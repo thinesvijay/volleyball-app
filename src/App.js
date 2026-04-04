@@ -23,6 +23,9 @@ export default function App() {
   const [editSkill, setEditSkill] = useState(1);
   const [savingPlayer, setSavingPlayer] = useState(false);
 
+  const [activePage, setActivePage] = useState("players");
+  const [advancedView, setAdvancedView] = useState(false);
+
   const isMobile = viewportWidth <= 768;
 
   useEffect(() => {
@@ -72,6 +75,8 @@ export default function App() {
 
       const data = await res.json();
       setTeams(data);
+      setActivePage("teams");
+      setAdvancedView(false);
     } catch (error) {
       console.error("Kunne ikke generere lag:", error);
     } finally {
@@ -346,11 +351,24 @@ export default function App() {
   }
 
   function getTeamGridStyle() {
+    if (advancedView) {
+      return {
+        display: "grid",
+        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+        gap: isMobile ? "10px" : "16px",
+        padding: isMobile ? "10px" : "16px",
+        background: "#f3f4f6",
+        alignItems: "start",
+      };
+    }
+
     return {
       display: "grid",
-      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-      gap: isMobile ? "10px" : "16px",
-      padding: isMobile ? "10px" : "16px",
+      gridTemplateColumns: isMobile
+        ? "1fr"
+        : "repeat(2, minmax(0, 1fr))",
+      gap: isMobile ? "12px" : "16px",
+      padding: isMobile ? "12px" : "16px",
       background: "#f3f4f6",
       alignItems: "start",
     };
@@ -364,180 +382,212 @@ export default function App() {
             <div style={{ ...styles.brand, fontSize: isMobile ? "28px" : "32px" }}>
               🏐 Make Teams Pro
             </div>
-            <div style={styles.subtitle}>React + Apps Script</div>
+            <div style={styles.subtitle}>Thines Vijay ©</div>
           </div>
         </header>
 
-        <section style={styles.section}>
-          <div style={styles.sectionHeader}>Number of Teams</div>
+        <div style={styles.pageTabs}>
+          <button
+            style={{
+              ...styles.pageTabBtn,
+              ...(activePage === "players" ? styles.pageTabBtnActive : {}),
+            }}
+            onClick={() => setActivePage("players")}
+          >
+            Players
+          </button>
 
-          <div style={{ ...styles.teamCountBox, padding: isMobile ? "22px 10px" : "28px 16px" }}>
-            <button
-              style={{
-                ...styles.circleBtn,
-                width: isMobile ? "64px" : "74px",
-                height: isMobile ? "64px" : "74px",
-                fontSize: isMobile ? "34px" : "42px",
-              }}
-              onClick={() => setTeamCount((prev) => Math.max(2, prev - 1))}
-            >
-              −
-            </button>
+          <button
+            style={{
+              ...styles.pageTabBtn,
+              ...(activePage === "teams" ? styles.pageTabBtnActive : {}),
+            }}
+            onClick={() => setActivePage("teams")}
+          >
+            Teams
+          </button>
+        </div>
 
-            <div
-              style={{
-                ...styles.teamCountNumber,
-                fontSize: isMobile ? "64px" : "72px",
-              }}
-            >
-              {teamCount}
-            </div>
+        {activePage === "players" && (
+          <>
+            <section style={styles.section}>
+              <div style={styles.sectionHeader}>Number of Teams</div>
 
-            <button
-              style={{
-                ...styles.circleBtn,
-                width: isMobile ? "64px" : "74px",
-                height: isMobile ? "64px" : "74px",
-                fontSize: isMobile ? "34px" : "42px",
-              }}
-              onClick={() => setTeamCount((prev) => prev + 1)}
-            >
-              +
-            </button>
-          </div>
-        </section>
-
-        <section style={styles.section}>
-          <div style={styles.sectionHeaderRow}>
-            <div style={styles.sectionHeaderText}>Players: {selected.length}</div>
-            <button
-              style={styles.addBtn}
-              onClick={() => setShowAddForm((prev) => !prev)}
-            >
-              {showAddForm ? "Close" : "+ Add Player"}
-            </button>
-          </div>
-
-          {showAddForm && (
-            <div style={styles.formBox}>
-              <input
-                style={styles.input}
-                placeholder="Player name"
-                value={newPlayerName}
-                onChange={(e) => setNewPlayerName(e.target.value)}
-              />
-
-              <select
-                style={styles.select}
-                value={newPlayerSkill}
-                onChange={(e) => setNewPlayerSkill(Number(e.target.value))}
-              >
-                <option value={1}>Skill 1</option>
-                <option value={2}>Skill 2</option>
-                <option value={3}>Skill 3</option>
-              </select>
-
-              <button
-                style={styles.saveBtn}
-                onClick={addPlayer}
-                disabled={savingPlayer}
-              >
-                {savingPlayer ? "Saving..." : "Save Player"}
-              </button>
-            </div>
-          )}
-
-          <div style={styles.playerList}>
-            {players.map((p, index) => {
-              const isSelected = selected.includes(p.name);
-
-              return (
-                <div
-                  key={p.name}
+              <div style={{ ...styles.teamCountBox, padding: isMobile ? "22px 10px" : "28px 16px" }}>
+                <button
                   style={{
-                    ...styles.playerRow,
-                    ...(isSelected ? styles.playerRowSelected : {}),
-                    padding: isMobile ? "10px 12px" : "12px 16px",
+                    ...styles.circleBtn,
+                    width: isMobile ? "64px" : "74px",
+                    height: isMobile ? "64px" : "74px",
+                    fontSize: isMobile ? "34px" : "42px",
+                  }}
+                  onClick={() => setTeamCount((prev) => Math.max(2, prev - 1))}
+                >
+                  −
+                </button>
+
+                <div
+                  style={{
+                    ...styles.teamCountNumber,
+                    fontSize: isMobile ? "64px" : "72px",
                   }}
                 >
-                  <div
-                    style={styles.playerRowMain}
-                    onClick={() => togglePlayer(p.name)}
+                  {teamCount}
+                </div>
+
+                <button
+                  style={{
+                    ...styles.circleBtn,
+                    width: isMobile ? "64px" : "74px",
+                    height: isMobile ? "64px" : "74px",
+                    fontSize: isMobile ? "34px" : "42px",
+                  }}
+                  onClick={() => setTeamCount((prev) => prev + 1)}
+                >
+                  +
+                </button>
+              </div>
+            </section>
+
+            <section style={styles.section}>
+              <div style={styles.sectionHeaderRow}>
+                <div style={styles.sectionHeaderText}>Selected: {selected.length}</div>
+                <button
+                  style={styles.addBtn}
+                  onClick={() => setShowAddForm((prev) => !prev)}
+                >
+                  {showAddForm ? "Close" : "+ Add Player"}
+                </button>
+              </div>
+
+              {showAddForm && (
+                <div style={styles.formBox}>
+                  <input
+                    style={styles.input}
+                    placeholder="Player name"
+                    value={newPlayerName}
+                    onChange={(e) => setNewPlayerName(e.target.value)}
+                  />
+
+                  <select
+                    style={styles.select}
+                    value={newPlayerSkill}
+                    onChange={(e) => setNewPlayerSkill(Number(e.target.value))}
                   >
-                    <div style={styles.playerLeft}>
-                      <div style={styles.playerIndex}>{index + 1}.</div>
-                      <div>
-                        <div
-                          style={{
-                            ...styles.playerName,
-                            fontSize: isMobile ? "17px" : "20px",
-                          }}
-                        >
-                          {p.name}
-                        </div>
-                        <div style={styles.playerMeta}>Skill {p.skill}</div>
-                      </div>
-                    </div>
+                    <option value={1}>Skill 1</option>
+                    <option value={2}>Skill 2</option>
+                    <option value={3}>Skill 3</option>
+                  </select>
 
-                    <div style={styles.playerRight}>
-                      {isSelected && (
-                        <div
-                          style={{
-                            ...styles.selectedLabel,
-                            padding: isMobile ? "5px 8px" : "6px 10px",
-                            fontSize: isMobile ? "11px" : "12px",
-                          }}
-                        >
-                          SELECTED
-                        </div>
-                      )}
-
-                      <div
-                        style={{
-                          ...styles.skillBadge,
-                          minWidth: isMobile ? "44px" : "48px",
-                          height: isMobile ? "44px" : "48px",
-                          ...(p.skill === 1
-                            ? styles.skill1
-                            : p.skill === 2
-                            ? styles.skill2
-                            : styles.skill3),
-                        }}
-                      >
-                        {p.skill}
-                      </div>
-                    </div>
-                  </div>
-
-                  <button style={styles.editBtn} onClick={() => openEditPlayer(p)}>
-                    Edit
+                  <button
+                    style={styles.saveBtn}
+                    onClick={addPlayer}
+                    disabled={savingPlayer}
+                  >
+                    {savingPlayer ? "Saving..." : "Save Player"}
                   </button>
                 </div>
-              );
-            })}
-          </div>
+              )}
 
-          <div style={styles.buttonArea}>
-            <button
-              style={{
-                ...styles.primaryBtn,
-                ...(loading || selected.length === 0 ? styles.disabledBtn : {}),
-              }}
-              onClick={generateTeams}
-              disabled={loading || selected.length === 0}
-            >
-              {loading ? "GENERERER..." : "MAKE TEAMS"}
-            </button>
-          </div>
-        </section>
+              <div style={styles.playerList}>
+                {players.map((p, index) => {
+                  const isSelected = selected.includes(p.name);
 
-        {teams.length > 0 && (
+                  return (
+                    <div
+                      key={p.name}
+                      style={{
+                        ...styles.playerRow,
+                        ...(isSelected ? styles.playerRowSelected : {}),
+                        padding: isMobile ? "10px 12px" : "12px 16px",
+                      }}
+                    >
+                      <div
+                        style={styles.playerRowMain}
+                        onClick={() => togglePlayer(p.name)}
+                      >
+                        <div style={styles.playerLeft}>
+                          <div style={styles.playerIndex}>{index + 1}.</div>
+                          <div>
+                            <div
+                              style={{
+                                ...styles.playerName,
+                                fontSize: isMobile ? "17px" : "20px",
+                              }}
+                            >
+                              {p.name}
+                            </div>
+                            <div style={styles.playerMeta}>Skill {p.skill}</div>
+                          </div>
+                        </div>
+
+                        <div style={styles.playerRight}>
+                          {isSelected && (
+                            <div
+                              style={{
+                                ...styles.selectedLabel,
+                                padding: isMobile ? "5px 8px" : "6px 10px",
+                                fontSize: isMobile ? "11px" : "12px",
+                              }}
+                            >
+                              Selected
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <button style={styles.editBtn} onClick={() => openEditPlayer(p)}>
+                        Edit
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={styles.buttonArea}>
+                <button
+                  style={{
+                    ...styles.primaryBtn,
+                    ...(loading || selected.length === 0 ? styles.disabledBtn : {}),
+                  }}
+                  onClick={generateTeams}
+                  disabled={loading || selected.length === 0}
+                >
+                  {loading ? "GENERERER..." : "MAKE TEAMS"}
+                </button>
+              </div>
+            </section>
+          </>
+        )}
+
+        {activePage === "teams" && (
           <section style={styles.section}>
-            <div style={styles.sectionHeader}>Teams</div>
+            <div style={styles.sectionHeaderRow}>
+              <div style={styles.sectionHeaderText}>Teams</div>
 
-            <div style={styles.dragHint}>
-              Dra spillere mellom lag. Kortene er kompakte og scroller inni seg.
+              <button
+                style={{
+                  ...styles.addBtn,
+                  background: advancedView ? "#0f766e" : "#e5e7eb",
+                  color: advancedView ? "white" : "#111827",
+                }}
+                onClick={() => setAdvancedView((prev) => !prev)}
+              >
+                {advancedView ? "Simple View" : "Advanced View"}
+              </button>
             </div>
+
+            {!advancedView && (
+              <div style={styles.simpleHint}>
+                Enkel oversikt. Trykk Advanced View hvis du vil låse og flytte spillere.
+              </div>
+            )}
+
+            {advancedView && (
+              <div style={styles.dragHint}>
+                Dra spillere mellom lag. Locked spillere kan ikke dras.
+              </div>
+            )}
 
             <div style={getTeamGridStyle()}>
               {teams.map((team, teamIndex) => (
@@ -545,19 +595,24 @@ export default function App() {
                   key={teamIndex}
                   style={{
                     ...styles.teamCard,
-                    ...(dragOverTeam === teamIndex ? styles.teamCardHover : {}),
+                    ...(advancedView && dragOverTeam === teamIndex ? styles.teamCardHover : {}),
                     borderRadius: isMobile ? "18px" : "22px",
                   }}
                   onDragOver={(e) => {
+                    if (!advancedView) return;
                     e.preventDefault();
                     handleAutoScroll(e);
                     setDragOverTeam(teamIndex);
                     setDragOverPlayer(null);
                   }}
                   onDragLeave={() => {
+                    if (!advancedView) return;
                     setDragOverTeam((prev) => (prev === teamIndex ? null : prev));
                   }}
-                  onDrop={() => handleDropOnTeam(teamIndex)}
+                  onDrop={() => {
+                    if (!advancedView) return;
+                    handleDropOnTeam(teamIndex);
+                  }}
                 >
                   <div
                     style={{
@@ -573,134 +628,141 @@ export default function App() {
                     >
                       {team.name}
                     </div>
-                    <div
-                      style={{
-                        ...styles.teamSkill,
-                        fontSize: isMobile ? "18px" : "20px",
-                      }}
-                    >
-                      Skill {getTeamSkill(team)}
-                    </div>
-                  </div>
 
-                  <div
-                    style={{
-                      ...styles.teamPlayers,
-                      padding: isMobile ? "8px 10px 10px" : "8px 16px 16px",
-                      maxHeight: isMobile ? "62vh" : "72vh",
-                      overflowY: "auto",
-                    }}
-                  >
-                    {team.players.map((p, playerIndex) => (
+                    {!advancedView && (
+                      <div style={styles.teamPlayerCount}>
+                        {team.players.length} players
+                      </div>
+                    )}
+
+                    {advancedView && (
                       <div
-                        key={`${p.name}-${playerIndex}`}
-                        draggable={!p.locked}
-                        onDragStart={() => handleDragStart(teamIndex, playerIndex)}
-                        onDragEnd={handleDragEnd}
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleAutoScroll(e);
-                          setDragOverTeam(teamIndex);
-                          setDragOverPlayer(`${teamIndex}-${playerIndex}`);
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleDropOnPlayer(teamIndex, playerIndex);
-                        }}
                         style={{
-                          ...styles.teamPlayerRow,
-                          ...(p.locked ? styles.teamPlayerLocked : {}),
-                          ...(isDraggingPlayer(teamIndex, playerIndex)
-                            ? styles.teamPlayerDragging
-                            : {}),
-                          ...(dragOverPlayer === `${teamIndex}-${playerIndex}`
-                            ? styles.teamPlayerHover
-                            : {}),
-                          padding: isMobile ? "10px" : "14px 0",
-                          marginBottom: isMobile ? "8px" : "0",
+                          ...styles.teamSkill,
+                          fontSize: isMobile ? "18px" : "20px",
                         }}
                       >
-                        <div style={styles.teamPlayerTop}>
-                          <div style={styles.teamPlayerInfo}>
-                            <div
-                              style={{
-                                ...styles.teamPlayerName,
-                                fontSize: isMobile ? "16px" : "22px",
-                              }}
-                            >
-                              {playerIndex + 1}. {p.name}
-                            </div>
-                            <div
-                              style={{
-                                ...styles.teamPlayerMeta,
-                                fontSize: isMobile ? "12px" : "14px",
-                              }}
-                            >
-                              Skill {p.skill} {p.locked ? " • Locked" : " • Drag"}
+                        Skill {getTeamSkill(team)}
+                      </div>
+                    )}
+                  </div>
+
+                  {!advancedView && (
+                    <div style={styles.simpleTeamList}>
+                      {team.players.map((p, i) => (
+                        <div key={`${p.name}-${i}`} style={styles.simplePlayerRow}>
+                          <span style={styles.simplePlayerNumber}>{i + 1}.</span>
+                          <span style={styles.simplePlayerName}>{p.name}</span>
+                          {p.locked && <span style={styles.simpleLocked}>Locked</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {advancedView && (
+                    <div
+                      style={{
+                        ...styles.teamPlayers,
+                        padding: isMobile ? "8px 10px 10px" : "8px 16px 16px",
+                        maxHeight: isMobile ? "62vh" : "72vh",
+                        overflowY: "auto",
+                      }}
+                    >
+                      {team.players.map((p, playerIndex) => (
+                        <div
+                          key={`${p.name}-${playerIndex}`}
+                          draggable={!p.locked}
+                          onDragStart={() => handleDragStart(teamIndex, playerIndex)}
+                          onDragEnd={handleDragEnd}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleAutoScroll(e);
+                            setDragOverTeam(teamIndex);
+                            setDragOverPlayer(`${teamIndex}-${playerIndex}`);
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleDropOnPlayer(teamIndex, playerIndex);
+                          }}
+                          style={{
+                            ...styles.teamPlayerRow,
+                            ...(p.locked ? styles.teamPlayerLocked : {}),
+                            ...(isDraggingPlayer(teamIndex, playerIndex)
+                              ? styles.teamPlayerDragging
+                              : {}),
+                            ...(dragOverPlayer === `${teamIndex}-${playerIndex}`
+                              ? styles.teamPlayerHover
+                              : {}),
+                            padding: isMobile ? "10px" : "14px 0",
+                            marginBottom: isMobile ? "8px" : "0",
+                          }}
+                        >
+                          <div style={styles.teamPlayerTop}>
+                            <div style={styles.teamPlayerInfo}>
+                              <div
+                                style={{
+                                  ...styles.teamPlayerName,
+                                  fontSize: isMobile ? "16px" : "20px",
+                                }}
+                              >
+                                {playerIndex + 1}. {p.name}
+                              </div>
+                              <div
+                                style={{
+                                  ...styles.teamPlayerMeta,
+                                  fontSize: isMobile ? "12px" : "14px",
+                                }}
+                              >
+                                {p.locked ? "Locked" : "Drag"}
+                              </div>
                             </div>
                           </div>
 
                           <div
                             style={{
-                              ...styles.smallSkillBadge,
-                              minWidth: isMobile ? "34px" : "38px",
-                              height: isMobile ? "34px" : "38px",
-                              fontSize: isMobile ? "16px" : "18px",
-                              ...(p.skill === 1
-                                ? styles.skill1
-                                : p.skill === 2
-                                ? styles.skill2
-                                : styles.skill3),
+                              ...styles.teamActions,
+                              gap: isMobile ? "8px" : "10px",
+                              marginTop: isMobile ? "6px" : "0",
                             }}
                           >
-                            {p.skill}
+                            <select
+                              style={{
+                                ...styles.select,
+                                minWidth: isMobile ? "unset" : "120px",
+                                height: isMobile ? "40px" : "44px",
+                                fontSize: isMobile ? "14px" : "16px",
+                              }}
+                              value={teamIndex}
+                              onChange={(e) =>
+                                movePlayer(teamIndex, playerIndex, Number(e.target.value))
+                              }
+                            >
+                              {teams.map((t, idx) => (
+                                <option key={idx} value={idx}>
+                                  {t.name}
+                                </option>
+                              ))}
+                            </select>
+
+                            <button
+                              style={{
+                                ...styles.lockBtn,
+                                ...(p.locked ? styles.lockBtnActive : {}),
+                                height: isMobile ? "40px" : "44px",
+                                padding: isMobile ? "0 12px" : "0 16px",
+                                fontSize: isMobile ? "13px" : "16px",
+                              }}
+                              onClick={() => toggleLock(teamIndex, playerIndex)}
+                            >
+                              {p.locked ? "Unlock" : "Lock"}
+                            </button>
                           </div>
                         </div>
-
-                        <div
-                          style={{
-                            ...styles.teamActions,
-                            gap: isMobile ? "8px" : "10px",
-                            marginTop: isMobile ? "6px" : "0",
-                          }}
-                        >
-                          <select
-                            style={{
-                              ...styles.select,
-                              minWidth: isMobile ? "unset" : "120px",
-                              height: isMobile ? "40px" : "44px",
-                              fontSize: isMobile ? "14px" : "16px",
-                            }}
-                            value={teamIndex}
-                            onChange={(e) =>
-                              movePlayer(teamIndex, playerIndex, Number(e.target.value))
-                            }
-                          >
-                            {teams.map((t, idx) => (
-                              <option key={idx} value={idx}>
-                                {t.name}
-                              </option>
-                            ))}
-                          </select>
-
-                          <button
-                            style={{
-                              ...styles.lockBtn,
-                              ...(p.locked ? styles.lockBtnActive : {}),
-                              height: isMobile ? "40px" : "44px",
-                              padding: isMobile ? "0 12px" : "0 16px",
-                              fontSize: isMobile ? "13px" : "16px",
-                            }}
-                            onClick={() => toggleLock(teamIndex, playerIndex)}
-                          >
-                            {p.locked ? "Unlock" : "Lock"}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -774,8 +836,32 @@ const styles = {
   },
   subtitle: {
     marginTop: "4px",
-    fontSize: "14px",
+    fontSize: "18px",
     opacity: 0.95,
+  },
+  pageTabs: {
+    display: "flex",
+    gap: "8px",
+    padding: "10px 12px",
+    background: "#f8fafc",
+    borderBottom: "1px solid #dbe3ea",
+    position: "sticky",
+    top: "88px",
+    zIndex: 9,
+  },
+  pageTabBtn: {
+    flex: 1,
+    height: "42px",
+    borderRadius: "12px",
+    border: "none",
+    background: "#dbeafe",
+    color: "#0f172a",
+    fontWeight: "700",
+    cursor: "pointer",
+  },
+  pageTabBtnActive: {
+    background: "#0f766e",
+    color: "white",
   },
   section: {
     marginTop: "14px",
@@ -919,33 +1005,6 @@ const styles = {
     color: "#6b7280",
     marginTop: "4px",
   },
-  skillBadge: {
-    borderRadius: "14px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "20px",
-    fontWeight: "800",
-    color: "white",
-  },
-  smallSkillBadge: {
-    borderRadius: "10px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontWeight: "800",
-    color: "white",
-    flexShrink: 0,
-  },
-  skill1: {
-    background: "#22c55e",
-  },
-  skill2: {
-    background: "#f59e0b",
-  },
-  skill3: {
-    background: "#ef4444",
-  },
   buttonArea: {
     padding: "20px 16px 26px",
     background: "#f9fafb",
@@ -986,6 +1045,13 @@ const styles = {
     opacity: 0.55,
     cursor: "not-allowed",
   },
+  simpleHint: {
+    padding: "14px 16px",
+    fontSize: "14px",
+    color: "#6b7280",
+    background: "#f9fafb",
+    borderBottom: "1px solid #e5e7eb",
+  },
   dragHint: {
     padding: "14px 16px",
     fontSize: "14px",
@@ -1017,6 +1083,43 @@ const styles = {
   teamSkill: {
     fontWeight: "700",
     color: "#134e4a",
+  },
+  teamPlayerCount: {
+    fontSize: "14px",
+    fontWeight: "700",
+    color: "#134e4a",
+  },
+  simpleTeamList: {
+    padding: "12px",
+    display: "grid",
+    gap: "8px",
+  },
+  simplePlayerRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "10px 12px",
+    borderRadius: "12px",
+    background: "#f8fafc",
+    border: "1px solid #e5e7eb",
+  },
+  simplePlayerNumber: {
+    fontWeight: "700",
+    color: "#6b7280",
+    minWidth: "22px",
+  },
+  simplePlayerName: {
+    fontWeight: "600",
+    color: "#111827",
+    flex: 1,
+  },
+  simpleLocked: {
+    fontSize: "12px",
+    fontWeight: "700",
+    color: "#b45309",
+    background: "#ffedd5",
+    borderRadius: "999px",
+    padding: "4px 8px",
   },
   teamPlayers: {},
   teamPlayerRow: {
