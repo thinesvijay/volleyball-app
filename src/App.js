@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const API =
   "https://script.google.com/macros/s/AKfycbx9FWReNsr6vJam6b02OCf96K482opSh_SPZVSeBqoTs65M7S2E1ZGZXt9qGUMzpE2dDw/exec";
@@ -9,10 +9,13 @@ export default function App() {
   const [teams, setTeams] = useState([]);
   const [teamCount, setTeamCount] = useState(2);
   const [loading, setLoading] = useState(false);
+
+  const [activeTab, setActiveTab] = useState("players");
+  const [advancedView, setAdvancedView] = useState(false);
+
   const [dragging, setDragging] = useState(null);
   const [dragOverTeam, setDragOverTeam] = useState(null);
   const [dragOverPlayer, setDragOverPlayer] = useState(null);
-  const [viewportWidth, setViewportWidth] = useState(window.innerWidth);
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState("");
@@ -23,22 +26,8 @@ export default function App() {
   const [editSkill, setEditSkill] = useState(1);
   const [savingPlayer, setSavingPlayer] = useState(false);
 
-  const [activePage, setActivePage] = useState("players");
-  const [advancedView, setAdvancedView] = useState(false);
-
-  const isMobile = viewportWidth <= 768;
-
   useEffect(() => {
     loadPlayers();
-  }, []);
-
-  useEffect(() => {
-    function onResize() {
-      setViewportWidth(window.innerWidth);
-    }
-
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
   }, []);
 
   async function loadPlayers() {
@@ -75,7 +64,7 @@ export default function App() {
 
       const data = await res.json();
       setTeams(data);
-      setActivePage("teams");
+      setActiveTab("teams");
       setAdvancedView(false);
     } catch (error) {
       console.error("Kunne ikke generere lag:", error);
@@ -163,13 +152,7 @@ export default function App() {
 
       setPlayers((prev) =>
         prev.map((p) =>
-          p.name === oldName
-            ? {
-                ...p,
-                name: newName,
-                skill: newSkill,
-              }
-            : p
+          p.name === oldName ? { ...p, name: newName, skill: newSkill } : p
         )
       );
 
@@ -181,13 +164,7 @@ export default function App() {
         prevTeams.map((team) => ({
           ...team,
           players: team.players.map((p) =>
-            p.name === oldName
-              ? {
-                  ...p,
-                  name: newName,
-                  skill: newSkill,
-                }
-              : p
+            p.name === oldName ? { ...p, name: newName, skill: newSkill } : p
           ),
         }))
       );
@@ -338,10 +315,6 @@ export default function App() {
     resetDragState();
   }
 
-  function getTeamSkill(team) {
-    return team.players.reduce((sum, p) => sum + Number(p.skill || 0), 0);
-  }
-
   function isDraggingPlayer(teamIndex, playerIndex) {
     return (
       dragging &&
@@ -350,98 +323,82 @@ export default function App() {
     );
   }
 
-  function getTeamGridStyle() {
-    if (advancedView) {
-      return {
-        display: "grid",
-        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-        gap: isMobile ? "10px" : "16px",
-        padding: isMobile ? "10px" : "16px",
-        background: "#f3f4f6",
-        alignItems: "start",
-      };
-    }
-
-    return {
+  const teamsGridStyle = useMemo(
+    () => ({
       display: "grid",
-      gridTemplateColumns: isMobile
-        ? "1fr"
-        : "repeat(2, minmax(0, 1fr))",
-      gap: isMobile ? "12px" : "16px",
-      padding: isMobile ? "12px" : "16px",
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+      gap: "12px",
+      padding: "12px",
       background: "#f3f4f6",
       alignItems: "start",
-    };
-  }
+    }),
+    []
+  );
+
+  const playerGridStyle = useMemo(
+    () => ({
+      display: "grid",
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+      gap: "0",
+      background: "white",
+    }),
+    []
+  );
 
   return (
     <div style={styles.app}>
-      <div style={{ ...styles.container, maxWidth: isMobile ? "100%" : "1100px" }}>
-        <header style={{ ...styles.topbar, padding: isMobile ? "18px 14px" : "20px 16px" }}>
-          <div>
-            <div style={{ ...styles.brand, fontSize: isMobile ? "28px" : "32px" }}>
-              🏐 Make Teams Pro
+      <div style={styles.container}>
+        <header style={styles.topbar}>
+          <div style={styles.brandRow}>
+            <div style={styles.brandIcon}>🏐</div>
+            <div>
+              <div style={styles.brand}>Make Teams Pro</div>
+              <div style={styles.subtitle}>Thines Vijay ©</div>
             </div>
-            <div style={styles.subtitle}>Thines Vijay ©</div>
           </div>
         </header>
 
-        <div style={styles.pageTabs}>
-          <button
-            style={{
-              ...styles.pageTabBtn,
-              ...(activePage === "players" ? styles.pageTabBtnActive : {}),
-            }}
-            onClick={() => setActivePage("players")}
-          >
-            Players
-          </button>
+        <section style={styles.tabBarWrap}>
+          <div style={styles.tabBar}>
+            <button
+              style={{
+                ...styles.tabBtn,
+                ...(activeTab === "players" ? styles.tabBtnActive : {}),
+              }}
+              onClick={() => setActiveTab("players")}
+            >
+              Players
+            </button>
 
-          <button
-            style={{
-              ...styles.pageTabBtn,
-              ...(activePage === "teams" ? styles.pageTabBtnActive : {}),
-            }}
-            onClick={() => setActivePage("teams")}
-          >
-            Teams
-          </button>
-        </div>
+            <button
+              style={{
+                ...styles.tabBtn,
+                ...(activeTab === "teams" ? styles.tabBtnActive : {}),
+              }}
+              onClick={() => setActiveTab("teams")}
+            >
+              Teams
+            </button>
+          </div>
+        </section>
 
-        {activePage === "players" && (
+        {activeTab === "players" && (
           <>
             <section style={styles.section}>
               <div style={styles.sectionHeader}>Number of Teams</div>
 
-              <div style={{ ...styles.teamCountBox, padding: isMobile ? "22px 10px" : "28px 16px" }}>
+              <div style={styles.teamCountInline}>
                 <button
-                  style={{
-                    ...styles.circleBtn,
-                    width: isMobile ? "64px" : "74px",
-                    height: isMobile ? "64px" : "74px",
-                    fontSize: isMobile ? "34px" : "42px",
-                  }}
+                  style={styles.circleBtn}
                   onClick={() => setTeamCount((prev) => Math.max(2, prev - 1))}
                 >
                   −
                 </button>
 
-                <div
-                  style={{
-                    ...styles.teamCountNumber,
-                    fontSize: isMobile ? "64px" : "72px",
-                  }}
-                >
-                  {teamCount}
-                </div>
+                <div style={styles.teamCountNumber}>{teamCount}</div>
 
                 <button
-                  style={{
-                    ...styles.circleBtn,
-                    width: isMobile ? "64px" : "74px",
-                    height: isMobile ? "64px" : "74px",
-                    fontSize: isMobile ? "34px" : "42px",
-                  }}
+                  style={styles.circleBtn}
                   onClick={() => setTeamCount((prev) => prev + 1)}
                 >
                   +
@@ -451,7 +408,10 @@ export default function App() {
 
             <section style={styles.section}>
               <div style={styles.sectionHeaderRow}>
-                <div style={styles.sectionHeaderText}>Selected: {selected.length}</div>
+                <div style={styles.sectionHeaderText}>
+                  Selected: {selected.length}
+                </div>
+
                 <button
                   style={styles.addBtn}
                   onClick={() => setShowAddForm((prev) => !prev)}
@@ -489,7 +449,7 @@ export default function App() {
                 </div>
               )}
 
-              <div style={styles.playerList}>
+              <div style={playerGridStyle}>
                 {players.map((p, index) => {
                   const isSelected = selected.includes(p.name);
 
@@ -497,48 +457,52 @@ export default function App() {
                     <div
                       key={p.name}
                       style={{
-                        ...styles.playerRow,
-                        ...(isSelected ? styles.playerRowSelected : {}),
-                        padding: isMobile ? "10px 12px" : "12px 16px",
+                        ...styles.playerCard,
+                        ...(isSelected ? styles.playerCardSelected : {}),
                       }}
+                      onClick={() => togglePlayer(p.name)}
                     >
-                      <div
-                        style={styles.playerRowMain}
-                        onClick={() => togglePlayer(p.name)}
-                      >
-                        <div style={styles.playerLeft}>
-                          <div style={styles.playerIndex}>{index + 1}.</div>
-                          <div>
-                            <div
-                              style={{
-                                ...styles.playerName,
-                                fontSize: isMobile ? "17px" : "20px",
-                              }}
-                            >
-                              {p.name}
-                            </div>
-                            <div style={styles.playerMeta}>Skill {p.skill}</div>
-                          </div>
-                        </div>
-
-                        <div style={styles.playerRight}>
-                          {isSelected && (
-                            <div
-                              style={{
-                                ...styles.selectedLabel,
-                                padding: isMobile ? "5px 8px" : "6px 10px",
-                                fontSize: isMobile ? "11px" : "12px",
-                              }}
-                            >
-                              Selected
-                            </div>
-                          )}
-                        </div>
+                      <div style={styles.playerCardTop}>
+                        <div style={styles.playerIndexMini}>{index + 1}.</div>
+                        <button
+                          style={styles.editBtn}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openEditPlayer(p);
+                          }}
+                        >
+                          Edit
+                        </button>
                       </div>
 
-                      <button style={styles.editBtn} onClick={() => openEditPlayer(p)}>
-                        Edit
-                      </button>
+                      <div style={styles.playerNameCompact}>{p.name}</div>
+                      <div style={styles.playerMeta}>Skill {p.skill}</div>
+
+                      <div style={styles.playerCardBottom}>
+                        <div
+                          style={{
+                            ...styles.skillBadgeCompact,
+                            ...(p.skill === 1
+                              ? styles.skill1
+                              : p.skill === 2
+                              ? styles.skill2
+                              : styles.skill3),
+                          }}
+                        >
+                          {p.skill}
+                        </div>
+
+                        <div
+                          style={{
+                            ...styles.selectedPill,
+                            ...(isSelected
+                              ? styles.selectedPillActive
+                              : styles.selectedPillInactive),
+                          }}
+                        >
+                          {isSelected ? "Selected" : "Select"}
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
@@ -560,115 +524,76 @@ export default function App() {
           </>
         )}
 
-        {activePage === "teams" && (
+        {activeTab === "teams" && (
           <section style={styles.section}>
             <div style={styles.sectionHeaderRow}>
               <div style={styles.sectionHeaderText}>Teams</div>
 
               <button
-                style={{
-                  ...styles.addBtn,
-                  background: advancedView ? "#0f766e" : "#e5e7eb",
-                  color: advancedView ? "white" : "#111827",
-                }}
+                style={styles.addBtnSecondary}
                 onClick={() => setAdvancedView((prev) => !prev)}
               >
                 {advancedView ? "Simple View" : "Advanced View"}
               </button>
             </div>
 
+            <div style={styles.dragHint}>
+              {advancedView
+                ? "Dra spillere mellom lag. Locked spillere kan ikke dras."
+                : "Enkel oversikt. Trykk Advanced View hvis du vil låse og flytte spillere."}
+            </div>
+
             {!advancedView && (
-              <div style={styles.simpleHint}>
-                Enkel oversikt. Trykk Advanced View hvis du vil låse og flytte spillere.
+              <div style={teamsGridStyle}>
+                {teams.map((team, teamIndex) => (
+                  <div key={teamIndex} style={styles.teamSimpleCard}>
+                    <div style={styles.teamSimpleHeader}>
+                      <div style={styles.teamSimpleTitle}>{team.name}</div>
+                      <div style={styles.teamSimpleCount}>
+                        {(team.players || []).length} players
+                      </div>
+                    </div>
+
+                    <div style={styles.teamSimpleList}>
+                      {(team.players || []).map((p, i) => (
+                        <div key={`${p.name}-${i}`} style={styles.teamSimpleRow}>
+                          <span style={styles.teamSimpleIndex}>{i + 1}.</span>
+                          <span style={styles.teamSimpleName}>{p.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
 
             {advancedView && (
-              <div style={styles.dragHint}>
-                Dra spillere mellom lag. Locked spillere kan ikke dras.
-              </div>
-            )}
-
-            <div style={getTeamGridStyle()}>
-              {teams.map((team, teamIndex) => (
-                <div
-                  key={teamIndex}
-                  style={{
-                    ...styles.teamCard,
-                    ...(advancedView && dragOverTeam === teamIndex ? styles.teamCardHover : {}),
-                    borderRadius: isMobile ? "18px" : "22px",
-                  }}
-                  onDragOver={(e) => {
-                    if (!advancedView) return;
-                    e.preventDefault();
-                    handleAutoScroll(e);
-                    setDragOverTeam(teamIndex);
-                    setDragOverPlayer(null);
-                  }}
-                  onDragLeave={() => {
-                    if (!advancedView) return;
-                    setDragOverTeam((prev) => (prev === teamIndex ? null : prev));
-                  }}
-                  onDrop={() => {
-                    if (!advancedView) return;
-                    handleDropOnTeam(teamIndex);
-                  }}
-                >
+              <div style={teamsGridStyle}>
+                {teams.map((team, teamIndex) => (
                   <div
+                    key={teamIndex}
                     style={{
-                      ...styles.teamCardHeader,
-                      padding: isMobile ? "14px 12px" : "18px 16px",
+                      ...styles.teamCard,
+                      ...(dragOverTeam === teamIndex ? styles.teamCardHover : {}),
                     }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      handleAutoScroll(e);
+                      setDragOverTeam(teamIndex);
+                      setDragOverPlayer(null);
+                    }}
+                    onDragLeave={() => {
+                      setDragOverTeam((prev) => (prev === teamIndex ? null : prev));
+                    }}
+                    onDrop={() => handleDropOnTeam(teamIndex)}
                   >
-                    <div
-                      style={{
-                        ...styles.teamTitle,
-                        fontSize: isMobile ? "24px" : "28px",
-                      }}
-                    >
-                      {team.name}
+                    <div style={styles.teamCardHeader}>
+                      <div style={styles.teamTitle}>{team.name}</div>
+                      <div style={styles.teamSkill}>Skill {team.total || 0}</div>
                     </div>
 
-                    {!advancedView && (
-                      <div style={styles.teamPlayerCount}>
-                        {team.players.length} players
-                      </div>
-                    )}
-
-                    {advancedView && (
-                      <div
-                        style={{
-                          ...styles.teamSkill,
-                          fontSize: isMobile ? "18px" : "20px",
-                        }}
-                      >
-                        Skill {getTeamSkill(team)}
-                      </div>
-                    )}
-                  </div>
-
-                  {!advancedView && (
-                    <div style={styles.simpleTeamList}>
-                      {team.players.map((p, i) => (
-                        <div key={`${p.name}-${i}`} style={styles.simplePlayerRow}>
-                          <span style={styles.simplePlayerNumber}>{i + 1}.</span>
-                          <span style={styles.simplePlayerName}>{p.name}</span>
-                          {p.locked && <span style={styles.simpleLocked}>Locked</span>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {advancedView && (
-                    <div
-                      style={{
-                        ...styles.teamPlayers,
-                        padding: isMobile ? "8px 10px 10px" : "8px 16px 16px",
-                        maxHeight: isMobile ? "62vh" : "72vh",
-                        overflowY: "auto",
-                      }}
-                    >
-                      {team.players.map((p, playerIndex) => (
+                    <div style={styles.teamPlayers}>
+                      {(team.players || []).map((p, playerIndex) => (
                         <div
                           key={`${p.name}-${playerIndex}`}
                           draggable={!p.locked}
@@ -687,7 +612,7 @@ export default function App() {
                             handleDropOnPlayer(teamIndex, playerIndex);
                           }}
                           style={{
-                            ...styles.teamPlayerRow,
+                            ...styles.teamPlayerCard,
                             ...(p.locked ? styles.teamPlayerLocked : {}),
                             ...(isDraggingPlayer(teamIndex, playerIndex)
                               ? styles.teamPlayerDragging
@@ -695,45 +620,35 @@ export default function App() {
                             ...(dragOverPlayer === `${teamIndex}-${playerIndex}`
                               ? styles.teamPlayerHover
                               : {}),
-                            padding: isMobile ? "10px" : "14px 0",
-                            marginBottom: isMobile ? "8px" : "0",
                           }}
                         >
                           <div style={styles.teamPlayerTop}>
                             <div style={styles.teamPlayerInfo}>
-                              <div
-                                style={{
-                                  ...styles.teamPlayerName,
-                                  fontSize: isMobile ? "16px" : "20px",
-                                }}
-                              >
+                              <div style={styles.teamPlayerName}>
                                 {playerIndex + 1}. {p.name}
                               </div>
-                              <div
-                                style={{
-                                  ...styles.teamPlayerMeta,
-                                  fontSize: isMobile ? "12px" : "14px",
-                                }}
-                              >
-                                {p.locked ? "Locked" : "Drag"}
+                              <div style={styles.teamPlayerMeta}>
+                                Skill {p.skill} {p.locked ? " • Locked" : " • Drag"}
                               </div>
+                            </div>
+
+                            <div
+                              style={{
+                                ...styles.smallSkillBadge,
+                                ...(p.skill === 1
+                                  ? styles.skill1
+                                  : p.skill === 2
+                                  ? styles.skill2
+                                  : styles.skill3),
+                              }}
+                            >
+                              {p.skill}
                             </div>
                           </div>
 
-                          <div
-                            style={{
-                              ...styles.teamActions,
-                              gap: isMobile ? "8px" : "10px",
-                              marginTop: isMobile ? "6px" : "0",
-                            }}
-                          >
+                          <div style={styles.teamActionsCompact}>
                             <select
-                              style={{
-                                ...styles.select,
-                                minWidth: isMobile ? "unset" : "120px",
-                                height: isMobile ? "40px" : "44px",
-                                fontSize: isMobile ? "14px" : "16px",
-                              }}
+                              style={styles.selectCompact}
                               value={teamIndex}
                               onChange={(e) =>
                                 movePlayer(teamIndex, playerIndex, Number(e.target.value))
@@ -748,11 +663,8 @@ export default function App() {
 
                             <button
                               style={{
-                                ...styles.lockBtn,
+                                ...styles.lockBtnCompact,
                                 ...(p.locked ? styles.lockBtnActive : {}),
-                                height: isMobile ? "40px" : "44px",
-                                padding: isMobile ? "0 12px" : "0 16px",
-                                fontSize: isMobile ? "13px" : "16px",
                               }}
                               onClick={() => toggleLock(teamIndex, playerIndex)}
                             >
@@ -762,10 +674,10 @@ export default function App() {
                         </div>
                       ))}
                     </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </section>
         )}
 
@@ -795,6 +707,7 @@ export default function App() {
                 <button style={styles.cancelBtn} onClick={closeEditPlayer}>
                   Cancel
                 </button>
+
                 <button
                   style={styles.saveBtn}
                   onClick={savePlayerEdit}
@@ -819,199 +732,278 @@ const styles = {
     color: "#1f2937",
   },
   container: {
+    maxWidth: "100%",
     margin: "0 auto",
-    padding: "0 0 40px 0",
+    padding: "0 0 32px 0",
   },
   topbar: {
     background: "#06b6d4",
     color: "white",
+    padding: "18px 20px",
     boxShadow: "0 2px 10px rgba(0,0,0,0.12)",
-    position: "sticky",
-    top: 0,
-    zIndex: 10,
+  },
+  brandRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+  },
+  brandIcon: {
+    fontSize: "44px",
+    lineHeight: 1,
   },
   brand: {
+    fontSize: "36px",
     fontWeight: "700",
-    lineHeight: 1.1,
+    lineHeight: 1.05,
   },
   subtitle: {
-    marginTop: "4px",
-    fontSize: "18px",
+    marginTop: "6px",
+    fontSize: "16px",
     opacity: 0.95,
   },
-  pageTabs: {
-    display: "flex",
-    gap: "8px",
-    padding: "10px 12px",
-    background: "#f8fafc",
-    borderBottom: "1px solid #dbe3ea",
-    position: "sticky",
-    top: "88px",
-    zIndex: 9,
+  tabBarWrap: {
+    padding: "14px 20px 0",
   },
-  pageTabBtn: {
-    flex: 1,
-    height: "42px",
-    borderRadius: "12px",
+  tabBar: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "12px",
+  },
+  tabBtn: {
+    height: "72px",
+    borderRadius: "20px",
     border: "none",
-    background: "#dbeafe",
-    color: "#0f172a",
+    background: "#dbe6f8",
+    color: "#111827",
     fontWeight: "700",
+    fontSize: "18px",
     cursor: "pointer",
   },
-  pageTabBtnActive: {
-    background: "#0f766e",
+  tabBtnActive: {
+    background: "#167f76",
     color: "white",
   },
   section: {
-    marginTop: "14px",
+    marginTop: "18px",
     background: "white",
-    borderRadius: "0",
     overflow: "hidden",
   },
   sectionHeader: {
     background: "#dff4fb",
     color: "#0f766e",
-    fontSize: "18px",
+    fontSize: "20px",
     fontWeight: "700",
-    padding: "16px",
+    padding: "18px 20px",
     borderBottom: "1px solid #d1d5db",
   },
   sectionHeaderRow: {
     background: "#dff4fb",
     color: "#0f766e",
-    fontSize: "18px",
-    fontWeight: "700",
-    padding: "16px",
+    padding: "18px 20px",
     borderBottom: "1px solid #d1d5db",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
     gap: "12px",
-    flexWrap: "wrap",
   },
   sectionHeaderText: {
-    fontSize: "18px",
+    fontSize: "20px",
     fontWeight: "700",
   },
+  teamCountInline: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "30px",
+    padding: "20px 16px",
+    background: "white",
+  },
+  circleBtn: {
+    width: "96px",
+    height: "96px",
+    borderRadius: "50%",
+    border: "4px solid #22c1dc",
+    background: "white",
+    color: "#22c1dc",
+    fontSize: "54px",
+    cursor: "pointer",
+    lineHeight: 1,
+  },
+  teamCountNumber: {
+    minWidth: "70px",
+    textAlign: "center",
+    fontSize: "86px",
+    fontWeight: "800",
+    color: "#134e4a",
+  },
   addBtn: {
-    height: "40px",
-    borderRadius: "12px",
+    height: "68px",
+    minWidth: "180px",
+    borderRadius: "20px",
     border: "none",
     background: "#0f766e",
     color: "white",
     fontWeight: "700",
-    padding: "0 14px",
+    fontSize: "18px",
+    padding: "0 18px",
+    cursor: "pointer",
+  },
+  addBtnSecondary: {
+    height: "68px",
+    minWidth: "180px",
+    borderRadius: "20px",
+    border: "none",
+    background: "#ece9ef",
+    color: "#111827",
+    fontWeight: "700",
+    fontSize: "18px",
+    padding: "0 18px",
     cursor: "pointer",
   },
   formBox: {
-    padding: "16px",
+    padding: "16px 20px",
     display: "grid",
-    gap: "10px",
+    gap: "12px",
     background: "#f8fafc",
     borderBottom: "1px solid #e5e7eb",
   },
   input: {
     width: "100%",
-    height: "46px",
-    borderRadius: "12px",
+    height: "52px",
+    borderRadius: "14px",
     border: "1px solid #d1d5db",
     padding: "0 14px",
     fontSize: "16px",
     background: "white",
     boxSizing: "border-box",
   },
-  teamCountBox: {
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    gap: "28px",
+  select: {
+    width: "100%",
+    height: "52px",
+    borderRadius: "14px",
+    border: "1px solid #d1d5db",
+    padding: "0 12px",
+    fontSize: "16px",
     background: "white",
   },
-  circleBtn: {
-    borderRadius: "50%",
-    border: "3px solid #22c1dc",
-    background: "white",
-    color: "#22c1dc",
-    cursor: "pointer",
-  },
-  teamCountNumber: {
-    fontWeight: "800",
-    color: "#134e4a",
-    minWidth: "80px",
-    textAlign: "center",
-  },
-  playerList: {
-    background: "white",
-  },
-  playerRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "10px",
-    borderBottom: "1px solid #e5e7eb",
-    background: "#ffffff",
-  },
-  playerRowMain: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "12px",
-    flex: 1,
-    cursor: "pointer",
-  },
-  playerRowSelected: {
-    background: "#bff6ff",
-    boxShadow: "inset 0 0 0 2px #06b6d4",
-  },
-  playerLeft: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-  },
-  playerRight: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-  },
-  selectedLabel: {
-    borderRadius: "999px",
-    background: "#0891b2",
+  saveBtn: {
+    height: "52px",
+    borderRadius: "14px",
+    border: "none",
+    background: "#0f766e",
     color: "white",
     fontWeight: "700",
-    letterSpacing: "0.4px",
+    fontSize: "16px",
+    padding: "0 16px",
+    cursor: "pointer",
+  },
+  cancelBtn: {
+    height: "52px",
+    borderRadius: "14px",
+    border: "none",
+    background: "#e5e7eb",
+    color: "#111827",
+    fontWeight: "700",
+    fontSize: "16px",
+    padding: "0 16px",
+    cursor: "pointer",
+  },
+  playerCard: {
+    border: "2px solid #18b5ce",
+    background: "#bdeefa",
+    padding: "10px 10px 12px",
+    minHeight: "136px",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "space-between",
+    gap: "8px",
+  },
+  playerCardSelected: {
+    boxShadow: "inset 0 0 0 2px #0696b1",
+  },
+  playerCardTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+  },
+  playerIndexMini: {
+    fontSize: "18px",
+    color: "#374151",
+    fontWeight: "600",
   },
   editBtn: {
     height: "40px",
-    borderRadius: "12px",
+    minWidth: "84px",
+    borderRadius: "16px",
     border: "none",
-    background: "#e0f2fe",
+    background: "#dde5f3",
     color: "#075985",
     fontWeight: "700",
-    padding: "0 14px",
+    fontSize: "14px",
     cursor: "pointer",
-    flexShrink: 0,
   },
-  playerIndex: {
+  playerNameCompact: {
     fontSize: "18px",
-    width: "30px",
-    color: "#374151",
-  },
-  playerName: {
-    fontWeight: "500",
+    fontWeight: "700",
+    lineHeight: 1.15,
+    wordBreak: "break-word",
   },
   playerMeta: {
-    fontSize: "13px",
+    fontSize: "14px",
     color: "#6b7280",
-    marginTop: "4px",
+  },
+  playerCardBottom: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px",
+  },
+  skillBadgeCompact: {
+    minWidth: "52px",
+    height: "52px",
+    borderRadius: "16px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "white",
+    fontWeight: "800",
+    fontSize: "28px",
+  },
+  selectedPill: {
+    minWidth: "106px",
+    height: "42px",
+    borderRadius: "999px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "14px",
+    fontWeight: "700",
+  },
+  selectedPillActive: {
+    background: "#0791b1",
+    color: "white",
+  },
+  selectedPillInactive: {
+    background: "#dbe4ef",
+    color: "#111827",
+  },
+  skill1: {
+    background: "#22c55e",
+  },
+  skill2: {
+    background: "#f59e0b",
+  },
+  skill3: {
+    background: "#ef4444",
   },
   buttonArea: {
-    padding: "20px 16px 26px",
+    padding: "18px 20px 26px",
     background: "#f9fafb",
   },
   primaryBtn: {
     width: "100%",
-    height: "58px",
+    height: "62px",
     border: "none",
     borderRadius: "999px",
     background: "#0f766e",
@@ -1021,49 +1013,73 @@ const styles = {
     cursor: "pointer",
     boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
   },
-  saveBtn: {
-    height: "46px",
-    borderRadius: "12px",
-    border: "none",
-    background: "#0f766e",
-    color: "white",
-    fontWeight: "700",
-    padding: "0 16px",
-    cursor: "pointer",
-  },
-  cancelBtn: {
-    height: "46px",
-    borderRadius: "12px",
-    border: "none",
-    background: "#e5e7eb",
-    color: "#111827",
-    fontWeight: "700",
-    padding: "0 16px",
-    cursor: "pointer",
-  },
   disabledBtn: {
     opacity: 0.55,
     cursor: "not-allowed",
   },
-  simpleHint: {
-    padding: "14px 16px",
-    fontSize: "14px",
+  dragHint: {
+    padding: "18px 20px",
+    fontSize: "16px",
     color: "#6b7280",
     background: "#f9fafb",
     borderBottom: "1px solid #e5e7eb",
   },
-  dragHint: {
-    padding: "14px 16px",
-    fontSize: "14px",
+  teamSimpleCard: {
+    background: "#f7fafc",
+    borderRadius: "28px",
+    overflow: "hidden",
+    boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
+  },
+  teamSimpleHeader: {
+    background: "#e6f7fb",
+    padding: "16px 16px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "10px",
+  },
+  teamSimpleTitle: {
+    fontSize: "28px",
+    fontWeight: "800",
+    color: "#134e4a",
+  },
+  teamSimpleCount: {
+    fontSize: "18px",
+    fontWeight: "700",
+    color: "#134e4a",
+  },
+  teamSimpleList: {
+    padding: "14px 14px 16px",
+    display: "grid",
+    gap: "12px",
+  },
+  teamSimpleRow: {
+    minHeight: "66px",
+    borderRadius: "20px",
+    border: "1px solid #d8dde7",
+    background: "#f6f8fb",
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    padding: "0 14px",
+  },
+  teamSimpleIndex: {
+    fontSize: "18px",
+    fontWeight: "700",
     color: "#6b7280",
-    background: "#f9fafb",
-    borderBottom: "1px solid #e5e7eb",
+    minWidth: "36px",
+  },
+  teamSimpleName: {
+    fontSize: "17px",
+    fontWeight: "700",
+    color: "#111827",
+    wordBreak: "break-word",
   },
   teamCard: {
     background: "white",
+    borderRadius: "24px",
     overflow: "hidden",
     boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
-    transition: "box-shadow 0.15s ease, transform 0.15s ease",
     minWidth: 0,
   },
   teamCardHover: {
@@ -1071,67 +1087,37 @@ const styles = {
   },
   teamCardHeader: {
     background: "#e6f7fb",
+    padding: "14px 14px",
     display: "flex",
-    alignItems: "center",
     justifyContent: "space-between",
-    gap: "12px",
+    alignItems: "center",
+    gap: "10px",
   },
   teamTitle: {
-    fontWeight: "700",
+    fontSize: "24px",
+    fontWeight: "800",
     color: "#134e4a",
   },
   teamSkill: {
+    fontSize: "17px",
     fontWeight: "700",
     color: "#134e4a",
   },
-  teamPlayerCount: {
-    fontSize: "14px",
-    fontWeight: "700",
-    color: "#134e4a",
-  },
-  simpleTeamList: {
-    padding: "12px",
+  teamPlayers: {
+    padding: "10px",
     display: "grid",
-    gap: "8px",
+    gap: "10px",
+    maxHeight: "72vh",
+    overflowY: "auto",
   },
-  simplePlayerRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    padding: "10px 12px",
-    borderRadius: "12px",
-    background: "#f8fafc",
-    border: "1px solid #e5e7eb",
-  },
-  simplePlayerNumber: {
-    fontWeight: "700",
-    color: "#6b7280",
-    minWidth: "22px",
-  },
-  simplePlayerName: {
-    fontWeight: "600",
-    color: "#111827",
-    flex: 1,
-  },
-  simpleLocked: {
-    fontSize: "12px",
-    fontWeight: "700",
-    color: "#b45309",
-    background: "#ffedd5",
-    borderRadius: "999px",
-    padding: "4px 8px",
-  },
-  teamPlayers: {},
-  teamPlayerRow: {
+  teamPlayerCard: {
     display: "flex",
     flexDirection: "column",
     gap: "8px",
-    borderBottom: "1px solid #e5e7eb",
+    padding: "10px",
+    borderRadius: "18px",
+    border: "1px solid #e5e7eb",
     background: "white",
-    transition:
-      "opacity 0.15s ease, transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease",
-    cursor: "grab",
-    borderRadius: "14px",
   },
   teamPlayerHover: {
     background: "#dffafe",
@@ -1139,7 +1125,6 @@ const styles = {
   },
   teamPlayerLocked: {
     background: "#fff7ed",
-    cursor: "default",
   },
   teamPlayerDragging: {
     opacity: 0.35,
@@ -1147,9 +1132,9 @@ const styles = {
   },
   teamPlayerTop: {
     display: "flex",
-    alignItems: "flex-start",
     justifyContent: "space-between",
-    gap: "8px",
+    alignItems: "flex-start",
+    gap: "10px",
   },
   teamPlayerInfo: {
     display: "flex",
@@ -1158,30 +1143,48 @@ const styles = {
     minWidth: 0,
   },
   teamPlayerName: {
-    fontWeight: "600",
-    wordBreak: "break-word",
+    fontSize: "18px",
+    fontWeight: "700",
     lineHeight: 1.15,
+    wordBreak: "break-word",
   },
   teamPlayerMeta: {
+    fontSize: "13px",
     color: "#6b7280",
   },
-  teamActions: {
+  smallSkillBadge: {
+    minWidth: "42px",
+    height: "42px",
+    borderRadius: "14px",
     display: "flex",
-    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "white",
+    fontWeight: "800",
+    fontSize: "22px",
+    flexShrink: 0,
   },
-  select: {
-    flex: 1,
-    borderRadius: "12px",
+  teamActionsCompact: {
+    display: "grid",
+    gap: "8px",
+  },
+  selectCompact: {
+    width: "100%",
+    height: "44px",
+    borderRadius: "14px",
     border: "1px solid #d1d5db",
     padding: "0 12px",
+    fontSize: "15px",
     background: "white",
   },
-  lockBtn: {
-    borderRadius: "12px",
+  lockBtnCompact: {
+    height: "44px",
+    borderRadius: "14px",
     border: "none",
     background: "#e5e7eb",
     color: "#111827",
     fontWeight: "700",
+    fontSize: "16px",
     cursor: "pointer",
   },
   lockBtnActive: {
