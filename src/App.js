@@ -12,6 +12,7 @@ export default function App() {
   const [dragging, setDragging] = useState(null);
   const [dragOverTeam, setDragOverTeam] = useState(null);
   const [dragOverPlayer, setDragOverPlayer] = useState(null);
+  const [viewportWidth, setViewportWidth] = useState(window.innerWidth);
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState("");
@@ -22,8 +23,19 @@ export default function App() {
   const [editSkill, setEditSkill] = useState(1);
   const [savingPlayer, setSavingPlayer] = useState(false);
 
+  const isMobile = viewportWidth <= 768;
+
   useEffect(() => {
     loadPlayers();
+  }, []);
+
+  useEffect(() => {
+    function onResize() {
+      setViewportWidth(window.innerWidth);
+    }
+
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
 
   async function loadPlayers() {
@@ -221,7 +233,12 @@ export default function App() {
     });
   }
 
-  function movePlayerByDrag(fromTeamIndex, playerIndex, toTeamIndex, toPlayerIndex = null) {
+  function movePlayerByDrag(
+    fromTeamIndex,
+    playerIndex,
+    toTeamIndex,
+    toPlayerIndex = null
+  ) {
     setTeams((prevTeams) => {
       const sourceTeam = prevTeams[fromTeamIndex];
       const draggedPlayer = sourceTeam?.players?.[playerIndex];
@@ -256,6 +273,17 @@ export default function App() {
 
       return nextTeams;
     });
+  }
+
+  function handleAutoScroll(e) {
+    const edge = 90;
+    const speed = 18;
+
+    if (e.clientY < edge) {
+      window.scrollBy(0, -speed);
+    } else if (window.innerHeight - e.clientY < edge) {
+      window.scrollBy(0, speed);
+    }
   }
 
   function handleDragStart(teamIndex, playerIndex) {
@@ -318,31 +346,24 @@ export default function App() {
   }
 
   function getTeamGridStyle() {
-    if (teams.length >= 4) {
-      return {
-        display: "grid",
-        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-        gap: "16px",
-        padding: "16px",
-        background: "#f3f4f6",
-      };
-    }
-
     return {
       display: "grid",
-      gridTemplateColumns: "1fr",
-      gap: "16px",
-      padding: "16px",
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+      gap: isMobile ? "10px" : "16px",
+      padding: isMobile ? "10px" : "16px",
       background: "#f3f4f6",
+      alignItems: "start",
     };
   }
 
   return (
     <div style={styles.app}>
-      <div style={styles.container}>
-        <header style={styles.topbar}>
+      <div style={{ ...styles.container, maxWidth: isMobile ? "100%" : "1100px" }}>
+        <header style={{ ...styles.topbar, padding: isMobile ? "18px 14px" : "20px 16px" }}>
           <div>
-            <div style={styles.brand}>🏐 Make Teams Pro</div>
+            <div style={{ ...styles.brand, fontSize: isMobile ? "28px" : "32px" }}>
+              🏐 Make Teams Pro
+            </div>
             <div style={styles.subtitle}>React + Apps Script</div>
           </div>
         </header>
@@ -350,18 +371,35 @@ export default function App() {
         <section style={styles.section}>
           <div style={styles.sectionHeader}>Number of Teams</div>
 
-          <div style={styles.teamCountBox}>
+          <div style={{ ...styles.teamCountBox, padding: isMobile ? "22px 10px" : "28px 16px" }}>
             <button
-              style={styles.circleBtn}
+              style={{
+                ...styles.circleBtn,
+                width: isMobile ? "64px" : "74px",
+                height: isMobile ? "64px" : "74px",
+                fontSize: isMobile ? "34px" : "42px",
+              }}
               onClick={() => setTeamCount((prev) => Math.max(2, prev - 1))}
             >
               −
             </button>
 
-            <div style={styles.teamCountNumber}>{teamCount}</div>
+            <div
+              style={{
+                ...styles.teamCountNumber,
+                fontSize: isMobile ? "64px" : "72px",
+              }}
+            >
+              {teamCount}
+            </div>
 
             <button
-              style={styles.circleBtn}
+              style={{
+                ...styles.circleBtn,
+                width: isMobile ? "64px" : "74px",
+                height: isMobile ? "64px" : "74px",
+                fontSize: isMobile ? "34px" : "42px",
+              }}
               onClick={() => setTeamCount((prev) => prev + 1)}
             >
               +
@@ -419,6 +457,7 @@ export default function App() {
                   style={{
                     ...styles.playerRow,
                     ...(isSelected ? styles.playerRowSelected : {}),
+                    padding: isMobile ? "10px 12px" : "12px 16px",
                   }}
                 >
                   <div
@@ -428,17 +467,36 @@ export default function App() {
                     <div style={styles.playerLeft}>
                       <div style={styles.playerIndex}>{index + 1}.</div>
                       <div>
-                        <div style={styles.playerName}>{p.name}</div>
+                        <div
+                          style={{
+                            ...styles.playerName,
+                            fontSize: isMobile ? "17px" : "20px",
+                          }}
+                        >
+                          {p.name}
+                        </div>
                         <div style={styles.playerMeta}>Skill {p.skill}</div>
                       </div>
                     </div>
 
                     <div style={styles.playerRight}>
-                      {isSelected && <div style={styles.selectedLabel}>SELECTED</div>}
+                      {isSelected && (
+                        <div
+                          style={{
+                            ...styles.selectedLabel,
+                            padding: isMobile ? "5px 8px" : "6px 10px",
+                            fontSize: isMobile ? "11px" : "12px",
+                          }}
+                        >
+                          SELECTED
+                        </div>
+                      )}
 
                       <div
                         style={{
                           ...styles.skillBadge,
+                          minWidth: isMobile ? "44px" : "48px",
+                          height: isMobile ? "44px" : "48px",
                           ...(p.skill === 1
                             ? styles.skill1
                             : p.skill === 2
@@ -451,10 +509,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <button
-                    style={styles.editBtn}
-                    onClick={() => openEditPlayer(p)}
-                  >
+                  <button style={styles.editBtn} onClick={() => openEditPlayer(p)}>
                     Edit
                   </button>
                 </div>
@@ -481,7 +536,7 @@ export default function App() {
             <div style={styles.sectionHeader}>Teams</div>
 
             <div style={styles.dragHint}>
-              Dra spillere mellom lag. Locked spillere kan ikke dras.
+              Dra spillere mellom lag. Kortene er kompakte og scroller inni seg.
             </div>
 
             <div style={getTeamGridStyle()}>
@@ -491,9 +546,11 @@ export default function App() {
                   style={{
                     ...styles.teamCard,
                     ...(dragOverTeam === teamIndex ? styles.teamCardHover : {}),
+                    borderRadius: isMobile ? "18px" : "22px",
                   }}
                   onDragOver={(e) => {
                     e.preventDefault();
+                    handleAutoScroll(e);
                     setDragOverTeam(teamIndex);
                     setDragOverPlayer(null);
                   }}
@@ -502,12 +559,38 @@ export default function App() {
                   }}
                   onDrop={() => handleDropOnTeam(teamIndex)}
                 >
-                  <div style={styles.teamCardHeader}>
-                    <div style={styles.teamTitle}>{team.name}</div>
-                    <div style={styles.teamSkill}>Skill {getTeamSkill(team)}</div>
+                  <div
+                    style={{
+                      ...styles.teamCardHeader,
+                      padding: isMobile ? "14px 12px" : "18px 16px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        ...styles.teamTitle,
+                        fontSize: isMobile ? "24px" : "28px",
+                      }}
+                    >
+                      {team.name}
+                    </div>
+                    <div
+                      style={{
+                        ...styles.teamSkill,
+                        fontSize: isMobile ? "18px" : "20px",
+                      }}
+                    >
+                      Skill {getTeamSkill(team)}
+                    </div>
                   </div>
 
-                  <div style={styles.teamPlayers}>
+                  <div
+                    style={{
+                      ...styles.teamPlayers,
+                      padding: isMobile ? "8px 10px 10px" : "8px 16px 16px",
+                      maxHeight: isMobile ? "62vh" : "72vh",
+                      overflowY: "auto",
+                    }}
+                  >
                     {team.players.map((p, playerIndex) => (
                       <div
                         key={`${p.name}-${playerIndex}`}
@@ -517,6 +600,7 @@ export default function App() {
                         onDragOver={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
+                          handleAutoScroll(e);
                           setDragOverTeam(teamIndex);
                           setDragOverPlayer(`${teamIndex}-${playerIndex}`);
                         }}
@@ -534,14 +618,26 @@ export default function App() {
                           ...(dragOverPlayer === `${teamIndex}-${playerIndex}`
                             ? styles.teamPlayerHover
                             : {}),
+                          padding: isMobile ? "10px" : "14px 0",
+                          marginBottom: isMobile ? "8px" : "0",
                         }}
                       >
                         <div style={styles.teamPlayerTop}>
                           <div style={styles.teamPlayerInfo}>
-                            <div style={styles.teamPlayerName}>
+                            <div
+                              style={{
+                                ...styles.teamPlayerName,
+                                fontSize: isMobile ? "16px" : "22px",
+                              }}
+                            >
                               {playerIndex + 1}. {p.name}
                             </div>
-                            <div style={styles.teamPlayerMeta}>
+                            <div
+                              style={{
+                                ...styles.teamPlayerMeta,
+                                fontSize: isMobile ? "12px" : "14px",
+                              }}
+                            >
                               Skill {p.skill} {p.locked ? " • Locked" : " • Drag"}
                             </div>
                           </div>
@@ -549,6 +645,9 @@ export default function App() {
                           <div
                             style={{
                               ...styles.smallSkillBadge,
+                              minWidth: isMobile ? "34px" : "38px",
+                              height: isMobile ? "34px" : "38px",
+                              fontSize: isMobile ? "16px" : "18px",
                               ...(p.skill === 1
                                 ? styles.skill1
                                 : p.skill === 2
@@ -560,9 +659,20 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div style={styles.teamActions}>
+                        <div
+                          style={{
+                            ...styles.teamActions,
+                            gap: isMobile ? "8px" : "10px",
+                            marginTop: isMobile ? "6px" : "0",
+                          }}
+                        >
                           <select
-                            style={styles.select}
+                            style={{
+                              ...styles.select,
+                              minWidth: isMobile ? "unset" : "120px",
+                              height: isMobile ? "40px" : "44px",
+                              fontSize: isMobile ? "14px" : "16px",
+                            }}
                             value={teamIndex}
                             onChange={(e) =>
                               movePlayer(teamIndex, playerIndex, Number(e.target.value))
@@ -579,6 +689,9 @@ export default function App() {
                             style={{
                               ...styles.lockBtn,
                               ...(p.locked ? styles.lockBtnActive : {}),
+                              height: isMobile ? "40px" : "44px",
+                              padding: isMobile ? "0 12px" : "0 16px",
+                              fontSize: isMobile ? "13px" : "16px",
                             }}
                             onClick={() => toggleLock(teamIndex, playerIndex)}
                           >
@@ -644,21 +757,18 @@ const styles = {
     color: "#1f2937",
   },
   container: {
-    maxWidth: "1100px",
     margin: "0 auto",
     padding: "0 0 40px 0",
   },
   topbar: {
     background: "#06b6d4",
     color: "white",
-    padding: "20px 16px",
     boxShadow: "0 2px 10px rgba(0,0,0,0.12)",
     position: "sticky",
     top: 0,
     zIndex: 10,
   },
   brand: {
-    fontSize: "32px",
     fontWeight: "700",
     lineHeight: 1.1,
   },
@@ -730,21 +840,16 @@ const styles = {
     justifyContent: "center",
     alignItems: "center",
     gap: "28px",
-    padding: "28px 16px",
     background: "white",
   },
   circleBtn: {
-    width: "74px",
-    height: "74px",
     borderRadius: "50%",
     border: "3px solid #22c1dc",
     background: "white",
     color: "#22c1dc",
-    fontSize: "42px",
     cursor: "pointer",
   },
   teamCountNumber: {
-    fontSize: "72px",
     fontWeight: "800",
     color: "#134e4a",
     minWidth: "80px",
@@ -758,7 +863,6 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "center",
     gap: "10px",
-    padding: "12px 16px",
     borderBottom: "1px solid #e5e7eb",
     background: "#ffffff",
   },
@@ -785,11 +889,9 @@ const styles = {
     gap: "10px",
   },
   selectedLabel: {
-    padding: "6px 10px",
     borderRadius: "999px",
     background: "#0891b2",
     color: "white",
-    fontSize: "12px",
     fontWeight: "700",
     letterSpacing: "0.4px",
   },
@@ -810,7 +912,6 @@ const styles = {
     color: "#374151",
   },
   playerName: {
-    fontSize: "20px",
     fontWeight: "500",
   },
   playerMeta: {
@@ -819,8 +920,6 @@ const styles = {
     marginTop: "4px",
   },
   skillBadge: {
-    minWidth: "48px",
-    height: "48px",
     borderRadius: "14px",
     display: "flex",
     alignItems: "center",
@@ -830,13 +929,10 @@ const styles = {
     color: "white",
   },
   smallSkillBadge: {
-    minWidth: "38px",
-    height: "38px",
     borderRadius: "10px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontSize: "18px",
     fontWeight: "800",
     color: "white",
     flexShrink: 0,
@@ -899,7 +995,6 @@ const styles = {
   },
   teamCard: {
     background: "white",
-    borderRadius: "22px",
     overflow: "hidden",
     boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
     transition: "box-shadow 0.15s ease, transform 0.15s ease",
@@ -910,33 +1005,28 @@ const styles = {
   },
   teamCardHeader: {
     background: "#e6f7fb",
-    padding: "18px 16px",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     gap: "12px",
   },
   teamTitle: {
-    fontSize: "28px",
     fontWeight: "700",
     color: "#134e4a",
   },
   teamSkill: {
-    fontSize: "20px",
     fontWeight: "700",
     color: "#134e4a",
   },
-  teamPlayers: {
-    padding: "8px 16px 16px",
-  },
+  teamPlayers: {},
   teamPlayerRow: {
     display: "flex",
     flexDirection: "column",
-    gap: "10px",
-    padding: "14px 0",
+    gap: "8px",
     borderBottom: "1px solid #e5e7eb",
     background: "white",
-    transition: "opacity 0.15s ease, transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease",
+    transition:
+      "opacity 0.15s ease, transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease",
     cursor: "grab",
     borderRadius: "14px",
   },
@@ -956,7 +1046,7 @@ const styles = {
     display: "flex",
     alignItems: "flex-start",
     justifyContent: "space-between",
-    gap: "12px",
+    gap: "8px",
   },
   teamPlayerInfo: {
     display: "flex",
@@ -965,34 +1055,27 @@ const styles = {
     minWidth: 0,
   },
   teamPlayerName: {
-    fontSize: "22px",
-    fontWeight: "500",
+    fontWeight: "600",
     wordBreak: "break-word",
+    lineHeight: 1.15,
   },
   teamPlayerMeta: {
-    fontSize: "14px",
     color: "#6b7280",
   },
   teamActions: {
     display: "flex",
-    gap: "10px",
     flexWrap: "wrap",
   },
   select: {
     flex: 1,
-    minWidth: "120px",
-    height: "44px",
     borderRadius: "12px",
     border: "1px solid #d1d5db",
     padding: "0 12px",
-    fontSize: "16px",
     background: "white",
   },
   lockBtn: {
-    height: "44px",
     borderRadius: "12px",
     border: "none",
-    padding: "0 16px",
     background: "#e5e7eb",
     color: "#111827",
     fontWeight: "700",
