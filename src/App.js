@@ -14,6 +14,7 @@ export default function App() {
   const [advancedView, setAdvancedView] = useState(false);
 
   const [dragging, setDragging] = useState(null);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState("");
@@ -26,6 +27,15 @@ export default function App() {
 
   useEffect(() => {
     loadPlayers();
+  }, []);
+
+  useEffect(() => {
+    function handleResize() {
+      setIsMobile(window.innerWidth <= 768);
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   async function loadPlayers() {
@@ -319,7 +329,7 @@ export default function App() {
     }));
   }, [teams]);
 
-  const advancedGridColumns = teams.length <= 1 ? "1fr" : "1fr 1fr";
+  const advancedGridColumns = isMobile ? "1fr" : teams.length <= 1 ? "1fr" : "1fr 1fr";
 
   return (
     <div style={styles.app}>
@@ -1081,13 +1091,16 @@ const styles = {
   advancedRowLeft: {
     minWidth: 0,
     flex: 1,
+    overflow: "hidden",
   },
 
   advancedPlayerNameCompact: {
     fontSize: "13px",
     fontWeight: "700",
     color: "#111827",
-    wordBreak: "break-word",
+    wordBreak: "normal",
+    overflowWrap: "break-word",
+    whiteSpace: "normal",
     lineHeight: 1.2,
   },
 
