@@ -14,8 +14,6 @@ export default function App() {
   const [advancedView, setAdvancedView] = useState(false);
 
   const [dragging, setDragging] = useState(null);
-  const [dragOverTeam, setDragOverTeam] = useState(null);
-  const [dragOverPlayer, setDragOverPlayer] = useState(null);
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState("");
@@ -34,7 +32,7 @@ export default function App() {
     try {
       const res = await fetch(`${API}?action=getPlayers`);
       const data = await res.json();
-      setPlayers(data);
+      setPlayers(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Kunne ikke hente spillere:", error);
     }
@@ -63,11 +61,45 @@ export default function App() {
       });
 
       const data = await res.json();
-      setTeams(data);
+      setTeams(Array.isArray(data) ? data : []);
       setActiveTab("teams");
       setAdvancedView(false);
     } catch (error) {
       console.error("Kunne ikke generere lag:", error);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function generateNewRound() {
+    try {
+      const currentPlayers = teams.flatMap((team) =>
+        (team.players || []).map((player) => ({
+          name: player.name,
+          skill: Number(player.skill) || 1,
+          cannot: Array.isArray(player.cannot) ? player.cannot : [],
+        }))
+      );
+
+      if (currentPlayers.length < 2) return;
+
+      setLoading(true);
+
+      const res = await fetch(API, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "generate",
+          players: currentPlayers,
+          previousTeams: [],
+          teamCount,
+        }),
+      });
+
+      const data = await res.json();
+      setTeams(Array.isArray(data) ? data : []);
+      setAdvancedView(false);
+    } catch (error) {
+      console.error("Kunne ikke lage ny runde:", error);
     } finally {
       setLoading(false);
     }
@@ -141,12 +173,7 @@ export default function App() {
         method: "POST",
         body: JSON.stringify({
           action: "saveSkills",
-          players: [
-            {
-              name: newName,
-              skill: newSkill,
-            },
-          ],
+          players: [{ name: newName, skill: newSkill }],
         }),
       });
 
@@ -163,7 +190,7 @@ export default function App() {
       setTeams((prevTeams) =>
         prevTeams.map((team) => ({
           ...team,
-          players: team.players.map((p) =>
+          players: (team.players || []).map((p) =>
             p.name === oldName ? { ...p, name: newName, skill: newSkill } : p
           ),
         }))
@@ -185,7 +212,7 @@ export default function App() {
 
         return {
           ...team,
-          players: team.players.map((player, pIndex) => {
+          players: (team.players || []).map((player, pIndex) => {
             if (pIndex !== playerIndex) return player;
             return { ...player, locked: !player.locked };
           }),
@@ -205,7 +232,7 @@ export default function App() {
 
       const nextTeams = prevTeams.map((team) => ({
         ...team,
-        players: [...team.players],
+        players: [...(team.players || [])],
       }));
 
       nextTeams[fromTeamIndex].players.splice(playerIndex, 1);
@@ -229,7 +256,7 @@ export default function App() {
 
       const nextTeams = prevTeams.map((team) => ({
         ...team,
-        players: [...team.players],
+        players: [...(team.players || [])],
       }));
 
       nextTeams[fromTeamIndex].players.splice(playerIndex, 1);
@@ -257,17 +284,6 @@ export default function App() {
     });
   }
 
-  function handleAutoScroll(e) {
-    const edge = 90;
-    const speed = 18;
-
-    if (e.clientY < edge) {
-      window.scrollBy(0, -speed);
-    } else if (window.innerHeight - e.clientY < edge) {
-      window.scrollBy(0, speed);
-    }
-  }
-
   function handleDragStart(teamIndex, playerIndex) {
     const player = teams?.[teamIndex]?.players?.[playerIndex];
     if (!player || player.locked) return;
@@ -281,395 +297,344 @@ export default function App() {
 
   function resetDragState() {
     setDragging(null);
-    setDragOverTeam(null);
-    setDragOverPlayer(null);
   }
 
-  function handleDragEnd() {
-    resetDragState();
-  }
-
-  function handleDropOnPlayer(toTeamIndex, toPlayerIndex) {
-    if (!dragging) return;
-
-    movePlayerByDrag(
-      dragging.fromTeamIndex,
-      dragging.playerIndex,
-      toTeamIndex,
-      toPlayerIndex
-    );
-
-    resetDragState();
-  }
-
-  function handleDropOnTeam(toTeamIndex) {
-    if (!dragging) return;
-
-    movePlayerByDrag(
-      dragging.fromTeamIndex,
-      dragging.playerIndex,
-      toTeamIndex,
-      null
-    );
-
-    resetDragState();
-  }
-
-  function isDraggingPlayer(teamIndex, playerIndex) {
-    return (
-      dragging &&
-      dragging.fromTeamIndex === teamIndex &&
-      dragging.playerIndex === playerIndex
+  function teamTotal(team) {
+    return (team.players || []).reduce(
+      (sum, player) => sum + (Number(player.skill) || 0),
+      0
     );
   }
 
-  const teamsGridStyle = useMemo(
-    () => ({
-      display: "grid",
-      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-      gap: "12px",
-      padding: "12px",
-      background: "#f3f4f6",
-      alignItems: "start",
-    }),
-    []
-  );
+  const sortedPlayers = useMemo(() => {
+    return [...players].sort((a, b) => a.name.localeCompare(b.name));
+  }, [players]);
 
-  const playerGridStyle = useMemo(
-    () => ({
-      display: "grid",
-      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-      gap: "0",
-      background: "white",
-    }),
-    []
-  );
+  const teamsForSimpleView = useMemo(() => {
+    return teams.map((team, index) => ({
+      ...team,
+      name: team.name || `Team ${index + 1}`,
+      players: team.players || [],
+      total: teamTotal(team),
+    }));
+  }, [teams]);
+
+  const advancedGridColumns = teams.length <= 1 ? "1fr" : "1fr 1fr";
 
   return (
     <div style={styles.app}>
-      <div style={styles.container}>
-        <header style={styles.topbar}>
-          <div style={styles.brandRow}>
-            <div style={styles.brandIcon}>🏐</div>
-            <div>
-              <div style={styles.brand}>Make Teams Pro</div>
-              <div style={styles.subtitle}>Thines Vijay ©</div>
-            </div>
+      <div style={styles.shell}>
+        <div style={styles.header}>
+          <div>
+            <h1 style={styles.title}>Make Teams Pro</h1>
+            <p style={styles.subtitle}>Thines Vijay ©</p>
           </div>
-        </header>
+        </div>
 
-        <section style={styles.tabBarWrap}>
-          <div style={styles.tabBar}>
-            <button
-              style={{
-                ...styles.tabBtn,
-                ...(activeTab === "players" ? styles.tabBtnActive : {}),
-              }}
-              onClick={() => setActiveTab("players")}
-            >
-              Players
-            </button>
+        <div style={styles.tabBar}>
+          <button
+            style={{
+              ...styles.tabButton,
+              ...(activeTab === "players" ? styles.tabButtonActive : {}),
+            }}
+            onClick={() => setActiveTab("players")}
+          >
+            Players
+          </button>
 
-            <button
-              style={{
-                ...styles.tabBtn,
-                ...(activeTab === "teams" ? styles.tabBtnActive : {}),
-              }}
-              onClick={() => setActiveTab("teams")}
-            >
-              Teams
-            </button>
-          </div>
-        </section>
+          <button
+            style={{
+              ...styles.tabButton,
+              ...(activeTab === "teams" ? styles.tabButtonActive : {}),
+            }}
+            onClick={() => setActiveTab("teams")}
+          >
+            Teams
+          </button>
+        </div>
 
         {activeTab === "players" && (
-          <>
-            <section style={styles.section}>
-              <div style={styles.sectionHeader}>Number of Teams</div>
+          <div style={styles.section}>
+            <div style={styles.toolbarTop}>
+              <div style={styles.teamCountCard}>
+                <span style={styles.teamCountLabel}>Number of Teams</span>
 
-              <div style={styles.teamCountInline}>
-                <button
-                  style={styles.circleBtn}
-                  onClick={() => setTeamCount((prev) => Math.max(2, prev - 1))}
-                >
-                  −
-                </button>
-
-                <div style={styles.teamCountNumber}>{teamCount}</div>
-
-                <button
-                  style={styles.circleBtn}
-                  onClick={() => setTeamCount((prev) => prev + 1)}
-                >
-                  +
-                </button>
-              </div>
-            </section>
-
-            <section style={styles.section}>
-              <div style={styles.sectionHeaderRow}>
-                <div style={styles.sectionHeaderText}>
-                  Selected: {selected.length}
-                </div>
-
-                <button
-                  style={styles.addBtn}
-                  onClick={() => setShowAddForm((prev) => !prev)}
-                >
-                  {showAddForm ? "Close" : "+ Add Player"}
-                </button>
-              </div>
-
-              {showAddForm && (
-                <div style={styles.formBox}>
-                  <input
-                    style={styles.input}
-                    placeholder="Player name"
-                    value={newPlayerName}
-                    onChange={(e) => setNewPlayerName(e.target.value)}
-                  />
-
-                  <select
-                    style={styles.select}
-                    value={newPlayerSkill}
-                    onChange={(e) => setNewPlayerSkill(Number(e.target.value))}
+                <div style={styles.teamCountInline}>
+                  <button
+                    style={styles.countButton}
+                    onClick={() => setTeamCount((prev) => Math.max(2, prev - 1))}
                   >
-                    <option value={1}>Skill 1</option>
-                    <option value={2}>Skill 2</option>
-                    <option value={3}>Skill 3</option>
-                  </select>
+                    −
+                  </button>
+
+                  <div style={styles.countValue}>{teamCount}</div>
 
                   <button
-                    style={styles.saveBtn}
-                    onClick={addPlayer}
-                    disabled={savingPlayer}
+                    style={styles.countButton}
+                    onClick={() => setTeamCount((prev) => prev + 1)}
                   >
-                    {savingPlayer ? "Saving..." : "Save Player"}
+                    +
                   </button>
                 </div>
-              )}
-
-              <div style={playerGridStyle}>
-                {players.map((p, index) => {
-                  const isSelected = selected.includes(p.name);
-
-                  return (
-                    <div
-                      key={p.name}
-                      style={{
-                        ...styles.playerCard,
-                        ...(isSelected ? styles.playerCardSelected : {}),
-                      }}
-                      onClick={() => togglePlayer(p.name)}
-                    >
-                      <div style={styles.playerCardTop}>
-                        <div style={styles.playerIndexMini}>{index + 1}.</div>
-                        <button
-                          style={styles.editBtn}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openEditPlayer(p);
-                          }}
-                        >
-                          Edit
-                        </button>
-                      </div>
-
-                      <div style={styles.playerNameCompact}>{p.name}</div>
-                      <div style={styles.playerMeta}>Skill {p.skill}</div>
-
-                      <div style={styles.playerCardBottom}>
-                        <div
-                          style={{
-                            ...styles.skillBadgeCompact,
-                            ...(p.skill === 1
-                              ? styles.skill1
-                              : p.skill === 2
-                              ? styles.skill2
-                              : styles.skill3),
-                          }}
-                        >
-                          {p.skill}
-                        </div>
-
-                        <div
-                          style={{
-                            ...styles.selectedPill,
-                            ...(isSelected
-                              ? styles.selectedPillActive
-                              : styles.selectedPillInactive),
-                          }}
-                        >
-                          {isSelected ? "Selected" : "Select"}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
               </div>
 
-              <div style={styles.buttonArea}>
-                <button
-                  style={{
-                    ...styles.primaryBtn,
-                    ...(loading || selected.length === 0 ? styles.disabledBtn : {}),
-                  }}
-                  onClick={generateTeams}
-                  disabled={loading || selected.length === 0}
-                >
-                  {loading ? "GENERERER..." : "MAKE TEAMS"}
-                </button>
-              </div>
-            </section>
-          </>
-        )}
+              <div style={styles.selectedBadge}>Selected: {selected.length}</div>
+            </div>
 
-        {activeTab === "teams" && (
-          <section style={styles.section}>
-            <div style={styles.sectionHeaderRow}>
-              <div style={styles.sectionHeaderText}>Teams</div>
-
+            <div style={styles.actionRow}>
               <button
-                style={styles.addBtnSecondary}
-                onClick={() => setAdvancedView((prev) => !prev)}
+                style={styles.secondaryButton}
+                onClick={() => setShowAddForm((prev) => !prev)}
               >
-                {advancedView ? "Simple View" : "Advanced View"}
+                {showAddForm ? "Close" : "+ Add Player"}
               </button>
             </div>
 
-            <div style={styles.dragHint}>
-              {advancedView
-                ? "Dra spillere mellom lag. Locked spillere kan ikke dras."
-                : "Enkel oversikt. Trykk Advanced View hvis du vil låse og flytte spillere."}
+            {showAddForm && (
+              <div style={styles.formCard}>
+                <input
+                  style={styles.input}
+                  value={newPlayerName}
+                  onChange={(e) => setNewPlayerName(e.target.value)}
+                  placeholder="Player name"
+                />
+
+                <select
+                  style={styles.select}
+                  value={newPlayerSkill}
+                  onChange={(e) => setNewPlayerSkill(Number(e.target.value))}
+                >
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                </select>
+
+                <button
+                  style={styles.primaryButton}
+                  onClick={addPlayer}
+                  disabled={savingPlayer}
+                >
+                  {savingPlayer ? "Saving..." : "Save Player"}
+                </button>
+              </div>
+            )}
+
+            <div style={styles.playersGrid}>
+              {sortedPlayers.map((p) => {
+                const isSelected = selected.includes(p.name);
+
+                return (
+                  <button
+                    key={p.name}
+                    style={{
+                      ...styles.playerCardCompact,
+                      ...(isSelected ? styles.playerCardSelected : {}),
+                    }}
+                    onClick={() => togglePlayer(p.name)}
+                  >
+                    <div style={styles.playerCompactTop}>
+                      <div style={styles.playerNameCompact}>{p.name}</div>
+                      <div style={styles.skillMini}>{p.skill}</div>
+                    </div>
+
+                    <div style={styles.playerCompactBottom}>
+                      <span style={styles.checkTiny}>
+                        {isSelected ? "Selected" : "Tap"}
+                      </span>
+
+                      <button
+                        style={styles.editMiniButton}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openEditPlayer(p);
+                        }}
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              style={{
+                ...styles.generateButton,
+                opacity: selected.length < 2 || loading ? 0.6 : 1,
+              }}
+              onClick={generateTeams}
+              disabled={selected.length < 2 || loading}
+            >
+              {loading ? "Generating..." : "Generate Teams"}
+            </button>
+          </div>
+        )}
+
+        {activeTab === "teams" && (
+          <div style={styles.section}>
+            <div style={styles.viewSwitchRow}>
+              <button
+                style={{
+                  ...styles.switchButton,
+                  ...(!advancedView ? styles.switchButtonActive : {}),
+                }}
+                onClick={() => setAdvancedView(false)}
+              >
+                Simple View
+              </button>
+
+              <button
+                style={{
+                  ...styles.switchButton,
+                  ...(advancedView ? styles.switchButtonActive : {}),
+                }}
+                onClick={() => setAdvancedView(true)}
+              >
+                Advanced View
+              </button>
             </div>
 
             {!advancedView && (
-              <div style={teamsGridStyle}>
-                {teams.map((team, teamIndex) => (
-                  <div key={teamIndex} style={styles.teamSimpleCard}>
-                    <div style={styles.teamSimpleHeader}>
-                      <div style={styles.teamSimpleTitle}>{team.name}</div>
-                      <div style={styles.teamSimpleCount}>
-                        {(team.players || []).length} players
+              <>
+                <div style={styles.simpleActionRow}>
+                  <button
+                    style={{
+                      ...styles.primaryButton,
+                      opacity: teams.length === 0 || loading ? 0.6 : 1,
+                    }}
+                    onClick={generateNewRound}
+                    disabled={teams.length === 0 || loading}
+                  >
+                    {loading ? "Generating..." : "New Round"}
+                  </button>
+                </div>
+
+                <div style={styles.simpleTeamsGrid}>
+                  {teamsForSimpleView.map((team, index) => (
+                    <div key={index} style={styles.simpleTeamCard}>
+                      <div style={styles.simpleTeamHeaderRow}>
+                        <div style={styles.simpleTeamTitle}>{team.name}</div>
+                        <div style={styles.teamPointsBadge}>{team.total} pt</div>
+                      </div>
+
+                      <div style={styles.simpleTeamPlayers}>
+                        {team.players.map((player, pIndex) => (
+                          <div key={pIndex} style={styles.simplePlayerRow}>
+                            <span style={styles.simplePlayerName}>{player.name}</span>
+                            <span style={styles.simplePlayerSkill}>{player.skill}</span>
+                          </div>
+                        ))}
                       </div>
                     </div>
-
-                    <div style={styles.teamSimpleList}>
-                      {(team.players || []).map((p, i) => (
-                        <div key={`${p.name}-${i}`} style={styles.teamSimpleRow}>
-                          <span style={styles.teamSimpleIndex}>{i + 1}.</span>
-                          <span style={styles.teamSimpleName}>{p.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </>
             )}
 
             {advancedView && (
-              <div style={teamsGridStyle}>
+              <div
+                style={{
+                  ...styles.advancedTeamsWrap,
+                  gridTemplateColumns: advancedGridColumns,
+                }}
+              >
                 {teams.map((team, teamIndex) => (
                   <div
                     key={teamIndex}
-                    style={{
-                      ...styles.teamCard,
-                      ...(dragOverTeam === teamIndex ? styles.teamCardHover : {}),
+                    style={styles.advancedTeamCard}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (!dragging) return;
+                      movePlayerByDrag(
+                        dragging.fromTeamIndex,
+                        dragging.playerIndex,
+                        teamIndex,
+                        null
+                      );
+                      resetDragState();
                     }}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      handleAutoScroll(e);
-                      setDragOverTeam(teamIndex);
-                      setDragOverPlayer(null);
-                    }}
-                    onDragLeave={() => {
-                      setDragOverTeam((prev) => (prev === teamIndex ? null : prev));
-                    }}
-                    onDrop={() => handleDropOnTeam(teamIndex)}
                   >
-                    <div style={styles.teamCardHeader}>
-                      <div style={styles.teamTitle}>{team.name}</div>
-                      <div style={styles.teamSkill}>Skill {team.total || 0}</div>
+                    <div style={styles.advancedTeamHeader}>
+                      <div style={styles.advancedTeamTitle}>
+                        {team.name || `Team ${teamIndex + 1}`}
+                      </div>
+                      <div style={styles.teamPointsBadge}>
+                        {teamTotal(team)} pt
+                      </div>
                     </div>
 
-                    <div style={styles.teamPlayers}>
-                      {(team.players || []).map((p, playerIndex) => (
+                    <div style={styles.advancedPlayersList}>
+                      {(team.players || []).map((player, playerIndex) => (
                         <div
-                          key={`${p.name}-${playerIndex}`}
-                          draggable={!p.locked}
-                          onDragStart={() => handleDragStart(teamIndex, playerIndex)}
-                          onDragEnd={handleDragEnd}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleAutoScroll(e);
-                            setDragOverTeam(teamIndex);
-                            setDragOverPlayer(`${teamIndex}-${playerIndex}`);
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleDropOnPlayer(teamIndex, playerIndex);
-                          }}
+                          key={playerIndex}
                           style={{
-                            ...styles.teamPlayerCard,
-                            ...(p.locked ? styles.teamPlayerLocked : {}),
-                            ...(isDraggingPlayer(teamIndex, playerIndex)
-                              ? styles.teamPlayerDragging
-                              : {}),
-                            ...(dragOverPlayer === `${teamIndex}-${playerIndex}`
-                              ? styles.teamPlayerHover
-                              : {}),
+                            ...styles.advancedPlayerRowCompact,
+                            opacity:
+                              dragging &&
+                              dragging.fromTeamIndex === teamIndex &&
+                              dragging.playerIndex === playerIndex
+                                ? 0.45
+                                : 1,
+                          }}
+                          draggable={!player.locked}
+                          onDragStart={() => handleDragStart(teamIndex, playerIndex)}
+                          onDragEnd={resetDragState}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={() => {
+                            if (!dragging) return;
+                            movePlayerByDrag(
+                              dragging.fromTeamIndex,
+                              dragging.playerIndex,
+                              teamIndex,
+                              playerIndex
+                            );
+                            resetDragState();
                           }}
                         >
-                          <div style={styles.teamPlayerTop}>
-                            <div style={styles.teamPlayerInfo}>
-                              <div style={styles.teamPlayerName}>
-                                {playerIndex + 1}. {p.name}
-                              </div>
-                              <div style={styles.teamPlayerMeta}>
-                                Skill {p.skill} {p.locked ? " • Locked" : " • Drag"}
-                              </div>
-                            </div>
-
-                            <div
-                              style={{
-                                ...styles.smallSkillBadge,
-                                ...(p.skill === 1
-                                  ? styles.skill1
-                                  : p.skill === 2
-                                  ? styles.skill2
-                                  : styles.skill3),
-                              }}
-                            >
-                              {p.skill}
+                          <div style={styles.advancedRowLeft}>
+                            <div style={styles.advancedPlayerNameCompact}>
+                              {player.name}
                             </div>
                           </div>
 
-                          <div style={styles.teamActionsCompact}>
-                            <select
-                              style={styles.selectCompact}
-                              value={teamIndex}
-                              onChange={(e) =>
-                                movePlayer(teamIndex, playerIndex, Number(e.target.value))
-                              }
-                            >
-                              {teams.map((t, idx) => (
-                                <option key={idx} value={idx}>
-                                  {t.name}
-                                </option>
-                              ))}
-                            </select>
+                          <div style={styles.advancedRowRight}>
+                            <span style={styles.skillMini}>{player.skill}</span>
 
                             <button
                               style={{
-                                ...styles.lockBtnCompact,
-                                ...(p.locked ? styles.lockBtnActive : {}),
+                                ...styles.inlineActionButton,
+                                ...(player.locked ? styles.lockButtonActive : {}),
                               }}
-                              onClick={() => toggleLock(teamIndex, playerIndex)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleLock(teamIndex, playerIndex);
+                              }}
                             >
-                              {p.locked ? "Unlock" : "Lock"}
+                              {player.locked ? "Unlock" : "Lock"}
                             </button>
+
+                            {teams.length > 1 && (
+                              <select
+                                style={styles.inlineMoveSelect}
+                                value=""
+                                onClick={(e) => e.stopPropagation()}
+                                onChange={(e) => {
+                                  const toTeamIndex = Number(e.target.value);
+                                  if (!Number.isNaN(toTeamIndex)) {
+                                    movePlayer(teamIndex, playerIndex, toTeamIndex);
+                                  }
+                                }}
+                              >
+                                <option value="">Move</option>
+                                {teams.map((_, idx) =>
+                                  idx !== teamIndex ? (
+                                    <option key={idx} value={idx}>
+                                      Team {idx + 1}
+                                    </option>
+                                  ) : null
+                                )}
+                              </select>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -678,48 +643,47 @@ export default function App() {
                 ))}
               </div>
             )}
-          </section>
-        )}
-
-        {editingPlayer && (
-          <div style={styles.modalOverlay} onClick={closeEditPlayer}>
-            <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-              <div style={styles.modalTitle}>Edit Player</div>
-
-              <input
-                style={styles.input}
-                value={editName}
-                onChange={(e) => setEditName(e.target.value)}
-                placeholder="Player name"
-              />
-
-              <select
-                style={styles.select}
-                value={editSkill}
-                onChange={(e) => setEditSkill(Number(e.target.value))}
-              >
-                <option value={1}>Skill 1</option>
-                <option value={2}>Skill 2</option>
-                <option value={3}>Skill 3</option>
-              </select>
-
-              <div style={styles.modalActions}>
-                <button style={styles.cancelBtn} onClick={closeEditPlayer}>
-                  Cancel
-                </button>
-
-                <button
-                  style={styles.saveBtn}
-                  onClick={savePlayerEdit}
-                  disabled={savingPlayer}
-                >
-                  {savingPlayer ? "Saving..." : "Save"}
-                </button>
-              </div>
-            </div>
           </div>
         )}
       </div>
+
+      {editingPlayer && (
+        <div style={styles.modalOverlay} onClick={closeEditPlayer}>
+          <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+            <h3 style={styles.modalTitle}>Edit Player</h3>
+
+            <input
+              style={styles.input}
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+              placeholder="Player name"
+            />
+
+            <select
+              style={styles.select}
+              value={editSkill}
+              onChange={(e) => setEditSkill(Number(e.target.value))}
+            >
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+              <option value={3}>3</option>
+            </select>
+
+            <div style={styles.modalActions}>
+              <button style={styles.secondaryButton} onClick={closeEditPlayer}>
+                Cancel
+              </button>
+              <button
+                style={styles.primaryButton}
+                onClick={savePlayerEdit}
+                disabled={savingPlayer}
+              >
+                {savingPlayer ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -727,470 +691,440 @@ export default function App() {
 const styles = {
   app: {
     minHeight: "100vh",
-    background: "#eef2f7",
+    background: "#f5f7fb",
+    padding: "12px",
     fontFamily: "Arial, sans-serif",
-    color: "#1f2937",
   },
-  container: {
-    maxWidth: "100%",
+
+  shell: {
+    maxWidth: "900px",
     margin: "0 auto",
-    padding: "0 0 32px 0",
   },
-  topbar: {
-    background: "#06b6d4",
-    color: "white",
-    padding: "18px 20px",
-    boxShadow: "0 2px 10px rgba(0,0,0,0.12)",
+
+  header: {
+    marginBottom: "12px",
   },
-  brandRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-  },
-  brandIcon: {
-    fontSize: "44px",
-    lineHeight: 1,
-  },
-  brand: {
-    fontSize: "36px",
+
+  title: {
+    margin: 0,
+    fontSize: "24px",
     fontWeight: "700",
-    lineHeight: 1.05,
+    color: "#111827",
   },
+
   subtitle: {
-    marginTop: "6px",
-    fontSize: "16px",
-    opacity: 0.95,
+    margin: "4px 0 0 0",
+    color: "#6b7280",
+    fontSize: "13px",
   },
-  tabBarWrap: {
-    padding: "14px 20px 0",
-  },
+
   tabBar: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
-    gap: "12px",
+    gap: "8px",
+    marginBottom: "12px",
   },
-  tabBtn: {
-    height: "72px",
-    borderRadius: "20px",
+
+  tabButton: {
     border: "none",
-    background: "#dbe6f8",
+    borderRadius: "12px",
+    padding: "12px",
+    fontSize: "14px",
+    fontWeight: "600",
+    background: "#e5e7eb",
     color: "#111827",
-    fontWeight: "700",
-    fontSize: "18px",
     cursor: "pointer",
   },
-  tabBtnActive: {
-    background: "#167f76",
-    color: "white",
+
+  tabButtonActive: {
+    background: "#111827",
+    color: "#fff",
   },
+
   section: {
-    marginTop: "18px",
-    background: "white",
-    overflow: "hidden",
-  },
-  sectionHeader: {
-    background: "#dff4fb",
-    color: "#0f766e",
-    fontSize: "20px",
-    fontWeight: "700",
-    padding: "18px 20px",
-    borderBottom: "1px solid #d1d5db",
-  },
-  sectionHeaderRow: {
-    background: "#dff4fb",
-    color: "#0f766e",
-    padding: "18px 20px",
-    borderBottom: "1px solid #d1d5db",
     display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
+    flexDirection: "column",
     gap: "12px",
   },
-  sectionHeaderText: {
-    fontSize: "20px",
-    fontWeight: "700",
+
+  toolbarTop: {
+    display: "grid",
+    gridTemplateColumns: "1fr auto",
+    gap: "8px",
+    alignItems: "stretch",
   },
+
+  teamCountCard: {
+    background: "#fff",
+    borderRadius: "14px",
+    padding: "10px 12px",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+  },
+
+  teamCountLabel: {
+    display: "block",
+    fontSize: "12px",
+    color: "#6b7280",
+    marginBottom: "6px",
+  },
+
   teamCountInline: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "center",
-    gap: "30px",
-    padding: "20px 16px",
-    background: "white",
+    gap: "8px",
   },
-  circleBtn: {
-    width: "96px",
-    height: "96px",
-    borderRadius: "50%",
-    border: "4px solid #22c1dc",
-    background: "white",
-    color: "#22c1dc",
-    fontSize: "54px",
+
+  countButton: {
+    width: "34px",
+    height: "34px",
+    border: "none",
+    borderRadius: "10px",
+    background: "#111827",
+    color: "#fff",
+    fontSize: "20px",
     cursor: "pointer",
-    lineHeight: 1,
   },
-  teamCountNumber: {
-    minWidth: "70px",
+
+  countValue: {
+    minWidth: "30px",
     textAlign: "center",
-    fontSize: "86px",
-    fontWeight: "800",
-    color: "#134e4a",
-  },
-  addBtn: {
-    height: "68px",
-    minWidth: "180px",
-    borderRadius: "20px",
-    border: "none",
-    background: "#0f766e",
-    color: "white",
-    fontWeight: "700",
     fontSize: "18px",
-    padding: "0 18px",
-    cursor: "pointer",
-  },
-  addBtnSecondary: {
-    height: "68px",
-    minWidth: "180px",
-    borderRadius: "20px",
-    border: "none",
-    background: "#ece9ef",
+    fontWeight: "700",
     color: "#111827",
-    fontWeight: "700",
-    fontSize: "18px",
-    padding: "0 18px",
+  },
+
+  selectedBadge: {
+    background: "#fff",
+    borderRadius: "14px",
+    padding: "10px 12px",
+    fontSize: "13px",
+    fontWeight: "600",
+    color: "#111827",
+    display: "flex",
+    alignItems: "center",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+  },
+
+  actionRow: {
+    display: "flex",
+    gap: "8px",
+  },
+
+  simpleActionRow: {
+    display: "flex",
+    gap: "8px",
+  },
+
+  primaryButton: {
+    border: "none",
+    borderRadius: "12px",
+    padding: "12px 14px",
+    background: "#111827",
+    color: "#fff",
+    fontWeight: "600",
     cursor: "pointer",
   },
-  formBox: {
-    padding: "16px 20px",
-    display: "grid",
-    gap: "12px",
-    background: "#f8fafc",
-    borderBottom: "1px solid #e5e7eb",
+
+  secondaryButton: {
+    border: "none",
+    borderRadius: "12px",
+    padding: "12px 14px",
+    background: "#e5e7eb",
+    color: "#111827",
+    fontWeight: "600",
+    cursor: "pointer",
   },
+
+  formCard: {
+    background: "#fff",
+    borderRadius: "14px",
+    padding: "12px",
+    display: "grid",
+    gap: "8px",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+  },
+
   input: {
     width: "100%",
-    height: "52px",
-    borderRadius: "14px",
-    border: "1px solid #d1d5db",
-    padding: "0 14px",
-    fontSize: "16px",
-    background: "white",
     boxSizing: "border-box",
+    borderRadius: "10px",
+    border: "1px solid #d1d5db",
+    padding: "12px",
+    fontSize: "14px",
   },
+
   select: {
     width: "100%",
-    height: "52px",
-    borderRadius: "14px",
+    boxSizing: "border-box",
+    borderRadius: "10px",
     border: "1px solid #d1d5db",
-    padding: "0 12px",
-    fontSize: "16px",
-    background: "white",
+    padding: "12px",
+    fontSize: "14px",
+    background: "#fff",
   },
-  saveBtn: {
-    height: "52px",
-    borderRadius: "14px",
+
+  playersGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "8px",
+  },
+
+  playerCardCompact: {
     border: "none",
-    background: "#0f766e",
-    color: "white",
-    fontWeight: "700",
-    fontSize: "16px",
-    padding: "0 16px",
+    borderRadius: "12px",
+    background: "#fff",
+    padding: "8px 10px",
+    textAlign: "left",
     cursor: "pointer",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    minHeight: "62px",
   },
-  cancelBtn: {
-    height: "52px",
-    borderRadius: "14px",
+
+  playerCardSelected: {
+    outline: "2px solid #111827",
+  },
+
+  playerCompactTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "6px",
+  },
+
+  playerNameCompact: {
+    fontSize: "13px",
+    fontWeight: "700",
+    color: "#111827",
+    lineHeight: 1.2,
+    wordBreak: "break-word",
+  },
+
+  skillMini: {
+    minWidth: "22px",
+    height: "22px",
+    borderRadius: "999px",
+    background: "#111827",
+    color: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "12px",
+    fontWeight: "700",
+    flexShrink: 0,
+    padding: "0 6px",
+  },
+
+  playerCompactBottom: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "6px",
+  },
+
+  checkTiny: {
+    fontSize: "11px",
+    color: "#6b7280",
+  },
+
+  editMiniButton: {
     border: "none",
+    borderRadius: "8px",
+    padding: "5px 8px",
     background: "#e5e7eb",
     color: "#111827",
-    fontWeight: "700",
-    fontSize: "16px",
-    padding: "0 16px",
-    cursor: "pointer",
-  },
-  playerCard: {
-    border: "2px solid #18b5ce",
-    background: "#bdeefa",
-    padding: "10px 10px 12px",
-    minHeight: "136px",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "space-between",
-    gap: "8px",
-  },
-  playerCardSelected: {
-    boxShadow: "inset 0 0 0 2px #0696b1",
-  },
-  playerCardTop: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "8px",
-  },
-  playerIndexMini: {
-    fontSize: "18px",
-    color: "#374151",
+    fontSize: "11px",
     fontWeight: "600",
-  },
-  editBtn: {
-    height: "40px",
-    minWidth: "84px",
-    borderRadius: "16px",
-    border: "none",
-    background: "#dde5f3",
-    color: "#075985",
-    fontWeight: "700",
-    fontSize: "14px",
     cursor: "pointer",
   },
-  playerNameCompact: {
-    fontSize: "18px",
-    fontWeight: "700",
-    lineHeight: 1.15,
-    wordBreak: "break-word",
-  },
-  playerMeta: {
-    fontSize: "14px",
-    color: "#6b7280",
-  },
-  playerCardBottom: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "8px",
-  },
-  skillBadgeCompact: {
-    minWidth: "52px",
-    height: "52px",
-    borderRadius: "16px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    color: "white",
-    fontWeight: "800",
-    fontSize: "28px",
-  },
-  selectedPill: {
-    minWidth: "106px",
-    height: "42px",
-    borderRadius: "999px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "14px",
-    fontWeight: "700",
-  },
-  selectedPillActive: {
-    background: "#0791b1",
-    color: "white",
-  },
-  selectedPillInactive: {
-    background: "#dbe4ef",
-    color: "#111827",
-  },
-  skill1: {
-    background: "#22c55e",
-  },
-  skill2: {
-    background: "#f59e0b",
-  },
-  skill3: {
-    background: "#ef4444",
-  },
-  buttonArea: {
-    padding: "18px 20px 26px",
-    background: "#f9fafb",
-  },
-  primaryBtn: {
-    width: "100%",
-    height: "62px",
+
+  generateButton: {
     border: "none",
-    borderRadius: "999px",
-    background: "#0f766e",
-    color: "white",
-    fontSize: "22px",
-    fontWeight: "700",
-    cursor: "pointer",
-    boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-  },
-  disabledBtn: {
-    opacity: 0.55,
-    cursor: "not-allowed",
-  },
-  dragHint: {
-    padding: "18px 20px",
-    fontSize: "16px",
-    color: "#6b7280",
-    background: "#f9fafb",
-    borderBottom: "1px solid #e5e7eb",
-  },
-  teamSimpleCard: {
-    background: "#f7fafc",
-    borderRadius: "28px",
-    overflow: "hidden",
-    boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
-  },
-  teamSimpleHeader: {
-    background: "#e6f7fb",
-    padding: "16px 16px",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "10px",
-  },
-  teamSimpleTitle: {
-    fontSize: "28px",
-    fontWeight: "800",
-    color: "#134e4a",
-  },
-  teamSimpleCount: {
-    fontSize: "18px",
-    fontWeight: "700",
-    color: "#134e4a",
-  },
-  teamSimpleList: {
-    padding: "14px 14px 16px",
-    display: "grid",
-    gap: "12px",
-  },
-  teamSimpleRow: {
-    minHeight: "66px",
-    borderRadius: "20px",
-    border: "1px solid #d8dde7",
-    background: "#f6f8fb",
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    padding: "0 14px",
-  },
-  teamSimpleIndex: {
-    fontSize: "18px",
-    fontWeight: "700",
-    color: "#6b7280",
-    minWidth: "36px",
-  },
-  teamSimpleName: {
-    fontSize: "17px",
-    fontWeight: "700",
-    color: "#111827",
-    wordBreak: "break-word",
-  },
-  teamCard: {
-    background: "white",
-    borderRadius: "24px",
-    overflow: "hidden",
-    boxShadow: "0 4px 14px rgba(0,0,0,0.12)",
-    minWidth: 0,
-  },
-  teamCardHover: {
-    boxShadow: "0 0 0 3px #22c1dc, 0 8px 24px rgba(34,193,220,0.18)",
-  },
-  teamCardHeader: {
-    background: "#e6f7fb",
-    padding: "14px 14px",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "10px",
-  },
-  teamTitle: {
-    fontSize: "24px",
-    fontWeight: "800",
-    color: "#134e4a",
-  },
-  teamSkill: {
-    fontSize: "17px",
-    fontWeight: "700",
-    color: "#134e4a",
-  },
-  teamPlayers: {
-    padding: "10px",
-    display: "grid",
-    gap: "10px",
-    maxHeight: "72vh",
-    overflowY: "auto",
-  },
-  teamPlayerCard: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "8px",
-    padding: "10px",
-    borderRadius: "18px",
-    border: "1px solid #e5e7eb",
-    background: "white",
-  },
-  teamPlayerHover: {
-    background: "#dffafe",
-    boxShadow: "inset 0 0 0 2px #06b6d4",
-  },
-  teamPlayerLocked: {
-    background: "#fff7ed",
-  },
-  teamPlayerDragging: {
-    opacity: 0.35,
-    transform: "scale(0.98)",
-  },
-  teamPlayerTop: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "10px",
-  },
-  teamPlayerInfo: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px",
-    minWidth: 0,
-  },
-  teamPlayerName: {
-    fontSize: "18px",
-    fontWeight: "700",
-    lineHeight: 1.15,
-    wordBreak: "break-word",
-  },
-  teamPlayerMeta: {
-    fontSize: "13px",
-    color: "#6b7280",
-  },
-  smallSkillBadge: {
-    minWidth: "42px",
-    height: "42px",
     borderRadius: "14px",
+    padding: "14px",
+    background: "#16a34a",
+    color: "#fff",
+    fontSize: "15px",
+    fontWeight: "700",
+    cursor: "pointer",
+  },
+
+  viewSwitchRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "8px",
+  },
+
+  switchButton: {
+    border: "none",
+    borderRadius: "12px",
+    padding: "12px",
+    background: "#e5e7eb",
+    color: "#111827",
+    fontWeight: "600",
+    cursor: "pointer",
+  },
+
+  switchButtonActive: {
+    background: "#111827",
+    color: "#fff",
+  },
+
+  simpleTeamsGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "10px",
+  },
+
+  simpleTeamCard: {
+    background: "#fff",
+    borderRadius: "14px",
+    padding: "10px",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+  },
+
+  simpleTeamHeaderRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "8px",
+  },
+
+  simpleTeamTitle: {
+    fontSize: "15px",
+    fontWeight: "700",
+    color: "#111827",
+  },
+
+  teamPointsBadge: {
+    borderRadius: "999px",
+    background: "#111827",
+    color: "#fff",
+    padding: "4px 8px",
+    fontSize: "12px",
+    fontWeight: "700",
+    whiteSpace: "nowrap",
+  },
+
+  simpleTeamPlayers: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  },
+
+  simplePlayerRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+    padding: "6px 0",
+    borderBottom: "1px solid #f1f5f9",
+    fontSize: "13px",
+  },
+
+  simplePlayerName: {
+    color: "#111827",
+    fontWeight: "600",
+    wordBreak: "break-word",
+  },
+
+  simplePlayerSkill: {
+    fontSize: "12px",
+    fontWeight: "700",
+    color: "#6b7280",
+  },
+
+  advancedTeamsWrap: {
+    display: "grid",
+    gap: "10px",
+  },
+
+  advancedTeamCard: {
+    background: "#fff",
+    borderRadius: "14px",
+    padding: "10px",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    minWidth: 0,
+  },
+
+  advancedTeamHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "8px",
+  },
+
+  advancedTeamTitle: {
+    fontSize: "15px",
+    fontWeight: "700",
+    color: "#111827",
+  },
+
+  advancedPlayersList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  },
+
+  advancedPlayerRowCompact: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+    padding: "6px 0",
+    borderBottom: "1px solid #eef2f7",
+    cursor: "grab",
+  },
+
+  advancedRowLeft: {
+    minWidth: 0,
+    flex: 1,
+  },
+
+  advancedPlayerNameCompact: {
+    fontSize: "13px",
+    fontWeight: "700",
+    color: "#111827",
+    wordBreak: "break-word",
+    lineHeight: 1.2,
+  },
+
+  advancedRowRight: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "center",
-    color: "white",
-    fontWeight: "800",
-    fontSize: "22px",
+    justifyContent: "flex-end",
+    gap: "6px",
+    flexWrap: "wrap",
     flexShrink: 0,
   },
-  teamActionsCompact: {
-    display: "grid",
-    gap: "8px",
-  },
-  selectCompact: {
-    width: "100%",
-    height: "44px",
-    borderRadius: "14px",
-    border: "1px solid #d1d5db",
-    padding: "0 12px",
-    fontSize: "15px",
-    background: "white",
-  },
-  lockBtnCompact: {
-    height: "44px",
-    borderRadius: "14px",
+
+  inlineActionButton: {
     border: "none",
+    borderRadius: "8px",
+    padding: "5px 8px",
     background: "#e5e7eb",
     color: "#111827",
-    fontWeight: "700",
-    fontSize: "16px",
+    fontSize: "11px",
+    fontWeight: "600",
     cursor: "pointer",
   },
-  lockBtnActive: {
-    background: "#f59e0b",
-    color: "white",
+
+  lockButtonActive: {
+    background: "#111827",
+    color: "#fff",
   },
+
+  inlineMoveSelect: {
+    borderRadius: "8px",
+    border: "1px solid #d1d5db",
+    padding: "5px 7px",
+    fontSize: "11px",
+    background: "#fff",
+    maxWidth: "100%",
+  },
+
   modalOverlay: {
     position: "fixed",
     inset: 0,
@@ -1199,26 +1133,28 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     padding: "16px",
-    zIndex: 1000,
   },
-  modal: {
+
+  modalCard: {
     width: "100%",
-    maxWidth: "420px",
-    background: "white",
-    borderRadius: "20px",
-    padding: "20px",
+    maxWidth: "360px",
+    background: "#fff",
+    borderRadius: "16px",
+    padding: "16px",
     display: "grid",
-    gap: "12px",
-    boxShadow: "0 16px 40px rgba(0,0,0,0.2)",
+    gap: "10px",
   },
+
   modalTitle: {
-    fontSize: "22px",
+    margin: 0,
+    fontSize: "18px",
     fontWeight: "700",
     color: "#111827",
   },
+
   modalActions: {
-    display: "flex",
-    gap: "10px",
-    justifyContent: "flex-end",
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "8px",
   },
 };
