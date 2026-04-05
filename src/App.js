@@ -3,6 +3,203 @@ import { useEffect, useMemo, useState } from "react";
 const API =
   "https://script.google.com/macros/s/AKfycbx9FWReNsr6vJam6b02OCf96K482opSh_SPZVSeBqoTs65M7S2E1ZGZXt9qGUMzpE2dDw/exec";
 
+const ROUND_CACHE_KEY = "volleyball-current-round";
+const ROUND_SAVE_KEY = "volleyball-saved-round";
+const CURRENT_ROUND_TTL_MS = 60 * 60 * 1000;
+const SAVED_ROUND_TTL_MS = 6 * 60 * 60 * 1000;
+
+function normalizeTeamName(index, existingName) {
+  if (existingName && String(existingName).trim()) return existingName;
+  return `Team ${String.fromCharCode(65 + index)}`;
+}
+
+function normalizeTeams(rawTeams) {
+  if (!Array.isArray(rawTeams)) return [];
+
+  return rawTeams.map((team, index) => ({
+    ...team,
+    name: normalizeTeamName(index, team?.name),
+    players: Array.isArray(team?.players)
+      ? team.players.map((player) => ({
+          ...player,
+          skill: Number(player.skill) || 1,
+          locked: Boolean(player.locked),
+          cannot: Array.isArray(player.cannot) ? player.cannot : [],
+        }))
+      : [],
+  }));
+}
+
+function buildStoragePayload(teams, teamCount) {
+  return {
+    expiresAt: Date.now(),
+    teamCount,
+    teams,
+  };
+}
+
+function readStorageWithTtl(key, ttlMs) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    if (!parsed?.expiresAt || !parsed?.teams) {
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    if (Date.now() - parsed.expiresAt > ttlMs) {
+      localStorage.removeItem(key);
+      return null;
+    }
+
+    return {
+      teams: normalizeTeams(parsed.teams),
+      teamCount: Number(parsed.teamCount) || 2,
+    };
+  } catch (error) {
+    console.error("Kunne ikke lese lagring:", error);
+    localStorage.removeItem(key);
+    return null;
+  }
+}
+
+function createRoundRobinSchedule(teamNames) {
+  if (!Array.isArray(teamNames) || teamNames.length < 2) return [];
+
+  const entries = [...teamNames];
+  if (entries.length % 2 === 1) {
+    entries.push("BYE");
+  }
+
+  const rounds = [];
+  let rotation = [...entries];
+
+  for (let roundIndex = 0; roundIndex < rotation.length - 1; roundIndex += 1) {
+    const matches = [];
+
+    for (let i = 0; i < rotation.length / 2; i += 1) {
+      const team1 = rotation[i];
+      const team2 = rotation[rotation.length - 1 - i];
+
+      if (team1 !== "BYE" && team2 !== "BYE") {
+        matches.push({ team1, team2 });
+      }
+    }
+
+    rounds.push(matches);
+
+    const first = rotation[0];
+    const rest = rotation.slice(1);
+    rest.unshift(rest.pop());
+    rotation = [first, ...rest];
+  }
+
+  return rounds;
+}
+
+function buildBalancedMatchRounds(teamNames, requestedCourtCount = 2) {
+  const baseRounds = createRoundRobinSchedule(teamNames);
+  if (!baseRounds.length) return [];
+
+  const maxMatchesInAnyRound = Math.max(
+    ...baseRounds.map((round) => round.length),
+    1
+  );
+
+  const usableCourts = Math.max(
+    1,
+    Math.min(Number(requestedCourtCount) || 2, maxMatchesInAnyRound)
+  );
+
+  const teamStats = {};
+  teamNames.forEach((team) => {
+    teamStats[team] = {
+      courts: {},
+      left: 0,
+      right: 0,
+    };
+  });
+
+  function courtCountForTeam(team, court) {
+    return teamStats[team]?.courts?.[court] || 0;
+  }
+
+  function scoreAssignment(match, court, orientation) {
+    const leftTeam = orientation === 0 ? match.team1 : match.team2;
+    const rightTeam = orientation === 0 ? match.team2 : match.team1;
+
+    let score = 0;
+
+    score += courtCountForTeam(leftTeam, court) * 10;
+    score += courtCountForTeam(rightTeam, court) * 10;
+
+    score += teamStats[leftTeam].left * 3;
+    score += teamStats[rightTeam].right * 3;
+
+    if (teamStats[leftTeam].left > teamStats[leftTeam].right) {
+      score += 2;
+    }
+    if (teamStats[rightTeam].right > teamStats[rightTeam].left) {
+      score += 2;
+    }
+
+    return score;
+  }
+
+  function applyAssignment(match, court, orientation) {
+    const leftTeam = orientation === 0 ? match.team1 : match.team2;
+    const rightTeam = orientation === 0 ? match.team2 : match.team1;
+
+    teamStats[leftTeam].courts[court] =
+      (teamStats[leftTeam].courts[court] || 0) + 1;
+    teamStats[rightTeam].courts[court] =
+      (teamStats[rightTeam].courts[court] || 0) + 1;
+
+    teamStats[leftTeam].left += 1;
+    teamStats[rightTeam].right += 1;
+
+    return {
+      court,
+      leftTeam,
+      rightTeam,
+      originalTeam1: match.team1,
+      originalTeam2: match.team2,
+    };
+  }
+
+  return baseRounds.map((round) => {
+    const availableCourts = Array.from(
+      { length: Math.min(usableCourts, round.length) },
+      (_, i) => i + 1
+    );
+
+    const roundMatches = [];
+
+    round.forEach((match) => {
+      let best = null;
+
+      availableCourts.forEach((court) => {
+        [0, 1].forEach((orientation) => {
+          const score = scoreAssignment(match, court, orientation);
+
+          if (!best || score < best.score) {
+            best = { court, orientation, score };
+          }
+        });
+      });
+
+      if (best) {
+        roundMatches.push(applyAssignment(match, best.court, best.orientation));
+      }
+    });
+
+    roundMatches.sort((a, b) => a.court - b.court);
+    return roundMatches;
+  });
+}
+
 export default function App() {
   const [players, setPlayers] = useState([]);
   const [selected, setSelected] = useState([]);
@@ -11,10 +208,10 @@ export default function App() {
   const [loading, setLoading] = useState(false);
 
   const [activeTab, setActiveTab] = useState("players");
-  const [advancedView, setAdvancedView] = useState(false);
-
   const [dragging, setDragging] = useState(null);
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== "undefined" ? window.innerWidth <= 768 : true
+  );
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState("");
@@ -25,8 +222,25 @@ export default function App() {
   const [editSkill, setEditSkill] = useState(1);
   const [savingPlayer, setSavingPlayer] = useState(false);
 
+  const [matchMode, setMatchMode] = useState(false);
+  const [courtCount, setCourtCount] = useState(2);
+  const [matchRoundIndex, setMatchRoundIndex] = useState(0);
+
   useEffect(() => {
     loadPlayers();
+
+    const currentRound = readStorageWithTtl(
+      ROUND_CACHE_KEY,
+      CURRENT_ROUND_TTL_MS
+    );
+    const savedRound = readStorageWithTtl(ROUND_SAVE_KEY, SAVED_ROUND_TTL_MS);
+    const restored = currentRound || savedRound;
+
+    if (restored?.teams?.length) {
+      setTeams(restored.teams);
+      setTeamCount(restored.teamCount || 2);
+      setActiveTab("teams");
+    }
   }, []);
 
   useEffect(() => {
@@ -37,6 +251,17 @@ export default function App() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  useEffect(() => {
+    if (!teams.length) return;
+
+    try {
+      const payload = buildStoragePayload(teams, teamCount);
+      localStorage.setItem(ROUND_CACHE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      console.error("Kunne ikke lagre nåværende runde:", error);
+    }
+  }, [teams, teamCount]);
 
   async function loadPlayers() {
     try {
@@ -71,9 +296,12 @@ export default function App() {
       });
 
       const data = await res.json();
-      setTeams(Array.isArray(data) ? data : []);
+      const normalized = normalizeTeams(data);
+
+      setTeams(normalized);
+      setMatchRoundIndex(0);
       setActiveTab("teams");
-      setAdvancedView(false);
+      setMatchMode(false);
     } catch (error) {
       console.error("Kunne ikke generere lag:", error);
     } finally {
@@ -88,6 +316,7 @@ export default function App() {
           name: player.name,
           skill: Number(player.skill) || 1,
           cannot: Array.isArray(player.cannot) ? player.cannot : [],
+          locked: Boolean(player.locked),
         }))
       );
 
@@ -100,19 +329,41 @@ export default function App() {
         body: JSON.stringify({
           action: "generate",
           players: currentPlayers,
-          previousTeams: [],
+          previousTeams: teams,
           teamCount,
         }),
       });
 
       const data = await res.json();
-      setTeams(Array.isArray(data) ? data : []);
-      setAdvancedView(false);
+      const normalized = normalizeTeams(data);
+
+      setTeams(normalized);
+      setMatchRoundIndex(0);
+      setMatchMode(false);
     } catch (error) {
       console.error("Kunne ikke lage ny runde:", error);
     } finally {
       setLoading(false);
     }
+  }
+
+  function saveRoundForSixHours() {
+    try {
+      localStorage.setItem(
+        ROUND_SAVE_KEY,
+        JSON.stringify(buildStoragePayload(teams, teamCount))
+      );
+      alert("Round saved for 6 hours on this device.");
+    } catch (error) {
+      console.error("Kunne ikke lagre round:", error);
+      alert("Could not save round.");
+    }
+  }
+
+  function clearStoredRounds() {
+    localStorage.removeItem(ROUND_CACHE_KEY);
+    localStorage.removeItem(ROUND_SAVE_KEY);
+    alert("Saved round cleared on this device.");
   }
 
   async function addPlayer() {
@@ -231,27 +482,6 @@ export default function App() {
     );
   }
 
-  function movePlayer(fromTeamIndex, playerIndex, toTeamIndex) {
-    if (fromTeamIndex === toTeamIndex) return;
-
-    setTeams((prevTeams) => {
-      const fromTeam = prevTeams[fromTeamIndex];
-      const player = fromTeam?.players?.[playerIndex];
-
-      if (!player || player.locked) return prevTeams;
-
-      const nextTeams = prevTeams.map((team) => ({
-        ...team,
-        players: [...(team.players || [])],
-      }));
-
-      nextTeams[fromTeamIndex].players.splice(playerIndex, 1);
-      nextTeams[toTeamIndex].players.push(player);
-
-      return nextTeams;
-    });
-  }
-
   function movePlayerByDrag(
     fromTeamIndex,
     playerIndex,
@@ -263,6 +493,16 @@ export default function App() {
       const draggedPlayer = sourceTeam?.players?.[playerIndex];
 
       if (!draggedPlayer || draggedPlayer.locked) return prevTeams;
+
+      if (
+        fromTeamIndex === toTeamIndex &&
+        (toPlayerIndex === null ||
+          toPlayerIndex === undefined ||
+          toPlayerIndex === playerIndex ||
+          toPlayerIndex === playerIndex + 1)
+      ) {
+        return prevTeams;
+      }
 
       const nextTeams = prevTeams.map((team) => ({
         ...team,
@@ -320,16 +560,39 @@ export default function App() {
     return [...players].sort((a, b) => a.name.localeCompare(b.name));
   }, [players]);
 
-  const teamsForSimpleView = useMemo(() => {
+  const teamsWithTotals = useMemo(() => {
     return teams.map((team, index) => ({
       ...team,
-      name: team.name || `Team ${index + 1}`,
+      name: normalizeTeamName(index, team.name),
       players: team.players || [],
       total: teamTotal(team),
     }));
   }, [teams]);
 
-  const advancedGridColumns = isMobile ? "1fr" : teams.length <= 1 ? "1fr" : "1fr 1fr";
+  const teamsGridColumns =
+    isMobile ? "1fr 1fr" : teams.length <= 1 ? "1fr" : "1fr 1fr";
+
+  const balancedScheduleRounds = useMemo(() => {
+    const names = teamsWithTotals.map((team) => team.name);
+    return buildBalancedMatchRounds(names, courtCount);
+  }, [teamsWithTotals, courtCount]);
+
+  const currentMatches = useMemo(() => {
+    if (!balancedScheduleRounds.length) return [];
+    return balancedScheduleRounds[matchRoundIndex] || [];
+  }, [balancedScheduleRounds, matchRoundIndex]);
+
+  useEffect(() => {
+    const totalRounds = balancedScheduleRounds.length;
+    if (!totalRounds) {
+      setMatchRoundIndex(0);
+      return;
+    }
+
+    if (matchRoundIndex > totalRounds - 1) {
+      setMatchRoundIndex(0);
+    }
+  }, [balancedScheduleRounds, matchRoundIndex]);
 
   return (
     <div style={styles.app}>
@@ -369,21 +632,34 @@ export default function App() {
               <div style={styles.teamCountCard}>
                 <span style={styles.teamCountLabel}>Number of Teams</span>
 
-                <div style={styles.teamCountInline}>
-                  <button
-                    style={styles.countButton}
-                    onClick={() => setTeamCount((prev) => Math.max(2, prev - 1))}
-                  >
-                    −
-                  </button>
+                <div style={styles.teamCountRow}>
+                  <div style={styles.teamCountInline}>
+                    <button
+                      style={styles.countButton}
+                      onClick={() => setTeamCount((prev) => Math.max(2, prev - 1))}
+                    >
+                      −
+                    </button>
 
-                  <div style={styles.countValue}>{teamCount}</div>
+                    <div style={styles.countValue}>{teamCount}</div>
+
+                    <button
+                      style={styles.countButton}
+                      onClick={() => setTeamCount((prev) => prev + 1)}
+                    >
+                      +
+                    </button>
+                  </div>
 
                   <button
-                    style={styles.countButton}
-                    onClick={() => setTeamCount((prev) => prev + 1)}
+                    style={{
+                      ...styles.generateButtonInline,
+                      opacity: selected.length < 2 || loading ? 0.6 : 1,
+                    }}
+                    onClick={generateTeams}
+                    disabled={selected.length < 2 || loading}
                   >
-                    +
+                    {loading ? "Generating..." : "Generate Teams"}
                   </button>
                 </div>
               </div>
@@ -466,193 +742,220 @@ export default function App() {
                 );
               })}
             </div>
-
-            <button
-              style={{
-                ...styles.generateButton,
-                opacity: selected.length < 2 || loading ? 0.6 : 1,
-              }}
-              onClick={generateTeams}
-              disabled={selected.length < 2 || loading}
-            >
-              {loading ? "Generating..." : "Generate Teams"}
-            </button>
           </div>
         )}
 
         {activeTab === "teams" && (
           <div style={styles.section}>
-            <div style={styles.viewSwitchRow}>
+            <div style={styles.topTeamActions}>
               <button
                 style={{
-                  ...styles.switchButton,
-                  ...(!advancedView ? styles.switchButtonActive : {}),
+                  ...styles.primaryButton,
+                  opacity: teams.length === 0 || loading ? 0.6 : 1,
                 }}
-                onClick={() => setAdvancedView(false)}
+                onClick={generateNewRound}
+                disabled={teams.length === 0 || loading}
               >
-                Simple View
+                {loading ? "Generating..." : "New Round"}
               </button>
 
               <button
                 style={{
-                  ...styles.switchButton,
-                  ...(advancedView ? styles.switchButtonActive : {}),
+                  ...styles.secondaryButton,
+                  opacity: teams.length === 0 ? 0.6 : 1,
                 }}
-                onClick={() => setAdvancedView(true)}
+                onClick={saveRoundForSixHours}
+                disabled={teams.length === 0}
               >
-                Advanced View
+                Save Round
+              </button>
+
+              <button
+                style={{
+                  ...styles.secondaryButton,
+                  opacity: teams.length >= 3 ? 1 : 0.6,
+                }}
+                onClick={() => {
+                  setMatchMode((prev) => !prev);
+                  setMatchRoundIndex(0);
+                }}
+                disabled={teams.length < 3}
+              >
+                {matchMode ? "Hide Match Mode" : "Match Mode"}
+              </button>
+
+              <button style={styles.secondaryButton} onClick={clearStoredRounds}>
+                Clear Saved
               </button>
             </div>
 
-            {!advancedView && (
-              <>
-                <div style={styles.simpleActionRow}>
+            {matchMode && teams.length >= 3 && (
+              <div style={styles.matchModeCard}>
+                <div style={styles.matchModeHeader}>
+                  <div>
+                    <div style={styles.matchModeTitle}>Match Mode</div>
+                    <div style={styles.matchModeSubtitle}>
+                      Round {balancedScheduleRounds.length ? matchRoundIndex + 1 : 0} of{" "}
+                      {balancedScheduleRounds.length}
+                    </div>
+                  </div>
+
+                  <div style={styles.courtWrap}>
+                    <span style={styles.courtLabel}>Courts</span>
+                    <select
+                      style={styles.smallSelect}
+                      value={courtCount}
+                      onChange={(e) => {
+                        setCourtCount(Number(e.target.value));
+                        setMatchRoundIndex(0);
+                      }}
+                    >
+                      <option value={1}>1</option>
+                      <option value={2}>2</option>
+                      <option value={3}>3</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={styles.matchActions}>
                   <button
-                    style={{
-                      ...styles.primaryButton,
-                      opacity: teams.length === 0 || loading ? 0.6 : 1,
-                    }}
-                    onClick={generateNewRound}
-                    disabled={teams.length === 0 || loading}
+                    style={styles.secondaryButton}
+                    onClick={() =>
+                      setMatchRoundIndex((prev) =>
+                        prev === 0
+                          ? Math.max(balancedScheduleRounds.length - 1, 0)
+                          : prev - 1
+                      )
+                    }
+                    disabled={!balancedScheduleRounds.length}
                   >
-                    {loading ? "Generating..." : "New Round"}
+                    Prev Round
+                  </button>
+
+                  <button
+                    style={styles.primaryButton}
+                    onClick={() =>
+                      setMatchRoundIndex((prev) =>
+                        !balancedScheduleRounds.length
+                          ? 0
+                          : (prev + 1) % balancedScheduleRounds.length
+                      )
+                    }
+                    disabled={!balancedScheduleRounds.length}
+                  >
+                    Next Round
                   </button>
                 </div>
 
-                <div style={styles.simpleTeamsGrid}>
-                  {teamsForSimpleView.map((team, index) => (
-                    <div key={index} style={styles.simpleTeamCard}>
-                      <div style={styles.simpleTeamHeaderRow}>
-                        <div style={styles.simpleTeamTitle}>{team.name}</div>
-                        <div style={styles.teamPointsBadge}>{team.total} pt</div>
-                      </div>
-
-                      <div style={styles.simpleTeamPlayers}>
-                        {team.players.map((player, pIndex) => (
-                          <div key={pIndex} style={styles.simplePlayerRow}>
-                            <span style={styles.simplePlayerName}>{player.name}</span>
-                            <span style={styles.simplePlayerSkill}>{player.skill}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {advancedView && (
-              <div
-                style={{
-                  ...styles.advancedTeamsWrap,
-                  gridTemplateColumns: advancedGridColumns,
-                }}
-              >
-                {teams.map((team, teamIndex) => (
-                  <div
-                    key={teamIndex}
-                    style={styles.advancedTeamCard}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => {
-                      if (!dragging) return;
-                      movePlayerByDrag(
-                        dragging.fromTeamIndex,
-                        dragging.playerIndex,
-                        teamIndex,
-                        null
-                      );
-                      resetDragState();
-                    }}
-                  >
-                    <div style={styles.advancedTeamHeader}>
-                      <div style={styles.advancedTeamTitle}>
-                        {team.name || `Team ${teamIndex + 1}`}
-                      </div>
-                      <div style={styles.teamPointsBadge}>
-                        {teamTotal(team)} pt
-                      </div>
-                    </div>
-
-                    <div style={styles.advancedPlayersList}>
-                      {(team.players || []).map((player, playerIndex) => (
-                        <div
-                          key={playerIndex}
-                          style={{
-                            ...styles.advancedPlayerRowCompact,
-                            opacity:
-                              dragging &&
-                              dragging.fromTeamIndex === teamIndex &&
-                              dragging.playerIndex === playerIndex
-                                ? 0.45
-                                : 1,
-                          }}
-                          draggable={!player.locked}
-                          onDragStart={() => handleDragStart(teamIndex, playerIndex)}
-                          onDragEnd={resetDragState}
-                          onDragOver={(e) => e.preventDefault()}
-                          onDrop={() => {
-                            if (!dragging) return;
-                            movePlayerByDrag(
-                              dragging.fromTeamIndex,
-                              dragging.playerIndex,
-                              teamIndex,
-                              playerIndex
-                            );
-                            resetDragState();
-                          }}
-                        >
-                          <div style={styles.advancedRowLeft}>
-                            <div style={styles.advancedPlayerNameCompact}>
-                              {player.name}
-                            </div>
-                          </div>
-
-                          <div style={styles.advancedRowRight}>
-                            <span style={styles.skillMini}>{player.skill}</span>
-
-                            <button
-                              style={{
-                                ...styles.inlineActionButton,
-                                ...(player.locked ? styles.lockButtonActive : {}),
-                              }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleLock(teamIndex, playerIndex);
-                              }}
-                            >
-                              {player.locked ? "Unlock" : "Lock"}
-                            </button>
-
-                            {teams.length > 1 && (
-                              <select
-                                style={styles.inlineMoveSelect}
-                                value=""
-                                onClick={(e) => e.stopPropagation()}
-                                onChange={(e) => {
-                                  const toTeamIndex = Number(e.target.value);
-                                  if (!Number.isNaN(toTeamIndex)) {
-                                    movePlayer(teamIndex, playerIndex, toTeamIndex);
-                                  }
-                                }}
-                              >
-                                <option value="">Move</option>
-                                {teams.map((_, idx) =>
-                                  idx !== teamIndex ? (
-                                    <option key={idx} value={idx}>
-                                      Team {idx + 1}
-                                    </option>
-                                  ) : null
-                                )}
-                              </select>
-                            )}
-                          </div>
+                <div style={styles.matchGrid}>
+                  {currentMatches.length > 0 ? (
+                    currentMatches.map((match, index) => (
+                      <div
+                        key={`${match.leftTeam}-${match.rightTeam}-${match.court}-${index}`}
+                        style={styles.matchCard}
+                      >
+                        <div style={styles.matchCourt}>Court {match.court}</div>
+                        <div style={styles.matchTeams}>
+                          <span>{match.leftTeam}</span>
+                          <span style={styles.vsText}>vs</span>
+                          <span>{match.rightTeam}</span>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+                      </div>
+                    ))
+                  ) : (
+                    <div style={styles.noMatchesText}>No matches available.</div>
+                  )}
+                </div>
               </div>
             )}
+
+            <div
+              style={{
+                ...styles.teamsGrid,
+                gridTemplateColumns: teamsGridColumns,
+              }}
+            >
+              {teamsWithTotals.map((team, teamIndex) => (
+                <div
+                  key={teamIndex}
+                  style={styles.teamCard}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (!dragging) return;
+                    movePlayerByDrag(
+                      dragging.fromTeamIndex,
+                      dragging.playerIndex,
+                      teamIndex,
+                      null
+                    );
+                    resetDragState();
+                  }}
+                >
+                  <div style={styles.teamHeaderRow}>
+                    <div style={styles.teamTitle}>{team.name}</div>
+                    <div style={styles.teamPointsBadge}>{team.total} pt</div>
+                  </div>
+
+                  <div style={styles.teamPlayers}>
+                    {team.players.map((player, playerIndex) => (
+                      <div
+                        key={`${player.name}-${playerIndex}`}
+                        style={{
+                          ...styles.teamPlayerRow,
+                          opacity:
+                            dragging &&
+                            dragging.fromTeamIndex === teamIndex &&
+                            dragging.playerIndex === playerIndex
+                              ? 0.45
+                              : 1,
+                          cursor: player.locked ? "default" : "grab",
+                        }}
+                        draggable={!player.locked}
+                        onDragStart={() => handleDragStart(teamIndex, playerIndex)}
+                        onDragEnd={resetDragState}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+
+                          if (!dragging) return;
+
+                          movePlayerByDrag(
+                            dragging.fromTeamIndex,
+                            dragging.playerIndex,
+                            teamIndex,
+                            playerIndex
+                          );
+                          resetDragState();
+                        }}
+                      >
+                        <div style={styles.teamPlayerLeft}>
+                          <div style={styles.teamPlayerName}>{player.name}</div>
+                        </div>
+
+                        <div style={styles.teamPlayerRight}>
+                          <span style={styles.skillMini}>{player.skill}</span>
+
+                          <button
+                            style={{
+                              ...styles.inlineActionButton,
+                              ...(player.locked ? styles.lockButtonActive : {}),
+                            }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleLock(teamIndex, playerIndex);
+                            }}
+                          >
+                            {player.locked ? "Unlock" : "Lock"}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -778,6 +1081,14 @@ const styles = {
     marginBottom: "6px",
   },
 
+  teamCountRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
+
   teamCountInline: {
     display: "flex",
     alignItems: "center",
@@ -820,9 +1131,10 @@ const styles = {
     gap: "8px",
   },
 
-  simpleActionRow: {
+  topTeamActions: {
     display: "flex",
     gap: "8px",
+    flexWrap: "wrap",
   },
 
   primaryButton: {
@@ -870,6 +1182,14 @@ const styles = {
     border: "1px solid #d1d5db",
     padding: "12px",
     fontSize: "14px",
+    background: "#fff",
+  },
+
+  smallSelect: {
+    borderRadius: "10px",
+    border: "1px solid #d1d5db",
+    padding: "8px 10px",
+    fontSize: "13px",
     background: "#fff",
   },
 
@@ -948,52 +1268,119 @@ const styles = {
     cursor: "pointer",
   },
 
-  generateButton: {
+  generateButtonInline: {
     border: "none",
-    borderRadius: "14px",
-    padding: "14px",
+    borderRadius: "12px",
+    padding: "10px 14px",
     background: "#16a34a",
     color: "#fff",
-    fontSize: "15px",
+    fontSize: "14px",
     fontWeight: "700",
     cursor: "pointer",
+    whiteSpace: "nowrap",
   },
 
-  viewSwitchRow: {
+  matchModeCard: {
+    background: "#fff",
+    borderRadius: "14px",
+    padding: "12px",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    gap: "12px",
+  },
+
+  matchModeHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
+
+  matchModeTitle: {
+    fontSize: "16px",
+    fontWeight: "700",
+    color: "#111827",
+  },
+
+  matchModeSubtitle: {
+    fontSize: "12px",
+    color: "#6b7280",
+    marginTop: "2px",
+  },
+
+  courtWrap: {
+    display: "flex",
+    alignItems: "center",
     gap: "8px",
   },
 
-  switchButton: {
-    border: "none",
-    borderRadius: "12px",
-    padding: "12px",
-    background: "#e5e7eb",
-    color: "#111827",
+  courtLabel: {
+    fontSize: "12px",
     fontWeight: "600",
-    cursor: "pointer",
+    color: "#6b7280",
   },
 
-  switchButtonActive: {
-    background: "#111827",
-    color: "#fff",
+  matchActions: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
   },
 
-  simpleTeamsGrid: {
+  matchGrid: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
     gap: "10px",
   },
 
-  simpleTeamCard: {
+  matchCard: {
+    background: "#f8fafc",
+    borderRadius: "12px",
+    padding: "12px",
+    border: "1px solid #e5e7eb",
+  },
+
+  matchCourt: {
+    fontSize: "12px",
+    fontWeight: "700",
+    color: "#16a34a",
+    marginBottom: "8px",
+  },
+
+  matchTeams: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+    fontSize: "14px",
+    fontWeight: "700",
+    color: "#111827",
+  },
+
+  vsText: {
+    fontSize: "12px",
+    color: "#6b7280",
+    fontWeight: "600",
+  },
+
+  noMatchesText: {
+    fontSize: "13px",
+    color: "#6b7280",
+  },
+
+  teamsGrid: {
+    display: "grid",
+    gap: "10px",
+  },
+
+  teamCard: {
     background: "#fff",
     borderRadius: "14px",
     padding: "10px",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    minWidth: 0,
   },
 
-  simpleTeamHeaderRow: {
+  teamHeaderRow: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
@@ -1001,7 +1388,7 @@ const styles = {
     marginBottom: "8px",
   },
 
-  simpleTeamTitle: {
+  teamTitle: {
     fontSize: "15px",
     fontWeight: "700",
     color: "#111827",
@@ -1017,94 +1404,36 @@ const styles = {
     whiteSpace: "nowrap",
   },
 
-  simpleTeamPlayers: {
+  teamPlayers: {
     display: "flex",
     flexDirection: "column",
     gap: "6px",
   },
 
-  simplePlayerRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "8px",
-    padding: "6px 0",
-    borderBottom: "1px solid #f1f5f9",
-    fontSize: "13px",
-  },
-
-  simplePlayerName: {
-    color: "#111827",
-    fontWeight: "600",
-    wordBreak: "break-word",
-  },
-
-  simplePlayerSkill: {
-    fontSize: "12px",
-    fontWeight: "700",
-    color: "#6b7280",
-  },
-
-  advancedTeamsWrap: {
-    display: "grid",
-    gap: "10px",
-  },
-
-  advancedTeamCard: {
-    background: "#fff",
-    borderRadius: "14px",
-    padding: "10px",
-    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-    minWidth: 0,
-  },
-
-  advancedTeamHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "8px",
-    marginBottom: "8px",
-  },
-
-  advancedTeamTitle: {
-    fontSize: "15px",
-    fontWeight: "700",
-    color: "#111827",
-  },
-
-  advancedPlayersList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "6px",
-  },
-
-  advancedPlayerRowCompact: {
+  teamPlayerRow: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
     gap: "8px",
     padding: "6px 0",
     borderBottom: "1px solid #eef2f7",
-    cursor: "grab",
   },
 
-  advancedRowLeft: {
+  teamPlayerLeft: {
     minWidth: 0,
     flex: 1,
     overflow: "hidden",
   },
 
-  advancedPlayerNameCompact: {
+  teamPlayerName: {
     fontSize: "13px",
     fontWeight: "700",
     color: "#111827",
-    wordBreak: "normal",
-    overflowWrap: "break-word",
-    whiteSpace: "normal",
     lineHeight: 1.2,
+    wordBreak: "break-word",
   },
 
-  advancedRowRight: {
+  teamPlayerRight: {
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
@@ -1127,15 +1456,6 @@ const styles = {
   lockButtonActive: {
     background: "#111827",
     color: "#fff",
-  },
-
-  inlineMoveSelect: {
-    borderRadius: "8px",
-    border: "1px solid #d1d5db",
-    padding: "5px 7px",
-    fontSize: "11px",
-    background: "#fff",
-    maxWidth: "100%",
   },
 
   modalOverlay: {
