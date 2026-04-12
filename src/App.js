@@ -42,6 +42,12 @@ function buildStoragePayload(teams, teamCount) {
   };
 }
 
+function getRoundStorageKey(baseKey, auth) {
+  const username =
+    auth?.loggedIn && auth?.username ? String(auth.username).trim() : "guest";
+  return `${baseKey}-${username}`;
+}
+
 function readStorageWithTtl(key, ttlMs) {
   try {
     const raw = localStorage.getItem(key);
@@ -278,6 +284,20 @@ export default function App() {
   const [courtCount, setCourtCount] = useState(2);
   const [matchRoundIndex, setMatchRoundIndex] = useState(0);
 
+  const [showCreateTrainerForm, setShowCreateTrainerForm] = useState(false);
+  const [trainerUsername, setTrainerUsername] = useState("");
+  const [trainerPassword, setTrainerPassword] = useState("");
+  const [trainerSkillView, setTrainerSkillView] = useState("numbers");
+  const [trainerSkillScale, setTrainerSkillScale] = useState(5);
+  const [copyPlayersFromMain, setCopyPlayersFromMain] = useState(true);
+  const [creatingTrainer, setCreatingTrainer] = useState(false);
+  const [createTrainerMessage, setCreateTrainerMessage] = useState("");
+  const [createdTrainerInfo, setCreatedTrainerInfo] = useState(null);
+
+  const [trainerUsers, setTrainerUsers] = useState([]);
+  const [trainerPasswords, setTrainerPasswords] = useState({});
+  const [trainerActionMessage, setTrainerActionMessage] = useState("");
+
   const [auth, setAuth] = useState(() => {
     if (typeof window === "undefined") {
       return {
@@ -342,6 +362,14 @@ export default function App() {
       : {};
   }, [auth]);
 
+  const clearRoundState = useCallback(() => {
+    setSelected([]);
+    setTeams([]);
+    setMatchRoundIndex(0);
+    setMatchMode(false);
+    setActiveTab("players");
+  }, []);
+
   const loadPlayers = useCallback(
     async (authOverride) => {
       try {
@@ -349,25 +377,64 @@ export default function App() {
         const queryString = buildQueryString({
           action: "getPlayers",
           ...payload,
+          _ts: Date.now(),
         });
 
-        const res = await fetch(`${API}?${queryString}`);
+        const res = await fetch(`${API}?${queryString}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+
         const data = await res.json();
-        setPlayers(Array.isArray(data) ? data : []);
+        const nextPlayers = Array.isArray(data) ? data : [];
+        setPlayers(nextPlayers);
       } catch (error) {
         console.error("Kunne ikke hente spillere:", error);
+        setPlayers([]);
       }
     },
     [getAuthPayload]
   );
+
+  const loadTrainerUsers = useCallback(async () => {
+    if (!auth.loggedIn || auth.role !== "admin") {
+      setTrainerUsers([]);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API}?_ts=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "listTrainerUsers",
+          username: auth.username,
+          password: auth.password,
+        }),
+      });
+
+      const data = await res.json();
+      setTrainerUsers(Array.isArray(data?.users) ? data.users : []);
+    } catch (error) {
+      console.error("Kunne ikke hente trainer users:", error);
+      setTrainerUsers([]);
+    }
+  }, [auth.loggedIn, auth.password, auth.role, auth.username]);
 
   const saveUserSettingsToBackend = useCallback(
     async (nextSkillView, nextSkillScale) => {
       if (!auth.loggedIn || !auth.username || !auth.password) return;
 
       try {
-        await fetch(API, {
+        await fetch(`${API}?_ts=${Date.now()}`, {
           method: "POST",
+          cache: "no-store",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8",
+          },
           body: JSON.stringify({
             action: "saveUserSettings",
             username: auth.username,
@@ -400,9 +467,14 @@ export default function App() {
         action: "login",
         username,
         password,
+        _ts: Date.now(),
       });
 
-      const res = await fetch(`${API}?${queryString}`);
+      const res = await fetch(`${API}?${queryString}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+
       const data = await res.json();
 
       if (!data?.success) {
@@ -417,12 +489,17 @@ export default function App() {
         role: data?.profile?.role || "trainer",
       };
 
+      clearRoundState();
       setAuth(nextAuth);
       setSkillView(data?.profile?.settings?.skillView || "numbers");
       setSkillScale(Number(data?.profile?.settings?.skillScale) || 5);
       setLoginUsername("");
       setLoginPassword("");
       setLoginMessage("Login ok.");
+      setTrainerActionMessage("");
+      setCreateTrainerMessage("");
+      setCreatedTrainerInfo(null);
+
       await loadPlayers({
         username,
         password,
@@ -435,7 +512,7 @@ export default function App() {
     }
   }
 
-  function handleLogout() {
+  async function handleLogout() {
     setAuth({
       username: "",
       password: "",
@@ -445,7 +522,187 @@ export default function App() {
     setLoginUsername("");
     setLoginPassword("");
     setLoginMessage("");
-    loadPlayers({});
+    setTrainerUsers([]);
+    setTrainerPasswords({});
+    setTrainerActionMessage("");
+    setCreateTrainerMessage("");
+    setCreatedTrainerInfo(null);
+    clearRoundState();
+    await loadPlayers({});
+  }
+
+  async function createTrainerFromApp() {
+    const newTrainerUsername = trainerUsername.trim();
+    const newTrainerPassword = trainerPassword.trim();
+
+    if (!newTrainerUsername || !newTrainerPassword) {
+      setCreateTrainerMessage("Skriv inn username og password.");
+      return;
+    }
+
+    try {
+      setCreatingTrainer(true);
+      setCreateTrainerMessage("");
+      setCreatedTrainerInfo(null);
+
+      const res = await fetch(`${API}?_ts=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "createTrainerUser",
+          username: auth.username,
+          password: auth.password,
+          newUsername: newTrainerUsername,
+          newPassword: newTrainerPassword,
+          skillView: trainerSkillView,
+          skillScale: Number(trainerSkillScale),
+          active: 1,
+          copyPlayersFromMain,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data?.success) {
+        setCreateTrainerMessage(data?.message || "Kunne ikke opprette trener.");
+        return;
+      }
+
+      setCreatedTrainerInfo(data.user || null);
+      setCreateTrainerMessage("Trainer opprettet.");
+      setTrainerUsername("");
+      setTrainerPassword("");
+      setTrainerSkillView("numbers");
+      setTrainerSkillScale(5);
+      setCopyPlayersFromMain(true);
+      setShowCreateTrainerForm(false);
+      await loadTrainerUsers();
+    } catch (error) {
+      console.error("Kunne ikke opprette trener:", error);
+      setCreateTrainerMessage("Kunne ikke opprette trener.");
+    } finally {
+      setCreatingTrainer(false);
+    }
+  }
+
+  async function updateTrainerStatus(targetUsername, active) {
+    try {
+      setTrainerActionMessage("");
+
+      const res = await fetch(`${API}?_ts=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "updateTrainerStatus",
+          username: auth.username,
+          password: auth.password,
+          targetUsername,
+          active: active ? 1 : 0,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data?.success) {
+        setTrainerActionMessage(data?.message || "Kunne ikke oppdatere trener.");
+        return;
+      }
+
+      setTrainerActionMessage(active ? "Trainer activated." : "Trainer deactivated.");
+      await loadTrainerUsers();
+    } catch (error) {
+      console.error("Kunne ikke oppdatere trenerstatus:", error);
+      setTrainerActionMessage("Kunne ikke oppdatere trener.");
+    }
+  }
+
+  async function resetTrainerPassword(targetUsername) {
+    const newPassword = String(trainerPasswords[targetUsername] || "").trim();
+
+    if (!newPassword) {
+      setTrainerActionMessage("Skriv inn nytt passord først.");
+      return;
+    }
+
+    try {
+      setTrainerActionMessage("");
+
+      const res = await fetch(`${API}?_ts=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "resetTrainerPassword",
+          username: auth.username,
+          password: auth.password,
+          targetUsername,
+          newPassword,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data?.success) {
+        setTrainerActionMessage(data?.message || "Kunne ikke resette passord.");
+        return;
+      }
+
+      setTrainerPasswords((prev) => ({
+        ...prev,
+        [targetUsername]: "",
+      }));
+      setTrainerActionMessage("Password reset ok.");
+    } catch (error) {
+      console.error("Kunne ikke resette passord:", error);
+      setTrainerActionMessage("Kunne ikke resette passord.");
+    }
+  }
+
+  async function deleteTrainer(targetUsername) {
+    const confirmed = window.confirm(
+      `Er du sikker på at du vil slette trainer "${targetUsername}"?`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setTrainerActionMessage("");
+
+      const res = await fetch(`${API}?_ts=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "deleteTrainerUser",
+          username: auth.username,
+          password: auth.password,
+          targetUsername,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data?.success) {
+        setTrainerActionMessage(data?.message || "Kunne ikke slette trainer.");
+        return;
+      }
+
+      setTrainerActionMessage("Trainer deleted.");
+      await loadTrainerUsers();
+    } catch (error) {
+      console.error("Kunne ikke slette trainer:", error);
+      setTrainerActionMessage("Kunne ikke slette trainer.");
+    }
   }
 
   useEffect(() => {
@@ -453,19 +710,34 @@ export default function App() {
   }, [loadPlayers]);
 
   useEffect(() => {
+    if (auth.loggedIn && auth.role === "admin") {
+      loadTrainerUsers();
+    } else {
+      setTrainerUsers([]);
+    }
+  }, [auth, loadTrainerUsers]);
+
+  useEffect(() => {
+    const currentRoundKey = getRoundStorageKey(ROUND_CACHE_KEY, auth);
+    const savedRoundKey = getRoundStorageKey(ROUND_SAVE_KEY, auth);
+
     const currentRound = readStorageWithTtl(
-      ROUND_CACHE_KEY,
+      currentRoundKey,
       CURRENT_ROUND_TTL_MS
     );
-    const savedRound = readStorageWithTtl(ROUND_SAVE_KEY, SAVED_ROUND_TTL_MS);
+    const savedRound = readStorageWithTtl(savedRoundKey, SAVED_ROUND_TTL_MS);
     const restored = currentRound || savedRound;
 
     if (restored?.teams?.length) {
       setTeams(restored.teams);
       setTeamCount(restored.teamCount || 2);
       setActiveTab("teams");
+      return;
     }
-  }, []);
+
+    setTeams([]);
+    setActiveTab("players");
+  }, [auth]);
 
   useEffect(() => {
     function handleResize() {
@@ -477,15 +749,20 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!teams.length) return;
+    const roundCacheKey = getRoundStorageKey(ROUND_CACHE_KEY, auth);
+
+    if (!teams.length) {
+      localStorage.removeItem(roundCacheKey);
+      return;
+    }
 
     try {
       const payload = buildStoragePayload(teams, teamCount);
-      localStorage.setItem(ROUND_CACHE_KEY, JSON.stringify(payload));
+      localStorage.setItem(roundCacheKey, JSON.stringify(payload));
     } catch (error) {
       console.error("Kunne ikke lagre nåværende runde:", error);
     }
-  }, [teams, teamCount]);
+  }, [auth, teams, teamCount]);
 
   useEffect(() => {
     try {
@@ -526,6 +803,12 @@ export default function App() {
     }
   }, [editSkill, newPlayerSkill, skillOptions, skillScale]);
 
+  useEffect(() => {
+    setSelected((prev) =>
+      prev.filter((name) => players.some((p) => p.name === name))
+    );
+  }, [players]);
+
   function togglePlayer(name) {
     setSelected((prev) =>
       prev.includes(name) ? prev.filter((p) => p !== name) : [...prev, name]
@@ -538,8 +821,12 @@ export default function App() {
 
       const selectedPlayers = players.filter((p) => selected.includes(p.name));
 
-      const res = await fetch(API, {
+      const res = await fetch(`${API}?_ts=${Date.now()}`, {
         method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
         body: JSON.stringify({
           action: "generate",
           players: selectedPlayers,
@@ -578,8 +865,12 @@ export default function App() {
 
       setLoading(true);
 
-      const res = await fetch(API, {
+      const res = await fetch(`${API}?_ts=${Date.now()}`, {
         method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
         body: JSON.stringify({
           action: "generate",
           players: currentPlayers,
@@ -604,8 +895,9 @@ export default function App() {
 
   function saveRoundForSixHours() {
     try {
+      const savedRoundKey = getRoundStorageKey(ROUND_SAVE_KEY, auth);
       localStorage.setItem(
-        ROUND_SAVE_KEY,
+        savedRoundKey,
         JSON.stringify(buildStoragePayload(teams, teamCount))
       );
       alert("Round saved for 6 hours on this device.");
@@ -616,8 +908,11 @@ export default function App() {
   }
 
   function clearStoredRounds() {
-    localStorage.removeItem(ROUND_CACHE_KEY);
-    localStorage.removeItem(ROUND_SAVE_KEY);
+    localStorage.removeItem(getRoundStorageKey(ROUND_CACHE_KEY, auth));
+    localStorage.removeItem(getRoundStorageKey(ROUND_SAVE_KEY, auth));
+    setTeams([]);
+    setSelected([]);
+    setActiveTab("players");
     alert("Saved round cleared on this device.");
   }
 
@@ -628,8 +923,12 @@ export default function App() {
     try {
       setSavingPlayer(true);
 
-      await fetch(API, {
+      await fetch(`${API}?_ts=${Date.now()}`, {
         method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
         body: JSON.stringify({
           action: "addPlayer",
           player: {
@@ -676,8 +975,12 @@ export default function App() {
       setSavingPlayer(true);
 
       if (oldName !== newName) {
-        await fetch(API, {
+        await fetch(`${API}?_ts=${Date.now()}`, {
           method: "POST",
+          cache: "no-store",
+          headers: {
+            "Content-Type": "text/plain;charset=utf-8",
+          },
           body: JSON.stringify({
             action: "updatePlayerName",
             oldName,
@@ -687,8 +990,12 @@ export default function App() {
         });
       }
 
-      await fetch(API, {
+      await fetch(`${API}?_ts=${Date.now()}`, {
         method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
         body: JSON.stringify({
           action: "saveSkills",
           players: [{ name: newName, skill: newSkill }],
@@ -935,6 +1242,213 @@ export default function App() {
 
           {loginMessage && <div style={styles.loginMessage}>{loginMessage}</div>}
         </div>
+
+        {auth.loggedIn && auth.role === "admin" && (
+          <div style={styles.adminCard}>
+            <div style={styles.authHeader}>
+              <div>
+                <div style={styles.authTitle}>Create Trainer</div>
+                <div style={styles.authSubtitle}>
+                  Lager ny trener og nytt Google Sheet automatisk
+                </div>
+              </div>
+
+              <button
+                style={styles.secondaryButton}
+                onClick={() => setShowCreateTrainerForm((prev) => !prev)}
+              >
+                {showCreateTrainerForm ? "Close" : "New Trainer"}
+              </button>
+            </div>
+
+            {showCreateTrainerForm && (
+              <div style={styles.formCard}>
+                <input
+                  style={styles.input}
+                  value={trainerUsername}
+                  onChange={(e) => setTrainerUsername(e.target.value)}
+                  placeholder="Trainer username"
+                />
+
+                <input
+                  style={styles.input}
+                  value={trainerPassword}
+                  onChange={(e) => setTrainerPassword(e.target.value)}
+                  placeholder="Trainer password"
+                />
+
+                <div style={styles.settingsRow}>
+                  <div style={styles.settingsCard}>
+                    <span style={styles.settingsLabel}>Skill View</span>
+                    <div style={styles.settingsToggleRow}>
+                      <button
+                        style={{
+                          ...styles.smallToggleButton,
+                          ...(trainerSkillView === "numbers"
+                            ? styles.smallToggleButtonActive
+                            : {}),
+                        }}
+                        onClick={() => setTrainerSkillView("numbers")}
+                      >
+                        Numbers
+                      </button>
+                      <button
+                        style={{
+                          ...styles.smallToggleButton,
+                          ...(trainerSkillView === "colors"
+                            ? styles.smallToggleButtonActive
+                            : {}),
+                        }}
+                        onClick={() => setTrainerSkillView("colors")}
+                      >
+                        Colors
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={styles.settingsCard}>
+                    <span style={styles.settingsLabel}>Skill Scale</span>
+                    <div style={styles.settingsToggleRow}>
+                      {SKILL_SCALE_OPTIONS.map((scale) => (
+                        <button
+                          key={scale}
+                          style={{
+                            ...styles.smallToggleButton,
+                            ...(trainerSkillScale === scale
+                              ? styles.smallToggleButtonActive
+                              : {}),
+                          }}
+                          onClick={() => setTrainerSkillScale(scale)}
+                        >
+                          1-{scale}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <label style={styles.checkboxRow}>
+                  <input
+                    type="checkbox"
+                    checked={copyPlayersFromMain}
+                    onChange={(e) => setCopyPlayersFromMain(e.target.checked)}
+                  />
+                  <span>Copy players from main sheet</span>
+                </label>
+
+                <button
+                  style={styles.primaryButton}
+                  onClick={createTrainerFromApp}
+                  disabled={creatingTrainer}
+                >
+                  {creatingTrainer ? "Creating..." : "Create Trainer"}
+                </button>
+              </div>
+            )}
+
+            {createTrainerMessage && (
+              <div style={styles.loginMessage}>{createTrainerMessage}</div>
+            )}
+
+            {createdTrainerInfo && (
+              <div style={styles.createdTrainerCard}>
+                <div>
+                  <strong>Username:</strong> {createdTrainerInfo.username}
+                </div>
+                <div>
+                  <strong>Spreadsheet ID:</strong> {createdTrainerInfo.spreadsheetId}
+                </div>
+                <div style={styles.createdTrainerLinkWrap}>
+                  <a
+                    href={createdTrainerInfo.spreadsheetUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={styles.link}
+                  >
+                    Open trainer sheet
+                  </a>
+                </div>
+              </div>
+            )}
+
+            <div style={styles.trainerListCard}>
+              <div style={styles.authTitle}>Trainer Users</div>
+              <div style={styles.authSubtitle}>
+                Admin kan aktivere, deaktivere, resette passord og slette trainers
+              </div>
+
+              {trainerActionMessage && (
+                <div style={styles.loginMessage}>{trainerActionMessage}</div>
+              )}
+
+              <div style={styles.trainerUsersWrap}>
+                {trainerUsers.length === 0 ? (
+                  <div style={styles.emptyText}>Ingen trainers ennå.</div>
+                ) : (
+                  trainerUsers.map((trainer) => (
+                    <div key={trainer.username} style={styles.trainerUserRow}>
+                      <div style={styles.trainerUserTop}>
+                        <div>
+                          <div style={styles.trainerUserName}>{trainer.username}</div>
+                          <div style={styles.trainerUserMeta}>
+                            {trainer.active ? "Active" : "Inactive"} • {trainer.skillView} • 1-
+                            {trainer.skillScale}
+                          </div>
+                        </div>
+
+                        <a
+                          href={trainer.spreadsheetUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={styles.link}
+                        >
+                          Open sheet
+                        </a>
+                      </div>
+
+                      <div style={styles.trainerActionsRow}>
+                        <button
+                          style={styles.secondaryButton}
+                          onClick={() =>
+                            updateTrainerStatus(trainer.username, !trainer.active)
+                          }
+                        >
+                          {trainer.active ? "Deactivate" : "Activate"}
+                        </button>
+
+                        <input
+                          style={styles.smallInput}
+                          value={trainerPasswords[trainer.username] || ""}
+                          onChange={(e) =>
+                            setTrainerPasswords((prev) => ({
+                              ...prev,
+                              [trainer.username]: e.target.value,
+                            }))
+                          }
+                          placeholder="New password"
+                        />
+
+                        <button
+                          style={styles.secondaryButton}
+                          onClick={() => resetTrainerPassword(trainer.username)}
+                        >
+                          Reset Password
+                        </button>
+
+                        <button
+                          style={styles.deleteButton}
+                          onClick={() => deleteTrainer(trainer.username)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div style={styles.tabBar}>
           <button
@@ -1519,6 +2033,88 @@ const styles = {
     marginBottom: "12px",
   },
 
+  adminCard: {
+    background: "#fff",
+    borderRadius: "14px",
+    padding: "12px",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    display: "grid",
+    gap: "12px",
+    marginBottom: "12px",
+  },
+
+  trainerListCard: {
+    background: "#fff",
+    borderRadius: "14px",
+    display: "grid",
+    gap: "10px",
+  },
+
+  trainerUsersWrap: {
+    display: "grid",
+    gap: "10px",
+  },
+
+  trainerUserRow: {
+    background: "#f8fafc",
+    border: "1px solid #e5e7eb",
+    borderRadius: "12px",
+    padding: "10px",
+    display: "grid",
+    gap: "10px",
+  },
+
+  trainerUserTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "10px",
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+
+  trainerUserName: {
+    fontSize: "14px",
+    fontWeight: "700",
+    color: "#111827",
+  },
+
+  trainerUserMeta: {
+    fontSize: "12px",
+    color: "#6b7280",
+    marginTop: "2px",
+  },
+
+  trainerActionsRow: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+    alignItems: "center",
+  },
+
+  smallInput: {
+    minWidth: "160px",
+    borderRadius: "10px",
+    border: "1px solid #d1d5db",
+    padding: "10px 12px",
+    fontSize: "13px",
+    boxSizing: "border-box",
+  },
+
+  deleteButton: {
+    border: "none",
+    borderRadius: "12px",
+    padding: "12px 14px",
+    background: "#dc2626",
+    color: "#fff",
+    fontWeight: "600",
+    cursor: "pointer",
+  },
+
+  emptyText: {
+    fontSize: "13px",
+    color: "#6b7280",
+  },
+
   authHeader: {
     display: "flex",
     justifyContent: "space-between",
@@ -1548,6 +2144,35 @@ const styles = {
   loginMessage: {
     fontSize: "12px",
     fontWeight: "600",
+    color: "#111827",
+  },
+
+  createdTrainerCard: {
+    background: "#f8fafc",
+    borderRadius: "12px",
+    padding: "10px 12px",
+    border: "1px solid #e5e7eb",
+    display: "grid",
+    gap: "6px",
+    fontSize: "13px",
+    color: "#111827",
+  },
+
+  createdTrainerLinkWrap: {
+    marginTop: "4px",
+  },
+
+  link: {
+    color: "#2563eb",
+    textDecoration: "none",
+    fontWeight: "600",
+  },
+
+  checkboxRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    fontSize: "13px",
     color: "#111827",
   },
 
