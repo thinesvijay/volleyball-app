@@ -7,6 +7,7 @@ const ROUND_CACHE_KEY = "volleyball-current-round";
 const ROUND_SAVE_KEY = "volleyball-saved-round";
 const CURRENT_ROUND_TTL_MS = 60 * 60 * 1000;
 const SAVED_ROUND_TTL_MS = 6 * 60 * 60 * 1000;
+const SKILL_OPTIONS = [1, 2, 3, 4, 5];
 
 function normalizeTeamName(index, existingName) {
   if (existingName && String(existingName).trim()) return existingName;
@@ -534,7 +535,31 @@ export default function App() {
     });
   }
 
+  function movePlayerToTeam(fromTeamIndex, playerIndex, toTeamIndex) {
+    if (toTeamIndex < 0 || toTeamIndex >= teams.length) return;
+
+    setTeams((prevTeams) => {
+      const sourceTeam = prevTeams[fromTeamIndex];
+      const draggedPlayer = sourceTeam?.players?.[playerIndex];
+
+      if (!draggedPlayer || draggedPlayer.locked) return prevTeams;
+      if (fromTeamIndex === toTeamIndex) return prevTeams;
+
+      const nextTeams = prevTeams.map((team) => ({
+        ...team,
+        players: [...(team.players || [])],
+      }));
+
+      nextTeams[fromTeamIndex].players.splice(playerIndex, 1);
+      nextTeams[toTeamIndex].players.push(draggedPlayer);
+
+      return nextTeams;
+    });
+  }
+
   function handleDragStart(teamIndex, playerIndex) {
+    if (isMobile) return;
+
     const player = teams?.[teamIndex]?.players?.[playerIndex];
     if (!player || player.locked) return;
 
@@ -690,9 +715,11 @@ export default function App() {
                   value={newPlayerSkill}
                   onChange={(e) => setNewPlayerSkill(Number(e.target.value))}
                 >
-                  <option value={1}>1</option>
-                  <option value={2}>2</option>
-                  <option value={3}>3</option>
+                  {SKILL_OPTIONS.map((skill) => (
+                    <option key={skill} value={skill}>
+                      {skill}
+                    </option>
+                  ))}
                 </select>
 
                 <button
@@ -789,6 +816,12 @@ export default function App() {
               </button>
             </div>
 
+            {isMobile && teams.length > 0 && (
+              <div style={styles.mobileHintCard}>
+                Mobile move mode: use ← and → to move players between teams.
+              </div>
+            )}
+
             {matchMode && teams.length >= 3 && (
               <div style={styles.matchModeCard}>
                 <div style={styles.matchModeHeader}>
@@ -879,8 +912,12 @@ export default function App() {
                 <div
                   key={teamIndex}
                   style={styles.teamCard}
-                  onDragOver={(e) => e.preventDefault()}
+                  onDragOver={(e) => {
+                    if (isMobile) return;
+                    e.preventDefault();
+                  }}
                   onDrop={(e) => {
+                    if (isMobile) return;
                     e.preventDefault();
                     if (!dragging) return;
                     movePlayerByDrag(
@@ -909,13 +946,18 @@ export default function App() {
                             dragging.playerIndex === playerIndex
                               ? 0.45
                               : 1,
-                          cursor: player.locked ? "default" : "grab",
+                          cursor:
+                            isMobile || player.locked ? "default" : "grab",
                         }}
-                        draggable={!player.locked}
+                        draggable={!isMobile && !player.locked}
                         onDragStart={() => handleDragStart(teamIndex, playerIndex)}
                         onDragEnd={resetDragState}
-                        onDragOver={(e) => e.preventDefault()}
+                        onDragOver={(e) => {
+                          if (isMobile) return;
+                          e.preventDefault();
+                        }}
                         onDrop={(e) => {
+                          if (isMobile) return;
                           e.preventDefault();
                           e.stopPropagation();
 
@@ -935,6 +977,54 @@ export default function App() {
                         </div>
 
                         <div style={styles.teamPlayerRight}>
+                          {isMobile && (
+                            <>
+                              <button
+                                style={{
+                                  ...styles.arrowMoveButton,
+                                  opacity:
+                                    teamIndex === 0 || player.locked ? 0.45 : 1,
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  movePlayerToTeam(
+                                    teamIndex,
+                                    playerIndex,
+                                    teamIndex - 1
+                                  );
+                                }}
+                                disabled={teamIndex === 0 || player.locked}
+                              >
+                                ←
+                              </button>
+
+                              <button
+                                style={{
+                                  ...styles.arrowMoveButton,
+                                  opacity:
+                                    teamIndex === teamsWithTotals.length - 1 ||
+                                    player.locked
+                                      ? 0.45
+                                      : 1,
+                                }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  movePlayerToTeam(
+                                    teamIndex,
+                                    playerIndex,
+                                    teamIndex + 1
+                                  );
+                                }}
+                                disabled={
+                                  teamIndex === teamsWithTotals.length - 1 ||
+                                  player.locked
+                                }
+                              >
+                                →
+                              </button>
+                            </>
+                          )}
+
                           <span style={styles.skillMini}>{player.skill}</span>
 
                           <button
@@ -977,9 +1067,11 @@ export default function App() {
               value={editSkill}
               onChange={(e) => setEditSkill(Number(e.target.value))}
             >
-              <option value={1}>1</option>
-              <option value={2}>2</option>
-              <option value={3}>3</option>
+              {SKILL_OPTIONS.map((skill) => (
+                <option key={skill} value={skill}>
+                  {skill}
+                </option>
+              ))}
             </select>
 
             <div style={styles.modalActions}>
@@ -1208,6 +1300,10 @@ const styles = {
     cursor: "pointer",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
     minHeight: "62px",
+    userSelect: "none",
+    WebkitUserSelect: "none",
+    WebkitTouchCallout: "none",
+    touchAction: "manipulation",
   },
 
   playerCardSelected: {
@@ -1278,6 +1374,16 @@ const styles = {
     fontWeight: "700",
     cursor: "pointer",
     whiteSpace: "nowrap",
+  },
+
+  mobileHintCard: {
+    background: "#fff7ed",
+    color: "#9a3412",
+    border: "1px solid #fdba74",
+    borderRadius: "12px",
+    padding: "10px 12px",
+    fontSize: "12px",
+    fontWeight: "600",
   },
 
   matchModeCard: {
@@ -1417,6 +1523,10 @@ const styles = {
     gap: "8px",
     padding: "6px 0",
     borderBottom: "1px solid #eef2f7",
+    userSelect: "none",
+    WebkitUserSelect: "none",
+    WebkitTouchCallout: "none",
+    touchAction: "manipulation",
   },
 
   teamPlayerLeft: {
@@ -1451,6 +1561,18 @@ const styles = {
     fontSize: "11px",
     fontWeight: "600",
     cursor: "pointer",
+  },
+
+  arrowMoveButton: {
+    border: "none",
+    borderRadius: "8px",
+    padding: "5px 8px",
+    background: "#dbeafe",
+    color: "#1d4ed8",
+    fontSize: "12px",
+    fontWeight: "700",
+    cursor: "pointer",
+    minWidth: "28px",
   },
 
   lockButtonActive: {
