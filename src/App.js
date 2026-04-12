@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 const API =
   "https://script.google.com/macros/s/AKfycbx9FWReNsr6vJam6b02OCf96K482opSh_SPZVSeBqoTs65M7S2E1ZGZXt9qGUMzpE2dDw/exec";
@@ -213,7 +213,10 @@ function getSkillOptions(scale) {
 function getSkillStyle(skill, skillView, skillScale) {
   const value = Number(skill) || 1;
   const maxScale = Math.max(1, Number(skillScale) || 5);
-  const normalized = Math.max(0, Math.min(1, (value - 1) / Math.max(maxScale - 1, 1)));
+  const normalized = Math.max(
+    0,
+    Math.min(1, (value - 1) / Math.max(maxScale - 1, 1))
+  );
 
   if (skillView === "colors") {
     if (normalized <= 0.2) {
@@ -330,49 +333,55 @@ export default function App() {
 
   const skillOptions = useMemo(() => getSkillOptions(skillScale), [skillScale]);
 
-  function getAuthPayload() {
+  const getAuthPayload = useCallback(() => {
     return auth?.username && auth?.password
       ? {
           username: auth.username,
           password: auth.password,
         }
       : {};
-  }
+  }, [auth]);
 
-  async function loadPlayers(authOverride) {
-    try {
-      const payload = authOverride || getAuthPayload();
-      const queryString = buildQueryString({
-        action: "getPlayers",
-        ...payload,
-      });
+  const loadPlayers = useCallback(
+    async (authOverride) => {
+      try {
+        const payload = authOverride || getAuthPayload();
+        const queryString = buildQueryString({
+          action: "getPlayers",
+          ...payload,
+        });
 
-      const res = await fetch(`${API}?${queryString}`);
-      const data = await res.json();
-      setPlayers(Array.isArray(data) ? data : []);
-    } catch (error) {
-      console.error("Kunne ikke hente spillere:", error);
-    }
-  }
+        const res = await fetch(`${API}?${queryString}`);
+        const data = await res.json();
+        setPlayers(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error("Kunne ikke hente spillere:", error);
+      }
+    },
+    [getAuthPayload]
+  );
 
-  async function saveUserSettingsToBackend(nextSkillView, nextSkillScale) {
-    if (!auth.loggedIn || !auth.username || !auth.password) return;
+  const saveUserSettingsToBackend = useCallback(
+    async (nextSkillView, nextSkillScale) => {
+      if (!auth.loggedIn || !auth.username || !auth.password) return;
 
-    try {
-      await fetch(API, {
-        method: "POST",
-        body: JSON.stringify({
-          action: "saveUserSettings",
-          username: auth.username,
-          password: auth.password,
-          skillView: nextSkillView,
-          skillScale: Number(nextSkillScale),
-        }),
-      });
-    } catch (error) {
-      console.error("Kunne ikke lagre brukerinnstillinger:", error);
-    }
-  }
+      try {
+        await fetch(API, {
+          method: "POST",
+          body: JSON.stringify({
+            action: "saveUserSettings",
+            username: auth.username,
+            password: auth.password,
+            skillView: nextSkillView,
+            skillScale: Number(nextSkillScale),
+          }),
+        });
+      } catch (error) {
+        console.error("Kunne ikke lagre brukerinnstillinger:", error);
+      }
+    },
+    [auth.loggedIn, auth.password, auth.username]
+  );
 
   async function handleLogin() {
     const username = loginUsername.trim();
@@ -441,7 +450,9 @@ export default function App() {
 
   useEffect(() => {
     loadPlayers();
+  }, [loadPlayers]);
 
+  useEffect(() => {
     const currentRound = readStorageWithTtl(
       ROUND_CACHE_KEY,
       CURRENT_ROUND_TTL_MS
@@ -502,9 +513,8 @@ export default function App() {
 
   useEffect(() => {
     if (!auth.loggedIn) return;
-
     saveUserSettingsToBackend(skillView, skillScale);
-  }, [skillView, skillScale]);
+  }, [auth.loggedIn, saveUserSettingsToBackend, skillView, skillScale]);
 
   useEffect(() => {
     if (!skillOptions.includes(newPlayerSkill)) {
@@ -514,7 +524,7 @@ export default function App() {
     if (!skillOptions.includes(editSkill)) {
       setEditSkill(Math.min(editSkill, skillScale));
     }
-  }, [skillOptions, skillScale]);
+  }, [editSkill, newPlayerSkill, skillOptions, skillScale]);
 
   function togglePlayer(name) {
     setSelected((prev) =>
