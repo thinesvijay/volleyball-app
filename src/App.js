@@ -5,10 +5,12 @@ const API =
 
 const ROUND_CACHE_KEY = "volleyball-current-round";
 const ROUND_SAVE_KEY = "volleyball-saved-round";
+const AUTH_STORAGE_KEY = "volleyball-auth";
 const SKILL_VIEW_KEY = "volleyball-skill-view";
+const SKILL_SCALE_KEY = "volleyball-skill-scale";
 const CURRENT_ROUND_TTL_MS = 60 * 60 * 1000;
 const SAVED_ROUND_TTL_MS = 6 * 60 * 60 * 1000;
-const SKILL_OPTIONS = [1, 2, 3, 4, 5];
+const SKILL_SCALE_OPTIONS = [3, 5, 15];
 
 function normalizeTeamName(index, existingName) {
   if (existingName && String(existingName).trim()) return existingName;
@@ -202,22 +204,31 @@ function buildBalancedMatchRounds(teamNames, requestedCourtCount = 2) {
   });
 }
 
-function getSkillStyle(skill, skillView) {
+function getSkillOptions(scale) {
+  const parsedScale = Number(scale) || 5;
+  const maxScale = Math.max(1, parsedScale);
+  return Array.from({ length: maxScale }, (_, index) => index + 1);
+}
+
+function getSkillStyle(skill, skillView, skillScale) {
   const value = Number(skill) || 1;
+  const maxScale = Math.max(1, Number(skillScale) || 5);
+  const normalized = Math.max(0, Math.min(1, (value - 1) / Math.max(maxScale - 1, 1)));
 
   if (skillView === "colors") {
-    const colorMap = {
-      1: { background: "#dc2626", color: "#fff", label: "" },
-      2: { background: "#f97316", color: "#fff", label: "" },
-      3: { background: "#eab308", color: "#111827", label: "" },
-      4: { background: "#22c55e", color: "#fff", label: "" },
-      5: { background: "#2563eb", color: "#fff", label: "" },
-    };
-
-    return {
-      ...colorMap[value],
-      text: "",
-    };
+    if (normalized <= 0.2) {
+      return { background: "#dc2626", color: "#fff", text: "" };
+    }
+    if (normalized <= 0.4) {
+      return { background: "#f97316", color: "#fff", text: "" };
+    }
+    if (normalized <= 0.6) {
+      return { background: "#eab308", color: "#111827", text: "" };
+    }
+    if (normalized <= 0.8) {
+      return { background: "#22c55e", color: "#fff", text: "" };
+    }
+    return { background: "#2563eb", color: "#fff", text: "" };
   }
 
   return {
@@ -225,6 +236,17 @@ function getSkillStyle(skill, skillView) {
     color: "#fff",
     text: String(value),
   };
+}
+
+function buildQueryString(params) {
+  const searchParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    searchParams.set(key, String(value));
+  });
+
+  return searchParams.toString();
 }
 
 export default function App() {
@@ -253,10 +275,169 @@ export default function App() {
   const [courtCount, setCourtCount] = useState(2);
   const [matchRoundIndex, setMatchRoundIndex] = useState(0);
 
+  const [auth, setAuth] = useState(() => {
+    if (typeof window === "undefined") {
+      return {
+        username: "",
+        password: "",
+        loggedIn: false,
+        role: "guest",
+      };
+    }
+
+    try {
+      const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+      if (!raw) {
+        return {
+          username: "",
+          password: "",
+          loggedIn: false,
+          role: "guest",
+        };
+      }
+
+      const parsed = JSON.parse(raw);
+      return {
+        username: parsed.username || "",
+        password: parsed.password || "",
+        loggedIn: Boolean(parsed.loggedIn),
+        role: parsed.role || "guest",
+      };
+    } catch (error) {
+      return {
+        username: "",
+        password: "",
+        loggedIn: false,
+        role: "guest",
+      };
+    }
+  });
+
+  const [loginUsername, setLoginUsername] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginMessage, setLoginMessage] = useState("");
+
   const [skillView, setSkillView] = useState(() => {
     if (typeof window === "undefined") return "numbers";
     return localStorage.getItem(SKILL_VIEW_KEY) || "numbers";
   });
+
+  const [skillScale, setSkillScale] = useState(() => {
+    if (typeof window === "undefined") return 5;
+    return Number(localStorage.getItem(SKILL_SCALE_KEY)) || 5;
+  });
+
+  const skillOptions = useMemo(() => getSkillOptions(skillScale), [skillScale]);
+
+  function getAuthPayload() {
+    return auth?.username && auth?.password
+      ? {
+          username: auth.username,
+          password: auth.password,
+        }
+      : {};
+  }
+
+  async function loadPlayers(authOverride) {
+    try {
+      const payload = authOverride || getAuthPayload();
+      const queryString = buildQueryString({
+        action: "getPlayers",
+        ...payload,
+      });
+
+      const res = await fetch(`${API}?${queryString}`);
+      const data = await res.json();
+      setPlayers(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Kunne ikke hente spillere:", error);
+    }
+  }
+
+  async function saveUserSettingsToBackend(nextSkillView, nextSkillScale) {
+    if (!auth.loggedIn || !auth.username || !auth.password) return;
+
+    try {
+      await fetch(API, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "saveUserSettings",
+          username: auth.username,
+          password: auth.password,
+          skillView: nextSkillView,
+          skillScale: Number(nextSkillScale),
+        }),
+      });
+    } catch (error) {
+      console.error("Kunne ikke lagre brukerinnstillinger:", error);
+    }
+  }
+
+  async function handleLogin() {
+    const username = loginUsername.trim();
+    const password = loginPassword.trim();
+
+    if (!username || !password) {
+      setLoginMessage("Skriv inn brukernavn og passord.");
+      return;
+    }
+
+    try {
+      setLoginLoading(true);
+      setLoginMessage("");
+
+      const queryString = buildQueryString({
+        action: "login",
+        username,
+        password,
+      });
+
+      const res = await fetch(`${API}?${queryString}`);
+      const data = await res.json();
+
+      if (!data?.success) {
+        setLoginMessage(data?.message || "Login failed.");
+        return;
+      }
+
+      const nextAuth = {
+        username,
+        password,
+        loggedIn: true,
+        role: data?.profile?.role || "trainer",
+      };
+
+      setAuth(nextAuth);
+      setSkillView(data?.profile?.settings?.skillView || "numbers");
+      setSkillScale(Number(data?.profile?.settings?.skillScale) || 5);
+      setLoginUsername("");
+      setLoginPassword("");
+      setLoginMessage("Login ok.");
+      await loadPlayers({
+        username,
+        password,
+      });
+    } catch (error) {
+      console.error("Kunne ikke logge inn:", error);
+      setLoginMessage("Login failed.");
+    } finally {
+      setLoginLoading(false);
+    }
+  }
+
+  function handleLogout() {
+    setAuth({
+      username: "",
+      password: "",
+      loggedIn: false,
+      role: "guest",
+    });
+    setLoginUsername("");
+    setLoginPassword("");
+    setLoginMessage("");
+    loadPlayers({});
+  }
 
   useEffect(() => {
     loadPlayers();
@@ -303,15 +484,37 @@ export default function App() {
     }
   }, [skillView]);
 
-  async function loadPlayers() {
+  useEffect(() => {
     try {
-      const res = await fetch(`${API}?action=getPlayers`);
-      const data = await res.json();
-      setPlayers(Array.isArray(data) ? data : []);
+      localStorage.setItem(SKILL_SCALE_KEY, String(skillScale));
     } catch (error) {
-      console.error("Kunne ikke hente spillere:", error);
+      console.error("Kunne ikke lagre skill scale:", error);
     }
-  }
+  }, [skillScale]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
+    } catch (error) {
+      console.error("Kunne ikke lagre auth:", error);
+    }
+  }, [auth]);
+
+  useEffect(() => {
+    if (!auth.loggedIn) return;
+
+    saveUserSettingsToBackend(skillView, skillScale);
+  }, [skillView, skillScale]);
+
+  useEffect(() => {
+    if (!skillOptions.includes(newPlayerSkill)) {
+      setNewPlayerSkill(Math.min(newPlayerSkill, skillScale));
+    }
+
+    if (!skillOptions.includes(editSkill)) {
+      setEditSkill(Math.min(editSkill, skillScale));
+    }
+  }, [skillOptions, skillScale]);
 
   function togglePlayer(name) {
     setSelected((prev) =>
@@ -332,6 +535,7 @@ export default function App() {
           players: selectedPlayers,
           previousTeams: teams,
           teamCount,
+          ...getAuthPayload(),
         }),
       });
 
@@ -371,6 +575,7 @@ export default function App() {
           players: currentPlayers,
           previousTeams: teams,
           teamCount,
+          ...getAuthPayload(),
         }),
       });
 
@@ -421,6 +626,7 @@ export default function App() {
             name: trimmed,
             skill: Number(newPlayerSkill),
           },
+          ...getAuthPayload(),
         }),
       });
 
@@ -466,6 +672,7 @@ export default function App() {
             action: "updatePlayerName",
             oldName,
             newName,
+            ...getAuthPayload(),
           }),
         });
       }
@@ -475,6 +682,7 @@ export default function App() {
         body: JSON.stringify({
           action: "saveSkills",
           players: [{ name: newName, skill: newSkill }],
+          ...getAuthPayload(),
         }),
       });
 
@@ -670,6 +878,54 @@ export default function App() {
           </div>
         </div>
 
+        <div style={styles.authCard}>
+          <div style={styles.authHeader}>
+            <div>
+              <div style={styles.authTitle}>
+                {auth.loggedIn ? "Trainer Profile" : "Trainer Login"}
+              </div>
+              <div style={styles.authSubtitle}>
+                {auth.loggedIn
+                  ? `${auth.username} (${auth.role})`
+                  : "Optional for trainer-specific data"}
+              </div>
+            </div>
+
+            {auth.loggedIn && (
+              <button style={styles.secondaryButton} onClick={handleLogout}>
+                Logout
+              </button>
+            )}
+          </div>
+
+          {!auth.loggedIn && (
+            <div style={styles.loginGrid}>
+              <input
+                style={styles.input}
+                value={loginUsername}
+                onChange={(e) => setLoginUsername(e.target.value)}
+                placeholder="Username"
+              />
+              <input
+                style={styles.input}
+                type="password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                placeholder="Password"
+              />
+              <button
+                style={styles.primaryButton}
+                onClick={handleLogin}
+                disabled={loginLoading}
+              >
+                {loginLoading ? "Logging in..." : "Login"}
+              </button>
+            </div>
+          )}
+
+          {loginMessage && <div style={styles.loginMessage}>{loginMessage}</div>}
+        </div>
+
         <div style={styles.tabBar}>
           <button
             style={{
@@ -763,6 +1019,26 @@ export default function App() {
                   </button>
                 </div>
               </div>
+
+              <div style={styles.settingsCard}>
+                <span style={styles.settingsLabel}>Skill Scale</span>
+                <div style={styles.settingsToggleRow}>
+                  {SKILL_SCALE_OPTIONS.map((scale) => (
+                    <button
+                      key={scale}
+                      style={{
+                        ...styles.smallToggleButton,
+                        ...(skillScale === scale
+                          ? styles.smallToggleButtonActive
+                          : {}),
+                      }}
+                      onClick={() => setSkillScale(scale)}
+                    >
+                      1-{scale}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             <div style={styles.actionRow}>
@@ -788,7 +1064,7 @@ export default function App() {
                   value={newPlayerSkill}
                   onChange={(e) => setNewPlayerSkill(Number(e.target.value))}
                 >
-                  {SKILL_OPTIONS.map((skill) => (
+                  {skillOptions.map((skill) => (
                     <option key={skill} value={skill}>
                       {skill}
                     </option>
@@ -808,7 +1084,7 @@ export default function App() {
             <div style={styles.playersGrid}>
               {sortedPlayers.map((p) => {
                 const isSelected = selected.includes(p.name);
-                const skillStyle = getSkillStyle(p.skill, skillView);
+                const skillStyle = getSkillStyle(p.skill, skillView, skillScale);
 
                 return (
                   <button
@@ -1018,7 +1294,11 @@ export default function App() {
 
                   <div style={styles.teamPlayers}>
                     {team.players.map((player, playerIndex) => {
-                      const skillStyle = getSkillStyle(player.skill, skillView);
+                      const skillStyle = getSkillStyle(
+                        player.skill,
+                        skillView,
+                        skillScale
+                      );
 
                       return (
                         <div
@@ -1163,7 +1443,7 @@ export default function App() {
               value={editSkill}
               onChange={(e) => setEditSkill(Number(e.target.value))}
             >
-              {SKILL_OPTIONS.map((skill) => (
+              {skillOptions.map((skill) => (
                 <option key={skill} value={skill}>
                   {skill}
                 </option>
@@ -1217,6 +1497,48 @@ const styles = {
     margin: "4px 0 0 0",
     color: "#6b7280",
     fontSize: "13px",
+  },
+
+  authCard: {
+    background: "#fff",
+    borderRadius: "14px",
+    padding: "12px",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    display: "grid",
+    gap: "10px",
+    marginBottom: "12px",
+  },
+
+  authHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
+
+  authTitle: {
+    fontSize: "15px",
+    fontWeight: "700",
+    color: "#111827",
+  },
+
+  authSubtitle: {
+    fontSize: "12px",
+    color: "#6b7280",
+    marginTop: "2px",
+  },
+
+  loginGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr auto",
+    gap: "8px",
+  },
+
+  loginMessage: {
+    fontSize: "12px",
+    fontWeight: "600",
+    color: "#111827",
   },
 
   tabBar: {
@@ -1339,6 +1661,7 @@ const styles = {
   settingsToggleRow: {
     display: "flex",
     gap: "8px",
+    flexWrap: "wrap",
   },
 
   smallToggleButton: {
