@@ -5,6 +5,7 @@ const API =
 
 const ROUND_CACHE_KEY = "volleyball-current-round";
 const ROUND_SAVE_KEY = "volleyball-saved-round";
+const SKILL_VIEW_KEY = "volleyball-skill-view";
 const CURRENT_ROUND_TTL_MS = 60 * 60 * 1000;
 const SAVED_ROUND_TTL_MS = 6 * 60 * 60 * 1000;
 const SKILL_OPTIONS = [1, 2, 3, 4, 5];
@@ -201,6 +202,31 @@ function buildBalancedMatchRounds(teamNames, requestedCourtCount = 2) {
   });
 }
 
+function getSkillStyle(skill, skillView) {
+  const value = Number(skill) || 1;
+
+  if (skillView === "colors") {
+    const colorMap = {
+      1: { background: "#dc2626", color: "#fff", label: "" },
+      2: { background: "#f97316", color: "#fff", label: "" },
+      3: { background: "#eab308", color: "#111827", label: "" },
+      4: { background: "#22c55e", color: "#fff", label: "" },
+      5: { background: "#2563eb", color: "#fff", label: "" },
+    };
+
+    return {
+      ...colorMap[value],
+      text: "",
+    };
+  }
+
+  return {
+    background: "#111827",
+    color: "#fff",
+    text: String(value),
+  };
+}
+
 export default function App() {
   const [players, setPlayers] = useState([]);
   const [selected, setSelected] = useState([]);
@@ -226,6 +252,11 @@ export default function App() {
   const [matchMode, setMatchMode] = useState(false);
   const [courtCount, setCourtCount] = useState(2);
   const [matchRoundIndex, setMatchRoundIndex] = useState(0);
+
+  const [skillView, setSkillView] = useState(() => {
+    if (typeof window === "undefined") return "numbers";
+    return localStorage.getItem(SKILL_VIEW_KEY) || "numbers";
+  });
 
   useEffect(() => {
     loadPlayers();
@@ -263,6 +294,14 @@ export default function App() {
       console.error("Kunne ikke lagre nåværende runde:", error);
     }
   }, [teams, teamCount]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SKILL_VIEW_KEY, skillView);
+    } catch (error) {
+      console.error("Kunne ikke lagre skill view:", error);
+    }
+  }, [skillView]);
 
   async function loadPlayers() {
     try {
@@ -619,6 +658,8 @@ export default function App() {
     }
   }, [balancedScheduleRounds, matchRoundIndex]);
 
+  const totalPlayers = sortedPlayers.length;
+
   return (
     <div style={styles.app}>
       <div style={styles.shell}>
@@ -689,7 +730,39 @@ export default function App() {
                 </div>
               </div>
 
-              <div style={styles.selectedBadge}>Selected: {selected.length}</div>
+              <div style={styles.selectedBadge}>
+                Selected: {selected.length} / {totalPlayers}
+              </div>
+            </div>
+
+            <div style={styles.settingsRow}>
+              <div style={styles.settingsCard}>
+                <span style={styles.settingsLabel}>Skill View</span>
+                <div style={styles.settingsToggleRow}>
+                  <button
+                    style={{
+                      ...styles.smallToggleButton,
+                      ...(skillView === "numbers"
+                        ? styles.smallToggleButtonActive
+                        : {}),
+                    }}
+                    onClick={() => setSkillView("numbers")}
+                  >
+                    Numbers
+                  </button>
+                  <button
+                    style={{
+                      ...styles.smallToggleButton,
+                      ...(skillView === "colors"
+                        ? styles.smallToggleButtonActive
+                        : {}),
+                    }}
+                    onClick={() => setSkillView("colors")}
+                  >
+                    Colors
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div style={styles.actionRow}>
@@ -735,6 +808,7 @@ export default function App() {
             <div style={styles.playersGrid}>
               {sortedPlayers.map((p) => {
                 const isSelected = selected.includes(p.name);
+                const skillStyle = getSkillStyle(p.skill, skillView);
 
                 return (
                   <button
@@ -747,7 +821,15 @@ export default function App() {
                   >
                     <div style={styles.playerCompactTop}>
                       <div style={styles.playerNameCompact}>{p.name}</div>
-                      <div style={styles.skillMini}>{p.skill}</div>
+                      <div
+                        style={{
+                          ...styles.skillMini,
+                          background: skillStyle.background,
+                          color: skillStyle.color,
+                        }}
+                      >
+                        {skillStyle.text}
+                      </div>
                     </div>
 
                     <div style={styles.playerCompactBottom}>
@@ -935,113 +1017,127 @@ export default function App() {
                   </div>
 
                   <div style={styles.teamPlayers}>
-                    {team.players.map((player, playerIndex) => (
-                      <div
-                        key={`${player.name}-${playerIndex}`}
-                        style={{
-                          ...styles.teamPlayerRow,
-                          opacity:
-                            dragging &&
-                            dragging.fromTeamIndex === teamIndex &&
-                            dragging.playerIndex === playerIndex
-                              ? 0.45
-                              : 1,
-                          cursor:
-                            isMobile || player.locked ? "default" : "grab",
-                        }}
-                        draggable={!isMobile && !player.locked}
-                        onDragStart={() => handleDragStart(teamIndex, playerIndex)}
-                        onDragEnd={resetDragState}
-                        onDragOver={(e) => {
-                          if (isMobile) return;
-                          e.preventDefault();
-                        }}
-                        onDrop={(e) => {
-                          if (isMobile) return;
-                          e.preventDefault();
-                          e.stopPropagation();
+                    {team.players.map((player, playerIndex) => {
+                      const skillStyle = getSkillStyle(player.skill, skillView);
 
-                          if (!dragging) return;
+                      return (
+                        <div
+                          key={`${player.name}-${playerIndex}`}
+                          style={{
+                            ...styles.teamPlayerRow,
+                            opacity:
+                              dragging &&
+                              dragging.fromTeamIndex === teamIndex &&
+                              dragging.playerIndex === playerIndex
+                                ? 0.45
+                                : 1,
+                            cursor:
+                              isMobile || player.locked ? "default" : "grab",
+                          }}
+                          draggable={!isMobile && !player.locked}
+                          onDragStart={() =>
+                            handleDragStart(teamIndex, playerIndex)
+                          }
+                          onDragEnd={resetDragState}
+                          onDragOver={(e) => {
+                            if (isMobile) return;
+                            e.preventDefault();
+                          }}
+                          onDrop={(e) => {
+                            if (isMobile) return;
+                            e.preventDefault();
+                            e.stopPropagation();
 
-                          movePlayerByDrag(
-                            dragging.fromTeamIndex,
-                            dragging.playerIndex,
-                            teamIndex,
-                            playerIndex
-                          );
-                          resetDragState();
-                        }}
-                      >
-                        <div style={styles.teamPlayerLeft}>
-                          <div style={styles.teamPlayerName}>{player.name}</div>
-                        </div>
+                            if (!dragging) return;
 
-                        <div style={styles.teamPlayerRight}>
-                          {isMobile && (
-                            <>
-                              <button
-                                style={{
-                                  ...styles.arrowMoveButton,
-                                  opacity:
-                                    teamIndex === 0 || player.locked ? 0.45 : 1,
-                                }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  movePlayerToTeam(
-                                    teamIndex,
-                                    playerIndex,
-                                    teamIndex - 1
-                                  );
-                                }}
-                                disabled={teamIndex === 0 || player.locked}
-                              >
-                                ←
-                              </button>
+                            movePlayerByDrag(
+                              dragging.fromTeamIndex,
+                              dragging.playerIndex,
+                              teamIndex,
+                              playerIndex
+                            );
+                            resetDragState();
+                          }}
+                        >
+                          <div style={styles.teamPlayerLeft}>
+                            <div style={styles.teamPlayerName}>{player.name}</div>
+                          </div>
 
-                              <button
-                                style={{
-                                  ...styles.arrowMoveButton,
-                                  opacity:
+                          <div style={styles.teamPlayerRight}>
+                            {isMobile && (
+                              <>
+                                <button
+                                  style={{
+                                    ...styles.arrowMoveButton,
+                                    opacity:
+                                      teamIndex === 0 || player.locked ? 0.45 : 1,
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    movePlayerToTeam(
+                                      teamIndex,
+                                      playerIndex,
+                                      teamIndex - 1
+                                    );
+                                  }}
+                                  disabled={teamIndex === 0 || player.locked}
+                                >
+                                  ←
+                                </button>
+
+                                <button
+                                  style={{
+                                    ...styles.arrowMoveButton,
+                                    opacity:
+                                      teamIndex === teamsWithTotals.length - 1 ||
+                                      player.locked
+                                        ? 0.45
+                                        : 1,
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    movePlayerToTeam(
+                                      teamIndex,
+                                      playerIndex,
+                                      teamIndex + 1
+                                    );
+                                  }}
+                                  disabled={
                                     teamIndex === teamsWithTotals.length - 1 ||
                                     player.locked
-                                      ? 0.45
-                                      : 1,
-                                }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  movePlayerToTeam(
-                                    teamIndex,
-                                    playerIndex,
-                                    teamIndex + 1
-                                  );
-                                }}
-                                disabled={
-                                  teamIndex === teamsWithTotals.length - 1 ||
-                                  player.locked
-                                }
-                              >
-                                →
-                              </button>
-                            </>
-                          )}
+                                  }
+                                >
+                                  →
+                                </button>
+                              </>
+                            )}
 
-                          <span style={styles.skillMini}>{player.skill}</span>
+                            <span
+                              style={{
+                                ...styles.skillMini,
+                                background: skillStyle.background,
+                                color: skillStyle.color,
+                              }}
+                            >
+                              {skillStyle.text}
+                            </span>
 
-                          <button
-                            style={{
-                              ...styles.inlineActionButton,
-                              ...(player.locked ? styles.lockButtonActive : {}),
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleLock(teamIndex, playerIndex);
-                            }}
-                          >
-                            {player.locked ? "Unlock" : "Lock"}
-                          </button>
+                            <button
+                              style={{
+                                ...styles.inlineActionButton,
+                                ...(player.locked ? styles.lockButtonActive : {}),
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleLock(teamIndex, playerIndex);
+                              }}
+                            >
+                              {player.locked ? "Unlock" : "Lock"}
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ))}
@@ -1218,6 +1314,49 @@ const styles = {
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
   },
 
+  settingsRow: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+  },
+
+  settingsCard: {
+    background: "#fff",
+    borderRadius: "14px",
+    padding: "10px 12px",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    display: "grid",
+    gap: "8px",
+    minWidth: "220px",
+  },
+
+  settingsLabel: {
+    fontSize: "12px",
+    color: "#6b7280",
+    fontWeight: "600",
+  },
+
+  settingsToggleRow: {
+    display: "flex",
+    gap: "8px",
+  },
+
+  smallToggleButton: {
+    border: "none",
+    borderRadius: "10px",
+    padding: "8px 10px",
+    background: "#e5e7eb",
+    color: "#111827",
+    fontSize: "12px",
+    fontWeight: "700",
+    cursor: "pointer",
+  },
+
+  smallToggleButtonActive: {
+    background: "#111827",
+    color: "#fff",
+  },
+
   actionRow: {
     display: "flex",
     gap: "8px",
@@ -1330,8 +1469,6 @@ const styles = {
     minWidth: "22px",
     height: "22px",
     borderRadius: "999px",
-    background: "#111827",
-    color: "#fff",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
