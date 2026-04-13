@@ -13,9 +13,14 @@ const MATCH_METHOD_KEY = "volleyball-match-method";
 const CURRENT_ROUND_TTL_MS = 60 * 60 * 1000;
 const SAVED_ROUND_TTL_MS = 6 * 60 * 60 * 1000;
 const SKILL_SCALE_OPTIONS = [3, 5];
+const TRAINER_COPY_OPTIONS = [
+  { value: "blank", label: "Blank sheet" },
+  { value: "main", label: "Copy players from main sheet" },
+  { value: "trainer", label: "Copy players from existing trainer" },
+];
 const MATCH_METHOD_OPTIONS = [
-  { value: "balanced", label: "Balanced" },
-  { value: "random", label: "Random" },
+  { value: "balanced", label: "Pattern" },
+  { value: "shuffle", label: "Shuffle" },
 ];
 
 function normalizeTeamName(index, existingName) {
@@ -124,7 +129,7 @@ function shuffleArray(items) {
   return arr;
 }
 
-function buildRandomMatchRounds(teamNames, requestedCourtCount = 2) {
+function buildShuffleMatchRounds(teamNames, requestedCourtCount = 2) {
   const baseRounds = createRoundRobinSchedule(teamNames);
   if (!baseRounds.length) return [];
 
@@ -301,6 +306,15 @@ function buildQueryString(params) {
   return searchParams.toString();
 }
 
+function getDefaultAuth() {
+  return {
+    username: "",
+    password: "",
+    loggedIn: false,
+    role: "guest",
+  };
+}
+
 export default function App() {
   const [players, setPlayers] = useState([]);
   const [selected, setSelected] = useState([]);
@@ -328,7 +342,8 @@ export default function App() {
   const [matchRoundIndex, setMatchRoundIndex] = useState(0);
   const [matchMethod, setMatchMethod] = useState(() => {
     if (typeof window === "undefined") return "balanced";
-    return localStorage.getItem(MATCH_METHOD_KEY) || "balanced";
+    const saved = localStorage.getItem(MATCH_METHOD_KEY) || "balanced";
+    return saved === "random" ? "shuffle" : saved;
   });
 
   const [showSkillInTeams, setShowSkillInTeams] = useState(() => {
@@ -342,7 +357,8 @@ export default function App() {
   const [trainerPassword, setTrainerPassword] = useState("");
   const [trainerSkillView, setTrainerSkillView] = useState("numbers");
   const [trainerSkillScale, setTrainerSkillScale] = useState(5);
-  const [copyPlayersFromMain, setCopyPlayersFromMain] = useState(true);
+  const [trainerCopyMode, setTrainerCopyMode] = useState("main");
+  const [copyFromTrainerUsername, setCopyFromTrainerUsername] = useState("");
   const [creatingTrainer, setCreatingTrainer] = useState(false);
   const [createTrainerMessage, setCreateTrainerMessage] = useState("");
   const [createdTrainerInfo, setCreatedTrainerInfo] = useState(null);
@@ -351,26 +367,14 @@ export default function App() {
   const [trainerPasswords, setTrainerPasswords] = useState({});
   const [trainerActionMessage, setTrainerActionMessage] = useState("");
 
+  const [mobileMoveSelection, setMobileMoveSelection] = useState(null);
+
   const [auth, setAuth] = useState(() => {
-    if (typeof window === "undefined") {
-      return {
-        username: "",
-        password: "",
-        loggedIn: false,
-        role: "guest",
-      };
-    }
+    if (typeof window === "undefined") return getDefaultAuth();
 
     try {
       const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-      if (!raw) {
-        return {
-          username: "",
-          password: "",
-          loggedIn: false,
-          role: "guest",
-        };
-      }
+      if (!raw) return getDefaultAuth();
 
       const parsed = JSON.parse(raw);
       return {
@@ -380,12 +384,7 @@ export default function App() {
         role: parsed.role || "guest",
       };
     } catch (error) {
-      return {
-        username: "",
-        password: "",
-        loggedIn: false,
-        role: "guest",
-      };
+      return getDefaultAuth();
     }
   });
 
@@ -408,7 +407,7 @@ export default function App() {
   const skillOptions = useMemo(() => getSkillOptions(skillScale), [skillScale]);
 
   const getAuthPayload = useCallback(() => {
-    return auth?.username && auth?.password
+    return auth?.loggedIn && auth?.username && auth?.password
       ? {
           username: auth.username,
           password: auth.password,
@@ -421,13 +420,20 @@ export default function App() {
     setTeams([]);
     setMatchRoundIndex(0);
     setMatchMode(false);
+    setMobileMoveSelection(null);
     setActiveTab("players");
   }, []);
 
   const loadPlayers = useCallback(
     async (authOverride) => {
+      const payload = authOverride || getAuthPayload();
+
+      if (!payload.username || !payload.password) {
+        setPlayers([]);
+        return;
+      }
+
       try {
-        const payload = authOverride || getAuthPayload();
         const queryString = buildQueryString({
           action: "getPlayers",
           ...payload,
@@ -440,8 +446,18 @@ export default function App() {
         });
 
         const data = await res.json();
-        const nextPlayers = Array.isArray(data) ? data : [];
-        setPlayers(nextPlayers);
+
+        if (Array.isArray(data)) {
+          setPlayers(data);
+          return;
+        }
+
+        if (data?.success === false) {
+          setPlayers([]);
+          return;
+        }
+
+        setPlayers([]);
       } catch (error) {
         console.error("Kunne ikke hente spillere:", error);
         setPlayers([]);
@@ -533,6 +549,7 @@ export default function App() {
 
       if (!data?.success) {
         setLoginMessage(data?.message || "Login failed.");
+        setPlayers([]);
         return;
       }
 
@@ -567,18 +584,14 @@ export default function App() {
     } catch (error) {
       console.error("Kunne ikke logge inn:", error);
       setLoginMessage("Login failed.");
+      setPlayers([]);
     } finally {
       setLoginLoading(false);
     }
   }
 
   async function handleLogout() {
-    setAuth({
-      username: "",
-      password: "",
-      loggedIn: false,
-      role: "guest",
-    });
+    setAuth(getDefaultAuth());
     setLoginUsername("");
     setLoginPassword("");
     setLoginMessage("");
@@ -587,8 +600,8 @@ export default function App() {
     setTrainerActionMessage("");
     setCreateTrainerMessage("");
     setCreatedTrainerInfo(null);
+    setPlayers([]);
     clearRoundState();
-    await loadPlayers({});
   }
 
   async function createTrainerFromApp() {
@@ -597,6 +610,14 @@ export default function App() {
 
     if (!newTrainerUsername || !newTrainerPassword) {
       setCreateTrainerMessage("Skriv inn username og password.");
+      return;
+    }
+
+    if (
+      trainerCopyMode === "trainer" &&
+      !String(copyFromTrainerUsername || "").trim()
+    ) {
+      setCreateTrainerMessage("Velg en trainer å kopiere fra.");
       return;
     }
 
@@ -620,7 +641,9 @@ export default function App() {
           skillView: trainerSkillView,
           skillScale: Number(trainerSkillScale),
           active: 1,
-          copyPlayersFromMain,
+          copyMode: trainerCopyMode,
+          copyFromTrainerUsername:
+            trainerCopyMode === "trainer" ? copyFromTrainerUsername : "",
         }),
       });
 
@@ -637,7 +660,8 @@ export default function App() {
       setTrainerPassword("");
       setTrainerSkillView("numbers");
       setTrainerSkillScale(5);
-      setCopyPlayersFromMain(true);
+      setTrainerCopyMode("main");
+      setCopyFromTrainerUsername("");
       setShowCreateTrainerForm(false);
       await loadTrainerUsers();
     } catch (error) {
@@ -803,8 +827,14 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (!auth.loggedIn) {
+      setPlayers([]);
+      setTrainerUsers([]);
+      return;
+    }
+
     loadPlayers();
-  }, [loadPlayers]);
+  }, [auth.loggedIn, auth.password, auth.username, loadPlayers]);
 
   useEffect(() => {
     if (auth.loggedIn && auth.role === "admin") {
@@ -815,6 +845,12 @@ export default function App() {
   }, [auth, loadTrainerUsers]);
 
   useEffect(() => {
+    if (!auth.loggedIn) {
+      setTeams([]);
+      setActiveTab("players");
+      return;
+    }
+
     const currentRoundKey = getRoundStorageKey(ROUND_CACHE_KEY, auth);
     const savedRoundKey = getRoundStorageKey(ROUND_SAVE_KEY, auth);
 
@@ -962,6 +998,7 @@ export default function App() {
       setMatchRoundIndex(0);
       setActiveTab("teams");
       setMatchMode(false);
+      setMobileMoveSelection(null);
     } catch (error) {
       console.error("Kunne ikke generere lag:", error);
     } finally {
@@ -1005,6 +1042,7 @@ export default function App() {
       setTeams(normalized);
       setMatchRoundIndex(0);
       setMatchMode(false);
+      setMobileMoveSelection(null);
     } catch (error) {
       console.error("Kunne ikke lage ny runde:", error);
     } finally {
@@ -1031,6 +1069,7 @@ export default function App() {
     localStorage.removeItem(getRoundStorageKey(ROUND_SAVE_KEY, auth));
     setTeams([]);
     setSelected([]);
+    setMobileMoveSelection(null);
     setActiveTab("players");
     alert("Saved round cleared on this device.");
   }
@@ -1240,6 +1279,27 @@ export default function App() {
     });
   }
 
+  function handleSelectMobileMove(teamIndex, playerIndex) {
+    const player = teams?.[teamIndex]?.players?.[playerIndex];
+    if (!player || player.locked) return;
+
+    setMobileMoveSelection({
+      fromTeamIndex: teamIndex,
+      playerIndex,
+      name: player.name,
+    });
+  }
+
+  function confirmMobileMove(toTeamIndex) {
+    if (!mobileMoveSelection) return;
+    movePlayerToTeam(
+      mobileMoveSelection.fromTeamIndex,
+      mobileMoveSelection.playerIndex,
+      toTeamIndex
+    );
+    setMobileMoveSelection(null);
+  }
+
   function handleDragStart(teamIndex, playerIndex) {
     if (isMobile) return;
 
@@ -1278,20 +1338,20 @@ export default function App() {
   }, [teams]);
 
   const teamsGridColumns =
-    isMobile ? "1fr 1fr" : teams.length <= 1 ? "1fr" : "1fr 1fr";
+    isMobile ? "1fr" : teams.length <= 1 ? "1fr" : "1fr 1fr";
 
   const balancedScheduleRounds = useMemo(() => {
     const names = teamsWithTotals.map((team) => team.name);
     return buildBalancedMatchRounds(names, courtCount);
   }, [teamsWithTotals, courtCount]);
 
-  const randomScheduleRounds = useMemo(() => {
+  const shuffleScheduleRounds = useMemo(() => {
     const names = teamsWithTotals.map((team) => team.name);
-    return buildRandomMatchRounds(names, courtCount);
+    return buildShuffleMatchRounds(names, courtCount);
   }, [teamsWithTotals, courtCount]);
 
   const activeScheduleRounds =
-    matchMethod === "random" ? randomScheduleRounds : balancedScheduleRounds;
+    matchMethod === "shuffle" ? shuffleScheduleRounds : balancedScheduleRounds;
 
   const currentMatches = useMemo(() => {
     if (!activeScheduleRounds.length) return [];
@@ -1304,6 +1364,12 @@ export default function App() {
 
   const archivedTrainerUsers = useMemo(() => {
     return trainerUsers.filter((trainer) => trainer.role === "archived");
+  }, [trainerUsers]);
+
+  const trainerCopySourceUsers = useMemo(() => {
+    return trainerUsers.filter(
+      (trainer) => trainer.role === "trainer" && trainer.active
+    );
   }, [trainerUsers]);
 
   useEffect(() => {
@@ -1339,7 +1405,7 @@ export default function App() {
               <div style={styles.authSubtitle}>
                 {auth.loggedIn
                   ? `${auth.username} (${auth.role})`
-                  : "Login to view players"}
+                  : "Login required to view players"}
               </div>
             </div>
 
@@ -1462,14 +1528,39 @@ export default function App() {
                   </div>
                 </div>
 
-                <label style={styles.checkboxRow}>
-                  <input
-                    type="checkbox"
-                    checked={copyPlayersFromMain}
-                    onChange={(e) => setCopyPlayersFromMain(e.target.checked)}
-                  />
-                  <span>Copy players from main sheet</span>
-                </label>
+                <div style={styles.settingsCard}>
+                  <span style={styles.settingsLabel}>Copy players</span>
+                  <div style={styles.copyOptionList}>
+                    {TRAINER_COPY_OPTIONS.map((option) => (
+                      <label key={option.value} style={styles.radioRow}>
+                        <input
+                          type="radio"
+                          name="trainer-copy-mode"
+                          checked={trainerCopyMode === option.value}
+                          onChange={() => setTrainerCopyMode(option.value)}
+                        />
+                        <span>{option.label}</span>
+                      </label>
+                    ))}
+                  </div>
+
+                  {trainerCopyMode === "trainer" && (
+                    <select
+                      style={styles.select}
+                      value={copyFromTrainerUsername}
+                      onChange={(e) =>
+                        setCopyFromTrainerUsername(e.target.value)
+                      }
+                    >
+                      <option value="">Select trainer</option>
+                      {trainerCopySourceUsers.map((trainer) => (
+                        <option key={trainer.username} value={trainer.username}>
+                          {trainer.username}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
 
                 <button
                   style={styles.primaryButton}
@@ -1493,6 +1584,9 @@ export default function App() {
                 <div>
                   <strong>Spreadsheet ID:</strong>{" "}
                   {createdTrainerInfo.spreadsheetId}
+                </div>
+                <div>
+                  <strong>Copy mode:</strong> {createdTrainerInfo.copyMode}
                 </div>
                 <div style={styles.createdTrainerLinkWrap}>
                   <a
@@ -1905,7 +1999,7 @@ export default function App() {
                     Clear Saved
                   </button>
 
-                  {skillView === "numbers" && (
+                  {skillView === "numbers" && teams.length > 0 && (
                     <button
                       style={styles.secondaryButton}
                       onClick={() => setShowSkillInTeams((prev) => !prev)}
@@ -1913,11 +2007,22 @@ export default function App() {
                       {showSkillInTeams ? "Hide Skill" : "Show Skill"}
                     </button>
                   )}
+
+                  {isMobile && mobileMoveSelection && (
+                    <button
+                      style={styles.secondaryButton}
+                      onClick={() => setMobileMoveSelection(null)}
+                    >
+                      Cancel Move
+                    </button>
+                  )}
                 </div>
 
                 {isMobile && teams.length > 0 && (
                   <div style={styles.mobileHintCard}>
-                    Mobile move mode: use ← and → to move players between teams.
+                    {mobileMoveSelection
+                      ? `Selected: ${mobileMoveSelection.name}. Tap "Move Here" on a team.`
+                      : "iPhone/Safari move mode: tap Select Move on a player, then tap Move Here on the target team."}
                   </div>
                 )}
 
@@ -2053,7 +2158,27 @@ export default function App() {
                       }}
                     >
                       <div style={styles.teamHeaderRow}>
-                        <div style={styles.teamTitle}>{team.name}</div>
+                        <div>
+                          <div style={styles.teamTitle}>{team.name}</div>
+                          {isMobile && mobileMoveSelection && (
+                            <button
+                              style={{
+                                ...styles.moveHereButton,
+                                opacity:
+                                  mobileMoveSelection.fromTeamIndex === teamIndex
+                                    ? 0.5
+                                    : 1,
+                              }}
+                              onClick={() => confirmMobileMove(teamIndex)}
+                              disabled={
+                                mobileMoveSelection.fromTeamIndex === teamIndex
+                              }
+                            >
+                              Move Here
+                            </button>
+                          )}
+                        </div>
+
                         <div style={styles.teamPointsBadge}>{team.total} pt</div>
                       </div>
 
@@ -2065,11 +2190,19 @@ export default function App() {
                             skillScale
                           );
 
+                          const isSelectedForMove =
+                            mobileMoveSelection &&
+                            mobileMoveSelection.fromTeamIndex === teamIndex &&
+                            mobileMoveSelection.playerIndex === playerIndex;
+
                           return (
                             <div
                               key={`${player.name}-${playerIndex}`}
                               style={{
                                 ...styles.teamPlayerRow,
+                                ...(isSelectedForMove
+                                  ? styles.teamPlayerRowSelected
+                                  : {}),
                                 opacity:
                                   dragging &&
                                   dragging.fromTeamIndex === teamIndex &&
@@ -2114,55 +2247,27 @@ export default function App() {
 
                               <div style={styles.teamPlayerRight}>
                                 {isMobile && (
-                                  <>
-                                    <button
-                                      style={{
-                                        ...styles.arrowMoveButton,
-                                        opacity:
-                                          teamIndex === 0 || player.locked
-                                            ? 0.45
-                                            : 1,
-                                      }}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        movePlayerToTeam(
-                                          teamIndex,
-                                          playerIndex,
-                                          teamIndex - 1
-                                        );
-                                      }}
-                                      disabled={teamIndex === 0 || player.locked}
-                                    >
-                                      ←
-                                    </button>
-
-                                    <button
-                                      style={{
-                                        ...styles.arrowMoveButton,
-                                        opacity:
-                                          teamIndex ===
-                                            teamsWithTotals.length - 1 ||
-                                          player.locked
-                                            ? 0.45
-                                            : 1,
-                                      }}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        movePlayerToTeam(
-                                          teamIndex,
-                                          playerIndex,
-                                          teamIndex + 1
-                                        );
-                                      }}
-                                      disabled={
-                                        teamIndex ===
-                                          teamsWithTotals.length - 1 ||
-                                        player.locked
-                                      }
-                                    >
-                                      →
-                                    </button>
-                                  </>
+                                  <button
+                                    style={{
+                                      ...styles.selectMoveButton,
+                                      ...(isSelectedForMove
+                                        ? styles.selectMoveButtonActive
+                                        : {}),
+                                      opacity: player.locked ? 0.45 : 1,
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleSelectMobileMove(
+                                        teamIndex,
+                                        playerIndex
+                                      );
+                                    }}
+                                    disabled={player.locked}
+                                  >
+                                    {isSelectedForMove
+                                      ? "Selected"
+                                      : "Select Move"}
+                                  </button>
                                 )}
 
                                 {skillView === "colors" && (
@@ -2435,14 +2540,6 @@ const styles = {
     fontWeight: "600",
   },
 
-  checkboxRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    fontSize: "13px",
-    color: "#111827",
-  },
-
   tabBar: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
@@ -2590,6 +2687,19 @@ const styles = {
   smallToggleButtonActive: {
     background: "#111827",
     color: "#fff",
+  },
+
+  copyOptionList: {
+    display: "grid",
+    gap: "8px",
+  },
+
+  radioRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    fontSize: "13px",
+    color: "#111827",
   },
 
   actionRow: {
@@ -2888,6 +2998,18 @@ const styles = {
     whiteSpace: "nowrap",
   },
 
+  moveHereButton: {
+    marginTop: "6px",
+    border: "none",
+    borderRadius: "8px",
+    padding: "6px 10px",
+    background: "#16a34a",
+    color: "#fff",
+    fontSize: "11px",
+    fontWeight: "700",
+    cursor: "pointer",
+  },
+
   teamPlayers: {
     display: "flex",
     flexDirection: "column",
@@ -2905,6 +3027,13 @@ const styles = {
     WebkitUserSelect: "none",
     WebkitTouchCallout: "none",
     touchAction: "manipulation",
+  },
+
+  teamPlayerRowSelected: {
+    background: "#eff6ff",
+    borderRadius: "10px",
+    padding: "8px",
+    borderBottom: "1px solid transparent",
   },
 
   teamPlayerLeft: {
@@ -2941,16 +3070,20 @@ const styles = {
     cursor: "pointer",
   },
 
-  arrowMoveButton: {
+  selectMoveButton: {
     border: "none",
     borderRadius: "8px",
     padding: "5px 8px",
     background: "#dbeafe",
     color: "#1d4ed8",
-    fontSize: "12px",
+    fontSize: "11px",
     fontWeight: "700",
     cursor: "pointer",
-    minWidth: "28px",
+  },
+
+  selectMoveButtonActive: {
+    background: "#1d4ed8",
+    color: "#fff",
   },
 
   lockButtonActive: {
