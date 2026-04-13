@@ -8,9 +8,15 @@ const ROUND_SAVE_KEY = "volleyball-saved-round";
 const AUTH_STORAGE_KEY = "volleyball-auth";
 const SKILL_VIEW_KEY = "volleyball-skill-view";
 const SKILL_SCALE_KEY = "volleyball-skill-scale";
+const TEAM_SKILL_VISIBILITY_KEY = "volleyball-team-skill-visibility";
+const MATCH_METHOD_KEY = "volleyball-match-method";
 const CURRENT_ROUND_TTL_MS = 60 * 60 * 1000;
 const SAVED_ROUND_TTL_MS = 6 * 60 * 60 * 1000;
-const SKILL_SCALE_OPTIONS = [3, 5, 15];
+const SKILL_SCALE_OPTIONS = [3, 5];
+const MATCH_METHOD_OPTIONS = [
+  { value: "balanced", label: "Balanced" },
+  { value: "random", label: "Random" },
+];
 
 function normalizeTeamName(index, existingName) {
   if (existingName && String(existingName).trim()) return existingName;
@@ -109,6 +115,42 @@ function createRoundRobinSchedule(teamNames) {
   return rounds;
 }
 
+function shuffleArray(items) {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function buildRandomMatchRounds(teamNames, requestedCourtCount = 2) {
+  const baseRounds = createRoundRobinSchedule(teamNames);
+  if (!baseRounds.length) return [];
+
+  return baseRounds.map((round) => {
+    const shuffledMatches = shuffleArray(round);
+    const usableCourts = Math.max(
+      1,
+      Math.min(Number(requestedCourtCount) || 2, shuffledMatches.length)
+    );
+
+    return shuffledMatches.map((match, index) => {
+      const reversed = Math.random() < 0.5;
+      const leftTeam = reversed ? match.team2 : match.team1;
+      const rightTeam = reversed ? match.team1 : match.team2;
+
+      return {
+        court: (index % usableCourts) + 1,
+        leftTeam,
+        rightTeam,
+        originalTeam1: match.team1,
+        originalTeam2: match.team2,
+      };
+    });
+  });
+}
+
 function buildBalancedMatchRounds(teamNames, requestedCourtCount = 2) {
   const baseRounds = createRoundRobinSchedule(teamNames);
   if (!baseRounds.length) return [];
@@ -180,14 +222,15 @@ function buildBalancedMatchRounds(teamNames, requestedCourtCount = 2) {
   }
 
   return baseRounds.map((round) => {
+    const shuffledRound = shuffleArray(round);
     const availableCourts = Array.from(
-      { length: Math.min(usableCourts, round.length) },
+      { length: Math.min(usableCourts, shuffledRound.length) },
       (_, i) => i + 1
     );
 
     const roundMatches = [];
 
-    round.forEach((match) => {
+    shuffledRound.forEach((match) => {
       let best = null;
 
       availableCourts.forEach((court) => {
@@ -283,6 +326,16 @@ export default function App() {
   const [matchMode, setMatchMode] = useState(false);
   const [courtCount, setCourtCount] = useState(2);
   const [matchRoundIndex, setMatchRoundIndex] = useState(0);
+  const [matchMethod, setMatchMethod] = useState(() => {
+    if (typeof window === "undefined") return "balanced";
+    return localStorage.getItem(MATCH_METHOD_KEY) || "balanced";
+  });
+
+  const [showSkillInTeams, setShowSkillInTeams] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const raw = localStorage.getItem(TEAM_SKILL_VISIBILITY_KEY);
+    return raw === null ? true : raw === "true";
+  });
 
   const [showCreateTrainerForm, setShowCreateTrainerForm] = useState(false);
   const [trainerUsername, setTrainerUsername] = useState("");
@@ -348,7 +401,8 @@ export default function App() {
 
   const [skillScale, setSkillScale] = useState(() => {
     if (typeof window === "undefined") return 5;
-    return Number(localStorage.getItem(SKILL_SCALE_KEY)) || 5;
+    const saved = Number(localStorage.getItem(SKILL_SCALE_KEY));
+    return [3, 5].includes(saved) ? saved : 5;
   });
 
   const skillOptions = useMemo(() => getSkillOptions(skillScale), [skillScale]);
@@ -482,6 +536,12 @@ export default function App() {
         return;
       }
 
+      const nextSkillScale = [3, 5].includes(
+        Number(data?.profile?.settings?.skillScale)
+      )
+        ? Number(data?.profile?.settings?.skillScale)
+        : 5;
+
       const nextAuth = {
         username,
         password,
@@ -492,7 +552,7 @@ export default function App() {
       clearRoundState();
       setAuth(nextAuth);
       setSkillView(data?.profile?.settings?.skillView || "numbers");
-      setSkillScale(Number(data?.profile?.settings?.skillScale) || 5);
+      setSkillScale(nextSkillScale);
       setLoginUsername("");
       setLoginPassword("");
       setLoginMessage("Login ok.");
@@ -614,7 +674,9 @@ export default function App() {
         return;
       }
 
-      setTrainerActionMessage(active ? "Trainer activated." : "Trainer deactivated.");
+      setTrainerActionMessage(
+        active ? "Trainer activated." : "Trainer deactivated."
+      );
       await loadTrainerUsers();
     } catch (error) {
       console.error("Kunne ikke oppdatere trenerstatus:", error);
@@ -666,9 +728,9 @@ export default function App() {
     }
   }
 
-  async function deleteTrainer(targetUsername) {
+  async function archiveTrainer(targetUsername) {
     const confirmed = window.confirm(
-      `Er du sikker på at du vil slette trainer "${targetUsername}"?`
+      `Er du sikker på at du vil arkivere trainer "${targetUsername}"?`
     );
 
     if (!confirmed) return;
@@ -683,7 +745,7 @@ export default function App() {
           "Content-Type": "text/plain;charset=utf-8",
         },
         body: JSON.stringify({
-          action: "deleteTrainerUser",
+          action: "archiveTrainerUser",
           username: auth.username,
           password: auth.password,
           targetUsername,
@@ -693,15 +755,50 @@ export default function App() {
       const data = await res.json();
 
       if (!data?.success) {
-        setTrainerActionMessage(data?.message || "Kunne ikke slette trainer.");
+        setTrainerActionMessage(data?.message || "Kunne ikke arkivere trainer.");
         return;
       }
 
-      setTrainerActionMessage("Trainer deleted.");
+      setTrainerActionMessage("Trainer archived.");
       await loadTrainerUsers();
     } catch (error) {
-      console.error("Kunne ikke slette trainer:", error);
-      setTrainerActionMessage("Kunne ikke slette trainer.");
+      console.error("Kunne ikke arkivere trainer:", error);
+      setTrainerActionMessage("Kunne ikke arkivere trainer.");
+    }
+  }
+
+  async function restoreTrainer(targetUsername) {
+    try {
+      setTrainerActionMessage("");
+
+      const res = await fetch(`${API}?_ts=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "restoreTrainerUser",
+          username: auth.username,
+          password: auth.password,
+          targetUsername,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data?.success) {
+        setTrainerActionMessage(
+          data?.message || "Kunne ikke gjenopprette trainer."
+        );
+        return;
+      }
+
+      setTrainerActionMessage("Trainer restored.");
+      await loadTrainerUsers();
+    } catch (error) {
+      console.error("Kunne ikke gjenopprette trainer:", error);
+      setTrainerActionMessage("Kunne ikke gjenopprette trainer.");
     }
   }
 
@@ -782,6 +879,22 @@ export default function App() {
 
   useEffect(() => {
     try {
+      localStorage.setItem(TEAM_SKILL_VISIBILITY_KEY, String(showSkillInTeams));
+    } catch (error) {
+      console.error("Kunne ikke lagre team skill visibility:", error);
+    }
+  }, [showSkillInTeams]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(MATCH_METHOD_KEY, matchMethod);
+    } catch (error) {
+      console.error("Kunne ikke lagre match method:", error);
+    }
+  }, [matchMethod]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
     } catch (error) {
       console.error("Kunne ikke lagre auth:", error);
@@ -808,6 +921,12 @@ export default function App() {
       prev.filter((name) => players.some((p) => p.name === name))
     );
   }, [players]);
+
+  useEffect(() => {
+    if (skillView === "colors") {
+      setShowSkillInTeams(false);
+    }
+  }, [skillView]);
 
   function togglePlayer(name) {
     setSelected((prev) =>
@@ -1166,13 +1285,29 @@ export default function App() {
     return buildBalancedMatchRounds(names, courtCount);
   }, [teamsWithTotals, courtCount]);
 
+  const randomScheduleRounds = useMemo(() => {
+    const names = teamsWithTotals.map((team) => team.name);
+    return buildRandomMatchRounds(names, courtCount);
+  }, [teamsWithTotals, courtCount]);
+
+  const activeScheduleRounds =
+    matchMethod === "random" ? randomScheduleRounds : balancedScheduleRounds;
+
   const currentMatches = useMemo(() => {
-    if (!balancedScheduleRounds.length) return [];
-    return balancedScheduleRounds[matchRoundIndex] || [];
-  }, [balancedScheduleRounds, matchRoundIndex]);
+    if (!activeScheduleRounds.length) return [];
+    return activeScheduleRounds[matchRoundIndex] || [];
+  }, [activeScheduleRounds, matchRoundIndex]);
+
+  const visibleTrainerUsers = useMemo(() => {
+    return trainerUsers.filter((trainer) => trainer.role !== "archived");
+  }, [trainerUsers]);
+
+  const archivedTrainerUsers = useMemo(() => {
+    return trainerUsers.filter((trainer) => trainer.role === "archived");
+  }, [trainerUsers]);
 
   useEffect(() => {
-    const totalRounds = balancedScheduleRounds.length;
+    const totalRounds = activeScheduleRounds.length;
     if (!totalRounds) {
       setMatchRoundIndex(0);
       return;
@@ -1181,7 +1316,7 @@ export default function App() {
     if (matchRoundIndex > totalRounds - 1) {
       setMatchRoundIndex(0);
     }
-  }, [balancedScheduleRounds, matchRoundIndex]);
+  }, [activeScheduleRounds, matchRoundIndex]);
 
   const totalPlayers = sortedPlayers.length;
 
@@ -1204,7 +1339,7 @@ export default function App() {
               <div style={styles.authSubtitle}>
                 {auth.loggedIn
                   ? `${auth.username} (${auth.role})`
-                  : "Optional for trainer-specific data"}
+                  : "Login to view players"}
               </div>
             </div>
 
@@ -1356,7 +1491,8 @@ export default function App() {
                   <strong>Username:</strong> {createdTrainerInfo.username}
                 </div>
                 <div>
-                  <strong>Spreadsheet ID:</strong> {createdTrainerInfo.spreadsheetId}
+                  <strong>Spreadsheet ID:</strong>{" "}
+                  {createdTrainerInfo.spreadsheetId}
                 </div>
                 <div style={styles.createdTrainerLinkWrap}>
                   <a
@@ -1374,7 +1510,8 @@ export default function App() {
             <div style={styles.trainerListCard}>
               <div style={styles.authTitle}>Trainer Users</div>
               <div style={styles.authSubtitle}>
-                Admin kan aktivere, deaktivere, resette passord og slette trainers
+                Admin kan aktivere, deaktivere, resette passord og arkivere
+                trainers
               </div>
 
               {trainerActionMessage && (
@@ -1382,17 +1519,19 @@ export default function App() {
               )}
 
               <div style={styles.trainerUsersWrap}>
-                {trainerUsers.length === 0 ? (
-                  <div style={styles.emptyText}>Ingen trainers ennå.</div>
+                {visibleTrainerUsers.length === 0 ? (
+                  <div style={styles.emptyText}>Ingen aktive trainers ennå.</div>
                 ) : (
-                  trainerUsers.map((trainer) => (
+                  visibleTrainerUsers.map((trainer) => (
                     <div key={trainer.username} style={styles.trainerUserRow}>
                       <div style={styles.trainerUserTop}>
                         <div>
-                          <div style={styles.trainerUserName}>{trainer.username}</div>
+                          <div style={styles.trainerUserName}>
+                            {trainer.username}
+                          </div>
                           <div style={styles.trainerUserMeta}>
-                            {trainer.active ? "Active" : "Inactive"} • {trainer.skillView} • 1-
-                            {trainer.skillScale}
+                            {trainer.active ? "Active" : "Inactive"} •{" "}
+                            {trainer.skillView} • 1-{trainer.skillScale}
                           </div>
                         </div>
 
@@ -1436,10 +1575,56 @@ export default function App() {
                         </button>
 
                         <button
-                          style={styles.deleteButton}
-                          onClick={() => deleteTrainer(trainer.username)}
+                          style={styles.archiveButton}
+                          onClick={() => archiveTrainer(trainer.username)}
                         >
-                          Delete
+                          Archive
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div style={styles.trainerListCard}>
+              <div style={styles.authTitle}>Archived Trainers</div>
+              <div style={styles.authSubtitle}>
+                Arkiverte trenere kan gjenopprettes senere
+              </div>
+
+              <div style={styles.trainerUsersWrap}>
+                {archivedTrainerUsers.length === 0 ? (
+                  <div style={styles.emptyText}>Ingen arkiverte trainers.</div>
+                ) : (
+                  archivedTrainerUsers.map((trainer) => (
+                    <div key={trainer.username} style={styles.trainerUserRow}>
+                      <div style={styles.trainerUserTop}>
+                        <div>
+                          <div style={styles.trainerUserName}>
+                            {trainer.username}
+                          </div>
+                          <div style={styles.trainerUserMeta}>
+                            Archived • {trainer.skillView} • 1-{trainer.skillScale}
+                          </div>
+                        </div>
+
+                        <a
+                          href={trainer.spreadsheetUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={styles.link}
+                        >
+                          Open sheet
+                        </a>
+                      </div>
+
+                      <div style={styles.trainerActionsRow}>
+                        <button
+                          style={styles.primaryButton}
+                          onClick={() => restoreTrainer(trainer.username)}
+                        >
+                          Restore
                         </button>
                       </div>
                     </div>
@@ -1474,478 +1659,560 @@ export default function App() {
 
         {activeTab === "players" && (
           <div style={styles.section}>
-            <div style={styles.toolbarTop}>
-              <div style={styles.teamCountCard}>
-                <span style={styles.teamCountLabel}>Number of Teams</span>
-
-                <div style={styles.teamCountRow}>
-                  <div style={styles.teamCountInline}>
-                    <button
-                      style={styles.countButton}
-                      onClick={() => setTeamCount((prev) => Math.max(2, prev - 1))}
-                    >
-                      −
-                    </button>
-
-                    <div style={styles.countValue}>{teamCount}</div>
-
-                    <button
-                      style={styles.countButton}
-                      onClick={() => setTeamCount((prev) => prev + 1)}
-                    >
-                      +
-                    </button>
-                  </div>
-
-                  <button
-                    style={{
-                      ...styles.generateButtonInline,
-                      opacity: selected.length < 2 || loading ? 0.6 : 1,
-                    }}
-                    onClick={generateTeams}
-                    disabled={selected.length < 2 || loading}
-                  >
-                    {loading ? "Generating..." : "Generate Teams"}
-                  </button>
-                </div>
+            {!auth.loggedIn ? (
+              <div style={styles.lockedCard}>
+                Logg inn som admin eller trener for å se spillerlisten.
               </div>
+            ) : (
+              <>
+                <div style={styles.toolbarTop}>
+                  <div style={styles.teamCountCard}>
+                    <span style={styles.teamCountLabel}>Number of Teams</span>
 
-              <div style={styles.selectedBadge}>
-                Selected: {selected.length} / {totalPlayers}
-              </div>
-            </div>
+                    <div style={styles.teamCountRow}>
+                      <div style={styles.teamCountInline}>
+                        <button
+                          style={styles.countButton}
+                          onClick={() =>
+                            setTeamCount((prev) => Math.max(2, prev - 1))
+                          }
+                        >
+                          −
+                        </button>
 
-            <div style={styles.settingsRow}>
-              <div style={styles.settingsCard}>
-                <span style={styles.settingsLabel}>Skill View</span>
-                <div style={styles.settingsToggleRow}>
-                  <button
-                    style={{
-                      ...styles.smallToggleButton,
-                      ...(skillView === "numbers"
-                        ? styles.smallToggleButtonActive
-                        : {}),
-                    }}
-                    onClick={() => setSkillView("numbers")}
-                  >
-                    Numbers
-                  </button>
-                  <button
-                    style={{
-                      ...styles.smallToggleButton,
-                      ...(skillView === "colors"
-                        ? styles.smallToggleButtonActive
-                        : {}),
-                    }}
-                    onClick={() => setSkillView("colors")}
-                  >
-                    Colors
-                  </button>
-                </div>
-              </div>
+                        <div style={styles.countValue}>{teamCount}</div>
 
-              <div style={styles.settingsCard}>
-                <span style={styles.settingsLabel}>Skill Scale</span>
-                <div style={styles.settingsToggleRow}>
-                  {SKILL_SCALE_OPTIONS.map((scale) => (
-                    <button
-                      key={scale}
-                      style={{
-                        ...styles.smallToggleButton,
-                        ...(skillScale === scale
-                          ? styles.smallToggleButtonActive
-                          : {}),
-                      }}
-                      onClick={() => setSkillScale(scale)}
-                    >
-                      1-{scale}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div style={styles.actionRow}>
-              <button
-                style={styles.secondaryButton}
-                onClick={() => setShowAddForm((prev) => !prev)}
-              >
-                {showAddForm ? "Close" : "+ Add Player"}
-              </button>
-            </div>
-
-            {showAddForm && (
-              <div style={styles.formCard}>
-                <input
-                  style={styles.input}
-                  value={newPlayerName}
-                  onChange={(e) => setNewPlayerName(e.target.value)}
-                  placeholder="Player name"
-                />
-
-                <select
-                  style={styles.select}
-                  value={newPlayerSkill}
-                  onChange={(e) => setNewPlayerSkill(Number(e.target.value))}
-                >
-                  {skillOptions.map((skill) => (
-                    <option key={skill} value={skill}>
-                      {skill}
-                    </option>
-                  ))}
-                </select>
-
-                <button
-                  style={styles.primaryButton}
-                  onClick={addPlayer}
-                  disabled={savingPlayer}
-                >
-                  {savingPlayer ? "Saving..." : "Save Player"}
-                </button>
-              </div>
-            )}
-
-            <div style={styles.playersGrid}>
-              {sortedPlayers.map((p) => {
-                const isSelected = selected.includes(p.name);
-                const skillStyle = getSkillStyle(p.skill, skillView, skillScale);
-
-                return (
-                  <button
-                    key={p.name}
-                    style={{
-                      ...styles.playerCardCompact,
-                      ...(isSelected ? styles.playerCardSelected : {}),
-                    }}
-                    onClick={() => togglePlayer(p.name)}
-                  >
-                    <div style={styles.playerCompactTop}>
-                      <div style={styles.playerNameCompact}>{p.name}</div>
-                      <div
-                        style={{
-                          ...styles.skillMini,
-                          background: skillStyle.background,
-                          color: skillStyle.color,
-                        }}
-                      >
-                        {skillStyle.text}
+                        <button
+                          style={styles.countButton}
+                          onClick={() => setTeamCount((prev) => prev + 1)}
+                        >
+                          +
+                        </button>
                       </div>
-                    </div>
-
-                    <div style={styles.playerCompactBottom}>
-                      <span style={styles.checkTiny}>
-                        {isSelected ? "Selected" : "Tap"}
-                      </span>
 
                       <button
-                        style={styles.editMiniButton}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openEditPlayer(p);
+                        style={{
+                          ...styles.generateButtonInline,
+                          opacity: selected.length < 2 || loading ? 0.6 : 1,
                         }}
+                        onClick={generateTeams}
+                        disabled={selected.length < 2 || loading}
                       >
-                        Edit
+                        {loading ? "Generating..." : "Generate Teams"}
                       </button>
                     </div>
+                  </div>
+
+                  <div style={styles.selectedBadge}>
+                    Selected: {selected.length} / {totalPlayers}
+                  </div>
+                </div>
+
+                <div style={styles.settingsRow}>
+                  <div style={styles.settingsCard}>
+                    <span style={styles.settingsLabel}>Skill View</span>
+                    <div style={styles.settingsToggleRow}>
+                      <button
+                        style={{
+                          ...styles.smallToggleButton,
+                          ...(skillView === "numbers"
+                            ? styles.smallToggleButtonActive
+                            : {}),
+                        }}
+                        onClick={() => setSkillView("numbers")}
+                      >
+                        Numbers
+                      </button>
+                      <button
+                        style={{
+                          ...styles.smallToggleButton,
+                          ...(skillView === "colors"
+                            ? styles.smallToggleButtonActive
+                            : {}),
+                        }}
+                        onClick={() => setSkillView("colors")}
+                      >
+                        Colors
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={styles.settingsCard}>
+                    <span style={styles.settingsLabel}>Skill Scale</span>
+                    <div style={styles.settingsToggleRow}>
+                      {SKILL_SCALE_OPTIONS.map((scale) => (
+                        <button
+                          key={scale}
+                          style={{
+                            ...styles.smallToggleButton,
+                            ...(skillScale === scale
+                              ? styles.smallToggleButtonActive
+                              : {}),
+                          }}
+                          onClick={() => setSkillScale(scale)}
+                        >
+                          1-{scale}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={styles.actionRow}>
+                  <button
+                    style={styles.secondaryButton}
+                    onClick={() => setShowAddForm((prev) => !prev)}
+                  >
+                    {showAddForm ? "Close" : "+ Add Player"}
                   </button>
-                );
-              })}
-            </div>
+                </div>
+
+                {showAddForm && (
+                  <div style={styles.formCard}>
+                    <input
+                      style={styles.input}
+                      value={newPlayerName}
+                      onChange={(e) => setNewPlayerName(e.target.value)}
+                      placeholder="Player name"
+                    />
+
+                    <select
+                      style={styles.select}
+                      value={newPlayerSkill}
+                      onChange={(e) => setNewPlayerSkill(Number(e.target.value))}
+                    >
+                      {skillOptions.map((skill) => (
+                        <option key={skill} value={skill}>
+                          {skill}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      style={styles.primaryButton}
+                      onClick={addPlayer}
+                      disabled={savingPlayer}
+                    >
+                      {savingPlayer ? "Saving..." : "Save Player"}
+                    </button>
+                  </div>
+                )}
+
+                <div style={styles.playersGrid}>
+                  {sortedPlayers.map((p) => {
+                    const isSelected = selected.includes(p.name);
+                    const skillStyle = getSkillStyle(
+                      p.skill,
+                      skillView,
+                      skillScale
+                    );
+
+                    return (
+                      <button
+                        key={p.name}
+                        style={{
+                          ...styles.playerCardCompact,
+                          ...(isSelected ? styles.playerCardSelected : {}),
+                        }}
+                        onClick={() => togglePlayer(p.name)}
+                      >
+                        <div style={styles.playerCompactTop}>
+                          <div style={styles.playerNameCompact}>{p.name}</div>
+                          <div
+                            style={{
+                              ...styles.skillMini,
+                              background: skillStyle.background,
+                              color: skillStyle.color,
+                            }}
+                          >
+                            {skillStyle.text}
+                          </div>
+                        </div>
+
+                        <div style={styles.playerCompactBottom}>
+                          <span style={styles.checkTiny}>
+                            {isSelected ? "Selected" : "Tap"}
+                          </span>
+
+                          <button
+                            style={styles.editMiniButton}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEditPlayer(p);
+                            }}
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </div>
         )}
 
         {activeTab === "teams" && (
           <div style={styles.section}>
-            <div style={styles.topTeamActions}>
-              <button
-                style={{
-                  ...styles.primaryButton,
-                  opacity: teams.length === 0 || loading ? 0.6 : 1,
-                }}
-                onClick={generateNewRound}
-                disabled={teams.length === 0 || loading}
-              >
-                {loading ? "Generating..." : "New Round"}
-              </button>
-
-              <button
-                style={{
-                  ...styles.secondaryButton,
-                  opacity: teams.length === 0 ? 0.6 : 1,
-                }}
-                onClick={saveRoundForSixHours}
-                disabled={teams.length === 0}
-              >
-                Save Round
-              </button>
-
-              <button
-                style={{
-                  ...styles.secondaryButton,
-                  opacity: teams.length >= 3 ? 1 : 0.6,
-                }}
-                onClick={() => {
-                  setMatchMode((prev) => !prev);
-                  setMatchRoundIndex(0);
-                }}
-                disabled={teams.length < 3}
-              >
-                {matchMode ? "Hide Match Mode" : "Match Mode"}
-              </button>
-
-              <button style={styles.secondaryButton} onClick={clearStoredRounds}>
-                Clear Saved
-              </button>
-            </div>
-
-            {isMobile && teams.length > 0 && (
-              <div style={styles.mobileHintCard}>
-                Mobile move mode: use ← and → to move players between teams.
+            {!auth.loggedIn ? (
+              <div style={styles.lockedCard}>
+                Logg inn som admin eller trener for å bruke Teams.
               </div>
-            )}
+            ) : (
+              <>
+                <div style={styles.topTeamActions}>
+                  <button
+                    style={{
+                      ...styles.primaryButton,
+                      opacity: teams.length === 0 || loading ? 0.6 : 1,
+                    }}
+                    onClick={generateNewRound}
+                    disabled={teams.length === 0 || loading}
+                  >
+                    {loading ? "Generating..." : "New Round"}
+                  </button>
 
-            {matchMode && teams.length >= 3 && (
-              <div style={styles.matchModeCard}>
-                <div style={styles.matchModeHeader}>
-                  <div>
-                    <div style={styles.matchModeTitle}>Match Mode</div>
-                    <div style={styles.matchModeSubtitle}>
-                      Round {balancedScheduleRounds.length ? matchRoundIndex + 1 : 0} of{" "}
-                      {balancedScheduleRounds.length}
-                    </div>
-                  </div>
+                  <button
+                    style={{
+                      ...styles.secondaryButton,
+                      opacity: teams.length === 0 ? 0.6 : 1,
+                    }}
+                    onClick={saveRoundForSixHours}
+                    disabled={teams.length === 0}
+                  >
+                    Save Round
+                  </button>
 
-                  <div style={styles.courtWrap}>
-                    <span style={styles.courtLabel}>Courts</span>
-                    <select
-                      style={styles.smallSelect}
-                      value={courtCount}
-                      onChange={(e) => {
-                        setCourtCount(Number(e.target.value));
-                        setMatchRoundIndex(0);
-                      }}
-                    >
-                      <option value={1}>1</option>
-                      <option value={2}>2</option>
-                      <option value={3}>3</option>
-                    </select>
-                  </div>
-                </div>
+                  <button
+                    style={{
+                      ...styles.secondaryButton,
+                      opacity: teams.length >= 3 ? 1 : 0.6,
+                    }}
+                    onClick={() => {
+                      setMatchMode((prev) => !prev);
+                      setMatchRoundIndex(0);
+                    }}
+                    disabled={teams.length < 3}
+                  >
+                    {matchMode ? "Hide Match Mode" : "Match Mode"}
+                  </button>
 
-                <div style={styles.matchActions}>
                   <button
                     style={styles.secondaryButton}
-                    onClick={() =>
-                      setMatchRoundIndex((prev) =>
-                        prev === 0
-                          ? Math.max(balancedScheduleRounds.length - 1, 0)
-                          : prev - 1
-                      )
-                    }
-                    disabled={!balancedScheduleRounds.length}
+                    onClick={clearStoredRounds}
                   >
-                    Prev Round
+                    Clear Saved
                   </button>
 
-                  <button
-                    style={styles.primaryButton}
-                    onClick={() =>
-                      setMatchRoundIndex((prev) =>
-                        !balancedScheduleRounds.length
-                          ? 0
-                          : (prev + 1) % balancedScheduleRounds.length
-                      )
-                    }
-                    disabled={!balancedScheduleRounds.length}
-                  >
-                    Next Round
-                  </button>
-                </div>
-
-                <div style={styles.matchGrid}>
-                  {currentMatches.length > 0 ? (
-                    currentMatches.map((match, index) => (
-                      <div
-                        key={`${match.leftTeam}-${match.rightTeam}-${match.court}-${index}`}
-                        style={styles.matchCard}
-                      >
-                        <div style={styles.matchCourt}>Court {match.court}</div>
-                        <div style={styles.matchTeams}>
-                          <span>{match.leftTeam}</span>
-                          <span style={styles.vsText}>vs</span>
-                          <span>{match.rightTeam}</span>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div style={styles.noMatchesText}>No matches available.</div>
+                  {skillView === "numbers" && (
+                    <button
+                      style={styles.secondaryButton}
+                      onClick={() => setShowSkillInTeams((prev) => !prev)}
+                    >
+                      {showSkillInTeams ? "Hide Skill" : "Show Skill"}
+                    </button>
                   )}
                 </div>
-              </div>
-            )}
 
-            <div
-              style={{
-                ...styles.teamsGrid,
-                gridTemplateColumns: teamsGridColumns,
-              }}
-            >
-              {teamsWithTotals.map((team, teamIndex) => (
+                {isMobile && teams.length > 0 && (
+                  <div style={styles.mobileHintCard}>
+                    Mobile move mode: use ← and → to move players between teams.
+                  </div>
+                )}
+
+                {matchMode && teams.length >= 3 && (
+                  <div style={styles.matchModeCard}>
+                    <div style={styles.matchModeHeader}>
+                      <div>
+                        <div style={styles.matchModeTitle}>Match Mode</div>
+                        <div style={styles.matchModeSubtitle}>
+                          Round {activeScheduleRounds.length ? matchRoundIndex + 1 : 0} of{" "}
+                          {activeScheduleRounds.length}
+                        </div>
+                      </div>
+
+                      <div style={styles.matchControlsWrap}>
+                        <div style={styles.courtWrap}>
+                          <span style={styles.courtLabel}>Method</span>
+                          <select
+                            style={styles.smallSelect}
+                            value={matchMethod}
+                            onChange={(e) => {
+                              setMatchMethod(e.target.value);
+                              setMatchRoundIndex(0);
+                            }}
+                          >
+                            {MATCH_METHOD_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div style={styles.courtWrap}>
+                          <span style={styles.courtLabel}>Courts</span>
+                          <select
+                            style={styles.smallSelect}
+                            value={courtCount}
+                            onChange={(e) => {
+                              setCourtCount(Number(e.target.value));
+                              setMatchRoundIndex(0);
+                            }}
+                          >
+                            <option value={1}>1</option>
+                            <option value={2}>2</option>
+                            <option value={3}>3</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={styles.matchActions}>
+                      <button
+                        style={styles.secondaryButton}
+                        onClick={() =>
+                          setMatchRoundIndex((prev) =>
+                            prev === 0
+                              ? Math.max(activeScheduleRounds.length - 1, 0)
+                              : prev - 1
+                          )
+                        }
+                        disabled={!activeScheduleRounds.length}
+                      >
+                        Prev Round
+                      </button>
+
+                      <button
+                        style={styles.primaryButton}
+                        onClick={() =>
+                          setMatchRoundIndex((prev) =>
+                            !activeScheduleRounds.length
+                              ? 0
+                              : (prev + 1) % activeScheduleRounds.length
+                          )
+                        }
+                        disabled={!activeScheduleRounds.length}
+                      >
+                        Next Round
+                      </button>
+                    </div>
+
+                    <div style={styles.matchGrid}>
+                      {currentMatches.length > 0 ? (
+                        currentMatches.map((match, index) => (
+                          <div
+                            key={`${match.leftTeam}-${match.rightTeam}-${match.court}-${index}`}
+                            style={styles.matchCard}
+                          >
+                            <div style={styles.matchCourt}>
+                              Court {match.court}
+                            </div>
+                            <div style={styles.matchTeams}>
+                              <span>{match.leftTeam}</span>
+                              <span style={styles.vsText}>vs</span>
+                              <span>{match.rightTeam}</span>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={styles.noMatchesText}>
+                          No matches available.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div
-                  key={teamIndex}
-                  style={styles.teamCard}
-                  onDragOver={(e) => {
-                    if (isMobile) return;
-                    e.preventDefault();
-                  }}
-                  onDrop={(e) => {
-                    if (isMobile) return;
-                    e.preventDefault();
-                    if (!dragging) return;
-                    movePlayerByDrag(
-                      dragging.fromTeamIndex,
-                      dragging.playerIndex,
-                      teamIndex,
-                      null
-                    );
-                    resetDragState();
+                  style={{
+                    ...styles.teamsGrid,
+                    gridTemplateColumns: teamsGridColumns,
                   }}
                 >
-                  <div style={styles.teamHeaderRow}>
-                    <div style={styles.teamTitle}>{team.name}</div>
-                    <div style={styles.teamPointsBadge}>{team.total} pt</div>
-                  </div>
+                  {teamsWithTotals.map((team, teamIndex) => (
+                    <div
+                      key={teamIndex}
+                      style={styles.teamCard}
+                      onDragOver={(e) => {
+                        if (isMobile) return;
+                        e.preventDefault();
+                      }}
+                      onDrop={(e) => {
+                        if (isMobile) return;
+                        e.preventDefault();
+                        if (!dragging) return;
+                        movePlayerByDrag(
+                          dragging.fromTeamIndex,
+                          dragging.playerIndex,
+                          teamIndex,
+                          null
+                        );
+                        resetDragState();
+                      }}
+                    >
+                      <div style={styles.teamHeaderRow}>
+                        <div style={styles.teamTitle}>{team.name}</div>
+                        <div style={styles.teamPointsBadge}>{team.total} pt</div>
+                      </div>
 
-                  <div style={styles.teamPlayers}>
-                    {team.players.map((player, playerIndex) => {
-                      const skillStyle = getSkillStyle(
-                        player.skill,
-                        skillView,
-                        skillScale
-                      );
+                      <div style={styles.teamPlayers}>
+                        {team.players.map((player, playerIndex) => {
+                          const skillStyle = getSkillStyle(
+                            player.skill,
+                            skillView,
+                            skillScale
+                          );
 
-                      return (
-                        <div
-                          key={`${player.name}-${playerIndex}`}
-                          style={{
-                            ...styles.teamPlayerRow,
-                            opacity:
-                              dragging &&
-                              dragging.fromTeamIndex === teamIndex &&
-                              dragging.playerIndex === playerIndex
-                                ? 0.45
-                                : 1,
-                            cursor:
-                              isMobile || player.locked ? "default" : "grab",
-                          }}
-                          draggable={!isMobile && !player.locked}
-                          onDragStart={() =>
-                            handleDragStart(teamIndex, playerIndex)
-                          }
-                          onDragEnd={resetDragState}
-                          onDragOver={(e) => {
-                            if (isMobile) return;
-                            e.preventDefault();
-                          }}
-                          onDrop={(e) => {
-                            if (isMobile) return;
-                            e.preventDefault();
-                            e.stopPropagation();
-
-                            if (!dragging) return;
-
-                            movePlayerByDrag(
-                              dragging.fromTeamIndex,
-                              dragging.playerIndex,
-                              teamIndex,
-                              playerIndex
-                            );
-                            resetDragState();
-                          }}
-                        >
-                          <div style={styles.teamPlayerLeft}>
-                            <div style={styles.teamPlayerName}>{player.name}</div>
-                          </div>
-
-                          <div style={styles.teamPlayerRight}>
-                            {isMobile && (
-                              <>
-                                <button
-                                  style={{
-                                    ...styles.arrowMoveButton,
-                                    opacity:
-                                      teamIndex === 0 || player.locked ? 0.45 : 1,
-                                  }}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    movePlayerToTeam(
-                                      teamIndex,
-                                      playerIndex,
-                                      teamIndex - 1
-                                    );
-                                  }}
-                                  disabled={teamIndex === 0 || player.locked}
-                                >
-                                  ←
-                                </button>
-
-                                <button
-                                  style={{
-                                    ...styles.arrowMoveButton,
-                                    opacity:
-                                      teamIndex === teamsWithTotals.length - 1 ||
-                                      player.locked
-                                        ? 0.45
-                                        : 1,
-                                  }}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    movePlayerToTeam(
-                                      teamIndex,
-                                      playerIndex,
-                                      teamIndex + 1
-                                    );
-                                  }}
-                                  disabled={
-                                    teamIndex === teamsWithTotals.length - 1 ||
-                                    player.locked
-                                  }
-                                >
-                                  →
-                                </button>
-                              </>
-                            )}
-
-                            <span
+                          return (
+                            <div
+                              key={`${player.name}-${playerIndex}`}
                               style={{
-                                ...styles.skillMini,
-                                background: skillStyle.background,
-                                color: skillStyle.color,
+                                ...styles.teamPlayerRow,
+                                opacity:
+                                  dragging &&
+                                  dragging.fromTeamIndex === teamIndex &&
+                                  dragging.playerIndex === playerIndex
+                                    ? 0.45
+                                    : 1,
+                                cursor:
+                                  isMobile || player.locked
+                                    ? "default"
+                                    : "grab",
                               }}
-                            >
-                              {skillStyle.text}
-                            </span>
-
-                            <button
-                              style={{
-                                ...styles.inlineActionButton,
-                                ...(player.locked ? styles.lockButtonActive : {}),
+                              draggable={!isMobile && !player.locked}
+                              onDragStart={() =>
+                                handleDragStart(teamIndex, playerIndex)
+                              }
+                              onDragEnd={resetDragState}
+                              onDragOver={(e) => {
+                                if (isMobile) return;
+                                e.preventDefault();
                               }}
-                              onClick={(e) => {
+                              onDrop={(e) => {
+                                if (isMobile) return;
+                                e.preventDefault();
                                 e.stopPropagation();
-                                toggleLock(teamIndex, playerIndex);
+
+                                if (!dragging) return;
+
+                                movePlayerByDrag(
+                                  dragging.fromTeamIndex,
+                                  dragging.playerIndex,
+                                  teamIndex,
+                                  playerIndex
+                                );
+                                resetDragState();
                               }}
                             >
-                              {player.locked ? "Unlock" : "Lock"}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                              <div style={styles.teamPlayerLeft}>
+                                <div style={styles.teamPlayerName}>
+                                  {player.name}
+                                </div>
+                              </div>
+
+                              <div style={styles.teamPlayerRight}>
+                                {isMobile && (
+                                  <>
+                                    <button
+                                      style={{
+                                        ...styles.arrowMoveButton,
+                                        opacity:
+                                          teamIndex === 0 || player.locked
+                                            ? 0.45
+                                            : 1,
+                                      }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        movePlayerToTeam(
+                                          teamIndex,
+                                          playerIndex,
+                                          teamIndex - 1
+                                        );
+                                      }}
+                                      disabled={teamIndex === 0 || player.locked}
+                                    >
+                                      ←
+                                    </button>
+
+                                    <button
+                                      style={{
+                                        ...styles.arrowMoveButton,
+                                        opacity:
+                                          teamIndex ===
+                                            teamsWithTotals.length - 1 ||
+                                          player.locked
+                                            ? 0.45
+                                            : 1,
+                                      }}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        movePlayerToTeam(
+                                          teamIndex,
+                                          playerIndex,
+                                          teamIndex + 1
+                                        );
+                                      }}
+                                      disabled={
+                                        teamIndex ===
+                                          teamsWithTotals.length - 1 ||
+                                        player.locked
+                                      }
+                                    >
+                                      →
+                                    </button>
+                                  </>
+                                )}
+
+                                {skillView === "colors" && (
+                                  <span
+                                    style={{
+                                      ...styles.skillMini,
+                                      background: skillStyle.background,
+                                      color: skillStyle.color,
+                                    }}
+                                  >
+                                    {skillStyle.text}
+                                  </span>
+                                )}
+
+                                {skillView === "numbers" && showSkillInTeams && (
+                                  <span
+                                    style={{
+                                      ...styles.skillMini,
+                                      background: skillStyle.background,
+                                      color: skillStyle.color,
+                                    }}
+                                  >
+                                    {skillStyle.text}
+                                  </span>
+                                )}
+
+                                <button
+                                  style={{
+                                    ...styles.inlineActionButton,
+                                    ...(player.locked
+                                      ? styles.lockButtonActive
+                                      : {}),
+                                  }}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleLock(teamIndex, playerIndex);
+                                  }}
+                                >
+                                  {player.locked ? "Unlock" : "Lock"}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -2100,11 +2367,11 @@ const styles = {
     boxSizing: "border-box",
   },
 
-  deleteButton: {
+  archiveButton: {
     border: "none",
     borderRadius: "12px",
     padding: "12px 14px",
-    background: "#dc2626",
+    background: "#f97316",
     color: "#fff",
     fontWeight: "600",
     cursor: "pointer",
@@ -2203,6 +2470,16 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: "12px",
+  },
+
+  lockedCard: {
+    background: "#fff",
+    borderRadius: "14px",
+    padding: "18px",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    fontSize: "14px",
+    fontWeight: "600",
+    color: "#111827",
   },
 
   toolbarTop: {
@@ -2495,6 +2772,12 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "center",
     gap: "10px",
+    flexWrap: "wrap",
+  },
+
+  matchControlsWrap: {
+    display: "flex",
+    gap: "8px",
     flexWrap: "wrap",
   },
 
