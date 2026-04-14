@@ -25,10 +25,6 @@ const MATCH_METHOD_OPTIONS = [
   { value: "balanced", label: "Pattern" },
   { value: "shuffle", label: "Shuffle" },
 ];
-const PLAYER_SORT_OPTIONS = [
-  { value: "name", label: "A-Z" },
-  { value: "recent", label: "Recent" },
-];
 
 function normalizeTeamName(index, existingName) {
   if (existingName && String(existingName).trim()) return existingName;
@@ -316,6 +312,8 @@ return raw === null ? true : raw === "true";
 
   const [showArchivedPlayers, setShowArchivedPlayers] = useState(false);
   const [playerActionMessage, setPlayerActionMessage] = useState("");
+
+const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
 
   const [showCreateTrainerForm, setShowCreateTrainerForm] = useState(false);
   const [trainerUsername, setTrainerUsername] = useState("");
@@ -1927,70 +1925,35 @@ name: player.name,
                 <div style={styles.settingsCompactRow}>
                   <div style={styles.compactSettingsCard}>
                     <span style={styles.settingsLabel}>Skill View</span>
-                    <div style={styles.settingsToggleRow}>
-                      <button
-                        style={{
-                          ...styles.smallToggleButton,
-                          ...(skillView === "numbers"
-                            ? styles.smallToggleButtonActive
-                            : {}),
-                        }}
-                        onClick={() => setSkillView("numbers")}
-                      >
-                        Numbers
-                      </button>
-                      <button
-                        style={{
-                          ...styles.smallToggleButton,
-                          ...(skillView === "colors"
-                            ? styles.smallToggleButtonActive
-                            : {}),
-                        }}
-                        onClick={() => setSkillView("colors")}
-                      >
-                        Colors
-                      </button>
-                    </div>
+                    <button
+                      style={styles.smallToggleButtonActive}
+                      onClick={() => setSkillView((prev) => (prev === "numbers" ? "colors" : "numbers"))}
+                      title="Toggle Skill View"
+                    >
+                      {skillView === "numbers" ? "123" : "🎨"}
+                    </button>
                   </div>
 
                   <div style={styles.compactSettingsCard}>
                     <span style={styles.settingsLabel}>Skill Scale</span>
-                    <div style={styles.settingsToggleRow}>
-                      {SKILL_SCALE_OPTIONS.map((scale) => (
-                        <button
-                          key={scale}
-                          style={{
-                            ...styles.smallToggleButton,
-                            ...(skillScale === scale
-                              ? styles.smallToggleButtonActive
-                              : {}),
-                          }}
-                          onClick={() => setSkillScale(scale)}
-                        >
-                          1-{scale}
-                        </button>
-                      ))}
-                    </div>
+                    <button
+                      style={styles.smallToggleButtonActive}
+                      onClick={() => setSkillScale((prev) => (prev === 3 ? 5 : 3))}
+                      title="Toggle Skill Scale"
+                    >
+                      {skillScale}
+                    </button>
                   </div>
 
                   <div style={styles.compactSettingsCard}>
                     <span style={styles.settingsLabel}>Sort</span>
-                    <div style={styles.settingsToggleRow}>
-                      {PLAYER_SORT_OPTIONS.map((option) => (
-                        <button
-                          key={option.value}
-                          style={{
-                            ...styles.smallToggleButton,
-                            ...(playerSortMode === option.value
-                              ? styles.smallToggleButtonActive
-                              : {}),
-                          }}
-                          onClick={() => setPlayerSortMode(option.value)}
-                        >
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
+                    <button
+                      style={styles.smallToggleButtonActive}
+                      onClick={() => setPlayerSortMode((prev) => (prev === "name" ? "recent" : "name"))}
+                      title="Toggle Sort"
+                    >
+                      {playerSortMode === "name" ? "A-Z" : "↓"}
+                    </button>
                   </div>
                 </div>
 
@@ -2009,6 +1972,13 @@ name: player.name,
                     {showArchivedPlayers
                       ? "Hide Archived"
                       : `Archived (${archivedPlayers.length})`}
+                  </button>
+
+                  <button
+                    style={styles.secondaryButtonCompact}
+                    onClick={() => setShowPlayerManageActions((prev) => !prev)}
+                  >
+                    {showPlayerManageActions ? "Done" : "Manage"}
                   </button>
                 </div>
 
@@ -2063,7 +2033,39 @@ name: player.name,
                       skillScale
                     );
 
-                    return (
+                    return !showPlayerManageActions ? (
+                      <div
+                        key={p.name}
+                        style={{
+                          ...styles.playerCardListCompact,
+                          ...(isSelected ? styles.playerCardListCompactSelected : {}),
+                        }}
+                        onClick={() => togglePlayer(p.name)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            togglePlayer(p.name);
+                          }
+                        }}
+                      >
+                        <div style={styles.playerListCompactName}>
+                          {displayPlayerName(p)}
+                        </div>
+                        <div style={styles.playerListCompactRight}>
+                          <div
+                            style={{
+                              ...styles.skillMini,
+                              background: skillStyle.background,
+                              color: skillStyle.color,
+                            }}
+                          >
+                            {skillStyle.text}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
                       <div
                         key={p.name}
                         style={{
@@ -2096,10 +2098,6 @@ name: player.name,
                         </div>
 
                         <div style={styles.playerCompactBottom}>
-                          <span style={styles.checkTiny}>
-                            {isSelected ? "Selected" : "Tap"}
-                          </span>
-
                           <div style={styles.playerCardActions}>
                             <button
                               style={styles.editMiniButton}
@@ -2629,10 +2627,10 @@ const styles = {
   authCard: {
     background: "#fff",
     borderRadius: "14px",
-    padding: "8px",
+    padding: "7px 8px",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
     display: "grid",
-    gap: "6px",
+    gap: "5px",
     marginBottom: "8px",
   },
 
@@ -2886,7 +2884,7 @@ const styles = {
   settingsCompactRow: {
     display: "grid",
     gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-    gap: "8px",
+    gap: "6px",
   },
 
   settingsCard: {
@@ -2901,16 +2899,16 @@ const styles = {
 
   compactSettingsCard: {
     background: "#fff",
-    borderRadius: "14px",
-    padding: "10px 10px",
+    borderRadius: "12px",
+    padding: "8px",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
     display: "grid",
-    gap: "8px",
+    gap: "6px",
     minWidth: 0,
   },
 
   settingsLabel: {
-    fontSize: "12px",
+    fontSize: "11px",
     color: "#6b7280",
     fontWeight: "600",
   },
@@ -2923,8 +2921,8 @@ const styles = {
 
   smallToggleButton: {
     border: "none",
-    borderRadius: "10px",
-    padding: "7px 9px",
+    borderRadius: "9px",
+    padding: "6px 8px",
     background: "#e5e7eb",
     color: "#111827",
     fontSize: "11px",
@@ -2952,7 +2950,7 @@ const styles = {
 
   actionRow: {
     display: "flex",
-    gap: "8px",
+    gap: "6px",
     flexWrap: "wrap",
   },
 
@@ -2992,6 +2990,17 @@ const styles = {
     fontWeight: "600",
     cursor: "pointer",
   },
+
+secondaryButtonCompact: {
+border: "none",
+borderRadius: "10px",
+padding: "9px 12px",
+background: "#e5e7eb",
+color: "#111827",
+fontWeight: "600",
+cursor: "pointer",
+fontSize: "12px",
+},
 
   compactActionButtonPrimary: {
     border: "none",
@@ -3056,17 +3065,17 @@ const styles = {
   playersGrid: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
-    gap: "8px",
+    gap: "6px",
   },
 
   playerCardCompact: {
     borderRadius: "12px",
     background: "#fff",
-    padding: "8px 10px",
+    padding: "8px 9px",
     textAlign: "left",
     cursor: "pointer",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-    minHeight: "72px",
+    minHeight: "58px",
     userSelect: "none",
     WebkitUserSelect: "none",
     WebkitTouchCallout: "none",
@@ -3082,15 +3091,17 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "center",
     gap: "8px",
-    marginBottom: "6px",
+    marginBottom: "4px",
   },
 
   playerNameCompact: {
-    fontSize: "13px",
+    fontSize: "12px",
     fontWeight: "700",
     color: "#111827",
-    lineHeight: 1.2,
-    wordBreak: "break-word",
+    lineHeight: 1.15,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
   },
 
   skillMini: {
@@ -3108,10 +3119,52 @@ const styles = {
 
   playerCompactBottom: {
     display: "flex",
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
     alignItems: "center",
     gap: "6px",
+    minHeight: "24px",
   },
+
+playerCardListCompact: {
+borderRadius: "10px",
+background: "#fff",
+padding: "8px 10px",
+textAlign: "left",
+cursor: "pointer",
+boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+minHeight: "unset",
+display: "flex",
+alignItems: "center",
+justifyContent: "space-between",
+gap: "8px",
+userSelect: "none",
+WebkitUserSelect: "none",
+WebkitTouchCallout: "none",
+touchAction: "manipulation",
+},
+
+playerCardListCompactSelected: {
+outline: "2px solid #111827",
+},
+
+playerListCompactName: {
+fontSize: "12px",
+fontWeight: "700",
+color: "#111827",
+lineHeight: 1.15,
+whiteSpace: "nowrap",
+overflow: "hidden",
+textOverflow: "ellipsis",
+minWidth: 0,
+flex: 1,
+},
+
+playerListCompactRight: {
+display: "flex",
+alignItems: "center",
+gap: "6px",
+flexShrink: 0,
+},
 
   checkTiny: {
     fontSize: "11px",
@@ -3501,11 +3554,12 @@ gap: "8px",
 profileCompactLeft: {
 minWidth: 0,
 display: "grid",
-gap: "1px",
+gap: "0px",
+flex: 1,
 },
 
 profileCompactName: {
-fontSize: "14px",
+fontSize: "13px",
 fontWeight: "800",
 color: "#111827",
 whiteSpace: "nowrap",
@@ -3514,7 +3568,7 @@ textOverflow: "ellipsis",
 },
 
 profileCompactRole: {
-fontSize: "11px",
+fontSize: "10px",
 color: "#6b7280",
 textTransform: "capitalize",
 },
@@ -3522,7 +3576,7 @@ textTransform: "capitalize",
 profileCompactLogout: {
 border: "none",
 borderRadius: "9px",
-padding: "7px 10px",
+padding: "6px 10px",
 background: "#e5e7eb",
 color: "#111827",
 fontWeight: "700",
