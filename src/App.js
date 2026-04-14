@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import html2canvas from "html2canvas";
 
 const API =
   "https://script.google.com/macros/s/AKfycbx9FWReNsr6vJam6b02OCf96K482opSh_SPZVSeBqoTs65M7S2E1ZGZXt9qGUMzpE2dDw/exec";
@@ -331,6 +332,53 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
   const [trainerActionMessage, setTrainerActionMessage] = useState("");
 
   const [mobileMoveSelection, setMobileMoveSelection] = useState(null);
+
+  const exportRef = useRef(null);
+  const [showAddToTeamsModal, setShowAddToTeamsModal] = useState(false);
+  const [showExportView, setShowExportView] = useState(false);
+  const [showToolbarSettings, setShowToolbarSettings] = useState(false);
+  const [showRemoveFromTeamsModal, setShowRemoveFromTeamsModal] = useState(false);
+
+  const [visibleActions, setVisibleActions] = useState(() => {
+    try {
+      const raw = localStorage.getItem("volleyball-visible-actions");
+      if (!raw) {
+        return {
+          newRound: true,
+          matchMode: true,
+          addPlayer: true,
+          saveRound: false,
+          clearSaved: false,
+          skillToggle: false,
+          lockToggle: false,
+          export: true,
+        };
+      }
+      return JSON.parse(raw);
+    } catch {
+      return {
+        newRound: true,
+        matchMode: true,
+        addPlayer: true,
+        saveRound: false,
+        clearSaved: false,
+        skillToggle: false,
+        lockToggle: false,
+        export: true,
+      };
+    }
+  });
+
+  const removablePlayersFromTeams = useMemo(() => {
+    return teams.flatMap((team, teamIndex) =>
+      (team.players || []).map((player, playerIndex) => ({
+        ...player,
+        teamIndex,
+        playerIndex,
+        teamName: team.name,
+      }))
+    );
+  }, [teams]);
 
   const [auth, setAuth] = useState(() => {
     if (typeof window === "undefined") return getDefaultAuth();
@@ -991,6 +1039,14 @@ console.error("Could not save team lock visibility:", error);
 
   useEffect(() => {
     try {
+      localStorage.setItem("volleyball-visible-actions", JSON.stringify(visibleActions));
+    } catch (e) {
+      console.error("Could not save visible actions", e);
+    }
+  }, [visibleActions]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
     } catch (error) {
       console.error("Kunne ikke lagre auth:", error);
@@ -1023,6 +1079,16 @@ console.error("Could not save team lock visibility:", error);
       setShowSkillInTeams(false);
     }
   }, [skillView]);
+
+  useEffect(() => {
+    if (!teams.length) return;
+
+    const namesInTeams = teams.flatMap((team) =>
+      (team.players || []).map((player) => player.name)
+    );
+
+    setSelected(namesInTeams);
+  }, [teams]);
 
   function togglePlayer(name) {
     setSelected((prev) =>
@@ -1069,13 +1135,14 @@ console.error("Could not save team lock visibility:", error);
   async function generateNewRound() {
     try {
       const currentPlayers = teams.flatMap((team) =>
-        (team.players || []).map((player) => ({
-          name: player.name,
-          skill: Number(player.skill) || 1,
-          cannot: Array.isArray(player.cannot) ? player.cannot : [],
-          locked: Boolean(player.locked),
-          club: String(player.club || "").trim(),
-        }))
+        (team.players || [])
+          .map((player) => ({
+            name: player.name,
+            skill: Number(player.skill) || 1,
+            cannot: Array.isArray(player.cannot) ? player.cannot : [],
+            locked: Boolean(player.locked),
+            club: String(player.club || "").trim(),
+          }))
       );
 
       if (currentPlayers.length < 2) return;
@@ -1288,6 +1355,23 @@ console.error("Could not save team lock visibility:", error);
     );
   }
 
+
+
+  function removeExistingPlayerFromCurrentTeams(teamIndex, playerIndex) {
+    setTeams((prevTeams) =>
+      prevTeams.map((team, tIdx) => {
+        if (tIdx !== teamIndex) return team;
+
+        return {
+          ...team,
+          players: (team.players || []).filter((_, pIdx) => pIdx !== playerIndex),
+        };
+      })
+    );
+
+    setShowRemoveFromTeamsModal(false);
+  }
+
   function movePlayerByDrag(
     fromTeamIndex,
     playerIndex,
@@ -1417,6 +1501,57 @@ name: player.name,
     );
   }
 
+  function addExistingPlayerToCurrentTeams(player) {
+    if (!player) return;
+
+    setTeams((prevTeams) => {
+      if (!prevTeams.length) return prevTeams;
+
+      let bestIndex = 0;
+      let bestScore = null;
+
+      prevTeams.forEach((team, index) => {
+        const total = (team.players || []).reduce(
+          (sum, p) => sum + (Number(p.skill) || 0),
+          0
+        );
+        const size = (team.players || []).length;
+
+        const score = { total, size };
+
+        if (
+          !bestScore ||
+          score.total < bestScore.total ||
+          (score.total === bestScore.total && score.size < bestScore.size)
+        ) {
+          bestScore = score;
+          bestIndex = index;
+        }
+      });
+
+      return prevTeams.map((team, index) => {
+        if (index !== bestIndex) return team;
+
+        return {
+          ...team,
+          players: [
+            ...(team.players || []),
+            {
+              name: player.name,
+              skill: Number(player.skill) || 1,
+              cannot: Array.isArray(player.cannot) ? player.cannot : [],
+              locked: false,
+              club: String(player.club || "").trim(),
+              leaving: false,
+            },
+          ],
+        };
+      });
+    });
+
+    setShowAddToTeamsModal(false);
+  }
+
   const sortedPlayers = useMemo(() => {
     const nextPlayers = [...players];
 
@@ -1484,6 +1619,14 @@ name: player.name,
       (trainer) => trainer.role === "trainer" && trainer.active
     );
   }, [trainerUsers]);
+
+  const availablePlayersForTeams = useMemo(() => {
+    const currentTeamNames = new Set(
+      teams.flatMap((team) => (team.players || []).map((player) => player.name))
+    );
+
+    return players.filter((player) => !currentTeamNames.has(player.name));
+  }, [players, teams]);
 
   useEffect(() => {
     const totalRounds = activeScheduleRounds.length;
@@ -2176,42 +2319,88 @@ name: player.name,
                     {loading ? "..." : "↻"}
                   </button>
 
-                  <button
-                    style={{
-                      ...styles.compactActionButton,
-                      opacity: teams.length === 0 ? 0.6 : 1,
-                    }}
-                    onClick={saveRoundForSixHours}
-                    disabled={teams.length === 0}
-                    title="Save Round"
-                  >
-                    💾
-                  </button>
+                  {visibleActions.saveRound && (
+                    <button
+                      style={{
+                        ...styles.compactActionButton,
+                        opacity: teams.length === 0 ? 0.6 : 1,
+                      }}
+                      onClick={saveRoundForSixHours}
+                      disabled={teams.length === 0}
+                      title="Save Round"
+                    >
+                      💾
+                    </button>
+                  )}
 
-                  <button
-                    style={{
-                      ...styles.compactActionButton,
-                      opacity: teams.length >= 3 ? 1 : 0.6,
-                    }}
-                    onClick={() => {
-                      setMatchMode((prev) => !prev);
-                      setMatchRoundIndex(0);
-                    }}
-                    disabled={teams.length < 3}
-                    title={matchMode ? "Hide Match" : "Match Mode"}
-                  >
-                    🏐
-                  </button>
+                  {visibleActions.matchMode && teams.length >= 3 && (
+                    <button
+                      style={{
+                        ...styles.compactActionButton,
+                        opacity: teams.length >= 3 ? 1 : 0.6,
+                      }}
+                      onClick={() => {
+                        setMatchMode((prev) => !prev);
+                        setMatchRoundIndex(0);
+                      }}
+                      disabled={teams.length < 3}
+                      title={matchMode ? "Hide Match" : "Match Mode"}
+                    >
+                      🆚
+                    </button>
+                  )}
 
-                  <button
-                    style={styles.compactActionButton}
-                    onClick={clearStoredRounds}
-                    title="Clear Saved"
-                  >
-                    ✕
-                  </button>
+                  {visibleActions.addPlayer && teams.length > 0 && (
+                    <button
+                      style={styles.addIconActionButton}
+                      onClick={() => setShowAddToTeamsModal(true)}
+                      title="Add Player"
+                    >
+                      +
+                    </button>
+                  )}
 
-                  {skillView === "numbers" && teams.length > 0 && (
+                  {teams.length > 0 && (
+                    <button
+                      style={styles.removeIconActionButton}
+                      onClick={() => setShowRemoveFromTeamsModal(true)}
+                      title="Remove Player"
+                    >
+                      −
+                    </button>
+                  )}
+
+                  {visibleActions.export && teams.length > 0 && (
+                    <button
+                      style={styles.iconActionButton}
+                      onClick={() => setShowExportView(true)}
+                      title="Export"
+                    >
+                      📤
+                    </button>
+                  )}
+
+                  {teams.length > 0 && (
+                    <button
+                      style={styles.iconActionButton}
+                      onClick={() => setShowToolbarSettings(true)}
+                      title="Toolbar Settings"
+                    >
+                      ⚙
+                    </button>
+                  )}
+
+                  {visibleActions.clearSaved && (
+                    <button
+                      style={styles.compactActionButton}
+                      onClick={clearStoredRounds}
+                      title="Clear Saved"
+                    >
+                      ✕
+                    </button>
+                  )}
+
+                  {visibleActions.skillToggle && skillView === "numbers" && teams.length > 0 && (
                     <button
                       style={styles.compactActionButton}
                       onClick={() => setShowSkillInTeams((prev) => !prev)}
@@ -2221,7 +2410,7 @@ name: player.name,
                     </button>
                   )}
 
-{teams.length > 0 && (
+{visibleActions.lockToggle && teams.length > 0 && (
 <button
 style={styles.iconActionButton}
 onClick={() => setShowLockInTeams((prev) => !prev)}
@@ -2423,12 +2612,7 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                                 ...(isSelectedForMove
                                   ? styles.teamPlayerRowSelected
                                   : {}),
-                                opacity:
-                                  dragging &&
-                                  dragging.fromTeamIndex === teamIndex &&
-                                  dragging.playerIndex === playerIndex
-                                    ? 0.45
-                                    : 1,
+                                opacity: 1,
                                 cursor:
                                   isMobile || player.locked
                                     ? "default"
@@ -2514,22 +2698,22 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                                   </span>
                                 )}
 
-{showLockInTeams && (
-<button
-style={{
-...styles.lockIconButton,
-...(player.locked ? styles.lockIconButtonActive : {}),
-}}
-onClick={(e) => {
-e.stopPropagation();
-toggleLock(teamIndex, playerIndex);
-}}
-title={player.locked ? "Unlock player" : "Lock player"}
-aria-label={player.locked ? "Unlock player" : "Lock player"}
->
-{player.locked ? "🔒" : "🔓"}
-</button>
-)}
+                                {showLockInTeams && (
+                                  <button
+                                    style={{
+                                      ...styles.lockIconButton,
+                                      ...(player.locked ? styles.lockIconButtonActive : {}),
+                                    }}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleLock(teamIndex, playerIndex);
+                                    }}
+                                    title={player.locked ? "Unlock player" : "Lock player"}
+                                    aria-label={player.locked ? "Unlock player" : "Lock player"}
+                                  >
+                                    {player.locked ? "🔒" : "🔓"}
+                                  </button>
+                                )}
                               </div>
                             </div>
                           );
@@ -2590,11 +2774,240 @@ aria-label={player.locked ? "Unlock player" : "Lock player"}
           </div>
         </div>
       )}
+
+      {showAddToTeamsModal && (
+        <div style={styles.modalOverlay} onClick={() => setShowAddToTeamsModal(false)}>
+          <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+            <h3 style={styles.modalTitle}>Add Player</h3>
+            <p style={styles.addToTeamsSubtitle}>Select player to add</p>
+
+            <div style={styles.addToTeamsList}>
+              {availablePlayersForTeams.length === 0 ? (
+                <div style={styles.emptyText}>No players available</div>
+              ) : (
+                availablePlayersForTeams.map((player) => {
+                  const skillStyle = getSkillStyle(
+                    player.skill,
+                    skillView,
+                    skillScale
+                  );
+
+                  return (
+                    <div key={player.name} style={styles.addToTeamsRow}>
+                      <div style={styles.addToTeamsNameWrap}>
+                        <div style={styles.addToTeamsName}>
+                          {displayPlayerName(player)}
+                        </div>
+                        <div
+                          style={{
+                            ...styles.skillMini,
+                            background: skillStyle.background,
+                            color: skillStyle.color,
+                          }}
+                        >
+                          {skillStyle.text}
+                        </div>
+                      </div>
+
+                      <button
+                        style={styles.smallPrimaryButton}
+                        onClick={() => addExistingPlayerToCurrentTeams(player)}
+                      >
+                        Add
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={styles.modalActions}>
+              <button
+                style={styles.secondaryButton}
+                onClick={() => setShowAddToTeamsModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showExportView && (
+        <div style={styles.exportOverlay} onClick={() => setShowExportView(false)}>
+          <div style={styles.exportCard} onClick={(e) => e.stopPropagation()}>
+            <div ref={exportRef} style={styles.exportGrid}>
+              {teams.map((team, index) => (
+                <div key={index} style={styles.exportTeam}>
+                  <div style={styles.exportTeamTitle}>{team.name}</div>
+                  {(team.players || []).map((p, i) => (
+                    <div key={i} style={styles.exportPlayer}>
+                      {displayPlayerName(p)}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+
+            <button
+              style={styles.primaryButton}
+              onClick={async () => {
+                if (!exportRef.current) return;
+
+                const canvas = await html2canvas(exportRef.current);
+                const link = document.createElement("a");
+                link.download = "teams.png";
+                link.href = canvas.toDataURL();
+                link.click();
+              }}
+            >
+              Save / Share
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showRemoveFromTeamsModal && (
+        <div
+          style={styles.modalOverlay}
+          onClick={() => setShowRemoveFromTeamsModal(false)}
+        >
+          <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+            <h3 style={styles.modalTitle}>Remove Player</h3>
+            <p style={styles.addToTeamsSubtitle}>Remove player from current teams</p>
+
+            <div style={styles.addToTeamsList}>
+              {removablePlayersFromTeams.length === 0 ? (
+                <div style={styles.emptyText}>No players to remove</div>
+              ) : (
+                removablePlayersFromTeams.map((player) => (
+                  <div
+                    key={`${player.teamIndex}-${player.playerIndex}-${player.name}`}
+                    style={styles.addToTeamsRow}
+                  >
+                    <div style={styles.addToTeamsNameWrap}>
+                      <div style={styles.addToTeamsName}>
+                        {displayPlayerName(player)}
+                      </div>
+                      <div style={styles.authSubtitle}>{player.teamName}</div>
+                    </div>
+
+                    <button
+                      style={styles.smallPrimaryButton}
+                      onClick={() =>
+                        removeExistingPlayerFromCurrentTeams(
+                          player.teamIndex,
+                          player.playerIndex
+                        )
+                      }
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <button
+              style={styles.secondaryButton}
+              onClick={() => setShowRemoveFromTeamsModal(false)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showToolbarSettings && (
+        <div style={styles.modalOverlay} onClick={() => setShowToolbarSettings(false)}>
+          <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
+            <h3 style={styles.modalTitle}>Toolbar Settings</h3>
+
+            <div style={styles.settingsList}>
+              {Object.entries(visibleActions).map(([key, value]) => {
+                const locked = ["newRound", "matchMode", "addPlayer"].includes(key);
+
+                return (
+                  <div key={key} style={styles.settingsRow}>
+                    <span>
+                      {{
+                        newRound: "New Round",
+                        matchMode: "Match",
+                        addPlayer: "Add Player",
+                        saveRound: "Save",
+                        clearSaved: "Clear",
+                        skillToggle: "Skill",
+                        lockToggle: "Lock",
+                        export: "Export",
+                      }[key] || key}
+                    </span>
+
+                    {!locked && (
+                      <button
+                        style={styles.smallToggleButton}
+                        onClick={() =>
+                          setVisibleActions((prev) => ({
+                            ...prev,
+                            [key]: !prev[key],
+                          }))
+                        }
+                      >
+                        {value ? "✓" : "✕"}
+                      </button>
+                    )}
+
+                    {locked && <span style={{ fontSize: 12, opacity: 0.6 }}>Locked</span>}
+                  </div>
+                );
+              })}
+            </div>
+
+            <button
+              style={styles.primaryButton}
+              onClick={() => setShowToolbarSettings(false)}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 const styles = {
+  addIconActionButton: {
+    border: "none",
+    borderRadius: "10px",
+    height: "32px",
+    minWidth: "32px",
+    background: "#2563eb",
+    color: "#fff",
+    fontWeight: "700",
+    cursor: "pointer",
+    fontSize: "16px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 0,
+  },
+
+  removeIconActionButton: {
+    border: "none",
+    borderRadius: "10px",
+    height: "32px",
+    minWidth: "32px",
+    background: "#dc2626",
+    color: "#fff",
+    fontWeight: "700",
+    cursor: "pointer",
+    fontSize: "16px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 0,
+  },
+
   app: {
     minHeight: "100vh",
     background: "#f5f7fb",
@@ -3458,11 +3871,11 @@ textOverflow: "ellipsis",
   iconMoveButton: {
     border: "none",
     borderRadius: "999px",
-    width: "26px",
-    height: "26px",
+    width: "22px",
+    height: "22px",
     background: "#dbeafe",
     color: "#1d4ed8",
-    fontSize: "13px",
+    fontSize: "11px",
     fontWeight: "700",
     cursor: "pointer",
     display: "flex",
@@ -3516,29 +3929,30 @@ textOverflow: "ellipsis",
 
 iconActionButton: {
 border: "none",
-borderRadius: "12px",
-height: "42px",
-minWidth: "42px",
+borderRadius: "10px",
+height: "32px",
+minWidth: "32px",
 background: "#e5e7eb",
 color: "#111827",
 fontWeight: "700",
 cursor: "pointer",
-fontSize: "16px",
+fontSize: "14px",
 display: "flex",
 alignItems: "center",
 justifyContent: "center",
+padding: 0,
 },
 
 iconActionButtonPrimary: {
 border: "none",
-borderRadius: "12px",
-height: "42px",
-minWidth: "42px",
+borderRadius: "10px",
+height: "32px",
+minWidth: "32px",
 background: "#111827",
 color: "#fff",
 fontWeight: "700",
 cursor: "pointer",
-fontSize: "16px",
+fontSize: "14px",
 display: "flex",
 alignItems: "center",
 justifyContent: "center",
@@ -3588,14 +4002,11 @@ flexShrink: 0,
 lockIconButton: {
 border: "none",
 borderRadius: "999px",
-width: "26px",
-height: "26px",
-background: "#e5e7eb",
-color: "#111827",
-fontSize: "12px",
-cursor: "pointer",
-display: "flex",
-alignItems: "center",
+    width: "22px",
+    height: "22px",
+    background: "#e5e7eb",
+    color: "#111827",
+    fontSize: "11px",
 justifyContent: "center",
 padding: 0,
 flexShrink: 0,
@@ -3604,5 +4015,106 @@ flexShrink: 0,
 lockIconButtonActive: {
 background: "#111827",
 color: "#fff",
+},
+
+addToTeamsList: {
+display: "grid",
+gap: "8px",
+maxHeight: "320px",
+overflowY: "auto",
+},
+
+addToTeamsRow: {
+display: "flex",
+justifyContent: "space-between",
+alignItems: "center",
+gap: "8px",
+padding: "8px 10px",
+borderRadius: "10px",
+background: "#f8fafc",
+border: "1px solid #e5e7eb",
+},
+
+addToTeamsNameWrap: {
+minWidth: 0,
+display: "flex",
+alignItems: "center",
+gap: "8px",
+flex: 1,
+},
+
+addToTeamsName: {
+fontSize: "13px",
+fontWeight: "700",
+color: "#111827",
+whiteSpace: "nowrap",
+overflow: "hidden",
+textOverflow: "ellipsis",
+},
+
+addToTeamsSubtitle: {
+margin: 0,
+fontSize: "12px",
+color: "#6b7280",
+},
+
+  settingsList: {
+    display: "grid",
+    gap: "8px",
+  },
+
+  settingsRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "8px 10px",
+    background: "#f8fafc",
+    borderRadius: "10px",
+    fontSize: "13px",
+  },
+
+exportOverlay: {
+position: "fixed",
+inset: 0,
+background: "rgba(0,0,0,0.5)",
+display: "flex",
+alignItems: "center",
+justifyContent: "center",
+padding: "16px",
+zIndex: 9999,
+},
+
+exportCard: {
+  width: "100%",
+  maxWidth: "700px",
+  background: "#fff",
+  borderRadius: "16px",
+  padding: "20px",
+  display: "grid",
+  gap: "16px",
+},
+
+exportGrid: {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: "16px",
+},
+
+exportTeam: {
+  display: "grid",
+  gap: "6px",
+},
+
+exportTeamTitle: {
+  fontSize: "16px",
+  fontWeight: "800",
+  marginBottom: "6px",
+  color: "#111827",
+},
+
+exportPlayer: {
+  fontSize: "14px",
+  fontWeight: "600",
+  color: "#111827",
 },
 };
