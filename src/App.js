@@ -1941,7 +1941,7 @@ name: player.name,
                       onClick={() => setSkillScale((prev) => (prev === 3 ? 5 : 3))}
                       title="Toggle Skill Scale"
                     >
-                      {skillScale}
+                      {skillScale === 3 ? "1-3" : "1-5"}
                     </button>
                   </div>
 
