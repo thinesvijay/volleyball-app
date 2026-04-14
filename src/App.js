@@ -9,9 +9,12 @@ const AUTH_STORAGE_KEY = "volleyball-auth";
 const SKILL_VIEW_KEY = "volleyball-skill-view";
 const SKILL_SCALE_KEY = "volleyball-skill-scale";
 const TEAM_SKILL_VISIBILITY_KEY = "volleyball-team-skill-visibility";
+const TEAM_LOCK_VISIBILITY_KEY = "volleyball-team-lock-visibility";
 const MATCH_METHOD_KEY = "volleyball-match-method";
+const PLAYER_SORT_KEY = "volleyball-player-sort";
 const CURRENT_ROUND_TTL_MS = 60 * 60 * 1000;
 const SAVED_ROUND_TTL_MS = 6 * 60 * 60 * 1000;
+
 const SKILL_SCALE_OPTIONS = [3, 5];
 const TRAINER_COPY_OPTIONS = [
   { value: "blank", label: "Blank sheet" },
@@ -21,6 +24,10 @@ const TRAINER_COPY_OPTIONS = [
 const MATCH_METHOD_OPTIONS = [
   { value: "balanced", label: "Pattern" },
   { value: "shuffle", label: "Shuffle" },
+];
+const PLAYER_SORT_OPTIONS = [
+  { value: "name", label: "A-Z" },
+  { value: "recent", label: "Recent" },
 ];
 
 function normalizeTeamName(index, existingName) {
@@ -40,6 +47,7 @@ function normalizeTeams(rawTeams) {
           skill: Number(player.skill) || 1,
           locked: Boolean(player.locked),
           cannot: Array.isArray(player.cannot) ? player.cannot : [],
+          club: String(player.club || "").trim(),
         }))
       : [],
   }));
@@ -170,91 +178,23 @@ function buildBalancedMatchRounds(teamNames, requestedCourtCount = 2) {
     Math.min(Number(requestedCourtCount) || 2, maxMatchesInAnyRound)
   );
 
-  const teamStats = {};
-  teamNames.forEach((team) => {
-    teamStats[team] = {
-      courts: {},
-      left: 0,
-      right: 0,
-    };
-  });
-
-  function courtCountForTeam(team, court) {
-    return teamStats[team]?.courts?.[court] || 0;
-  }
-
-  function scoreAssignment(match, court, orientation) {
-    const leftTeam = orientation === 0 ? match.team1 : match.team2;
-    const rightTeam = orientation === 0 ? match.team2 : match.team1;
-
-    let score = 0;
-
-    score += courtCountForTeam(leftTeam, court) * 10;
-    score += courtCountForTeam(rightTeam, court) * 10;
-
-    score += teamStats[leftTeam].left * 3;
-    score += teamStats[rightTeam].right * 3;
-
-    if (teamStats[leftTeam].left > teamStats[leftTeam].right) {
-      score += 2;
-    }
-    if (teamStats[rightTeam].right > teamStats[rightTeam].left) {
-      score += 2;
-    }
-
-    return score;
-  }
-
-  function applyAssignment(match, court, orientation) {
-    const leftTeam = orientation === 0 ? match.team1 : match.team2;
-    const rightTeam = orientation === 0 ? match.team2 : match.team1;
-
-    teamStats[leftTeam].courts[court] =
-      (teamStats[leftTeam].courts[court] || 0) + 1;
-    teamStats[rightTeam].courts[court] =
-      (teamStats[rightTeam].courts[court] || 0) + 1;
-
-    teamStats[leftTeam].left += 1;
-    teamStats[rightTeam].right += 1;
-
-    return {
-      court,
-      leftTeam,
-      rightTeam,
-      originalTeam1: match.team1,
-      originalTeam2: match.team2,
-    };
-  }
-
   return baseRounds.map((round) => {
     const shuffledRound = shuffleArray(round);
-    const availableCourts = Array.from(
-      { length: Math.min(usableCourts, shuffledRound.length) },
-      (_, i) => i + 1
-    );
 
-    const roundMatches = [];
+    return shuffledRound.map((match, index) => {
+      const court = (index % usableCourts) + 1;
+      const reversed = Math.random() < 0.5;
+      const leftTeam = reversed ? match.team2 : match.team1;
+      const rightTeam = reversed ? match.team1 : match.team2;
 
-    shuffledRound.forEach((match) => {
-      let best = null;
-
-      availableCourts.forEach((court) => {
-        [0, 1].forEach((orientation) => {
-          const score = scoreAssignment(match, court, orientation);
-
-          if (!best || score < best.score) {
-            best = { court, orientation, score };
-          }
-        });
-      });
-
-      if (best) {
-        roundMatches.push(applyAssignment(match, best.court, best.orientation));
-      }
+      return {
+        court,
+        leftTeam,
+        rightTeam,
+        originalTeam1: match.team1,
+        originalTeam2: match.team2,
+      };
     });
-
-    roundMatches.sort((a, b) => a.court - b.court);
-    return roundMatches;
   });
 }
 
@@ -315,8 +255,16 @@ function getDefaultAuth() {
   };
 }
 
+function displayPlayerName(player) {
+  const club = String(player?.club || "").trim();
+  const name = String(player?.name || "").trim();
+  if (!club) return name;
+  return `${club} ${name}`;
+}
+
 export default function App() {
   const [players, setPlayers] = useState([]);
+  const [archivedPlayers, setArchivedPlayers] = useState([]);
   const [selected, setSelected] = useState([]);
   const [teams, setTeams] = useState([]);
   const [teamCount, setTeamCount] = useState(2);
@@ -331,10 +279,12 @@ export default function App() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState("");
   const [newPlayerSkill, setNewPlayerSkill] = useState(1);
+  const [newPlayerClub, setNewPlayerClub] = useState("");
 
   const [editingPlayer, setEditingPlayer] = useState(null);
   const [editName, setEditName] = useState("");
   const [editSkill, setEditSkill] = useState(1);
+  const [editClub, setEditClub] = useState("");
   const [savingPlayer, setSavingPlayer] = useState(false);
 
   const [matchMode, setMatchMode] = useState(false);
@@ -351,6 +301,21 @@ export default function App() {
     const raw = localStorage.getItem(TEAM_SKILL_VISIBILITY_KEY);
     return raw === null ? true : raw === "true";
   });
+
+const [showLockInTeams, setShowLockInTeams] = useState(() => {
+if (typeof window === "undefined") return true;
+const raw = localStorage.getItem(TEAM_LOCK_VISIBILITY_KEY);
+return raw === null ? true : raw === "true";
+});
+
+  const [playerSortMode, setPlayerSortMode] = useState(() => {
+    if (typeof window === "undefined") return "name";
+    const raw = localStorage.getItem(PLAYER_SORT_KEY) || "name";
+    return raw === "recent" ? "recent" : "name";
+  });
+
+  const [showArchivedPlayers, setShowArchivedPlayers] = useState(false);
+  const [playerActionMessage, setPlayerActionMessage] = useState("");
 
   const [showCreateTrainerForm, setShowCreateTrainerForm] = useState(false);
   const [trainerUsername, setTrainerUsername] = useState("");
@@ -430,12 +395,14 @@ export default function App() {
 
       if (!payload.username || !payload.password) {
         setPlayers([]);
+        setArchivedPlayers([]);
         return;
       }
 
       try {
         const queryString = buildQueryString({
           action: "getPlayers",
+          includeArchived: 1,
           ...payload,
           _ts: Date.now(),
         });
@@ -449,18 +416,24 @@ export default function App() {
 
         if (Array.isArray(data)) {
           setPlayers(data);
+          setArchivedPlayers([]);
           return;
         }
 
-        if (data?.success === false) {
-          setPlayers([]);
+        if (Array.isArray(data?.players) || Array.isArray(data?.archivedPlayers)) {
+          setPlayers(Array.isArray(data.players) ? data.players : []);
+          setArchivedPlayers(
+            Array.isArray(data.archivedPlayers) ? data.archivedPlayers : []
+          );
           return;
         }
 
         setPlayers([]);
+        setArchivedPlayers([]);
       } catch (error) {
         console.error("Kunne ikke hente spillere:", error);
         setPlayers([]);
+        setArchivedPlayers([]);
       }
     },
     [getAuthPayload]
@@ -550,6 +523,7 @@ export default function App() {
       if (!data?.success) {
         setLoginMessage(data?.message || "Login failed.");
         setPlayers([]);
+        setArchivedPlayers([]);
         return;
       }
 
@@ -576,6 +550,7 @@ export default function App() {
       setTrainerActionMessage("");
       setCreateTrainerMessage("");
       setCreatedTrainerInfo(null);
+      setPlayerActionMessage("");
 
       await loadPlayers({
         username,
@@ -585,6 +560,7 @@ export default function App() {
       console.error("Kunne ikke logge inn:", error);
       setLoginMessage("Login failed.");
       setPlayers([]);
+      setArchivedPlayers([]);
     } finally {
       setLoginLoading(false);
     }
@@ -601,6 +577,8 @@ export default function App() {
     setCreateTrainerMessage("");
     setCreatedTrainerInfo(null);
     setPlayers([]);
+    setArchivedPlayers([]);
+    setPlayerActionMessage("");
     clearRoundState();
   }
 
@@ -756,7 +734,6 @@ export default function App() {
     const confirmed = window.confirm(
       `Er du sikker på at du vil arkivere trainer "${targetUsername}"?`
     );
-
     if (!confirmed) return;
 
     try {
@@ -826,9 +803,78 @@ export default function App() {
     }
   }
 
+  async function archivePlayer(playerName) {
+    const confirmed = window.confirm(`Archive player "${playerName}"?`);
+    if (!confirmed) return;
+
+    try {
+      setPlayerActionMessage("");
+
+      const res = await fetch(`${API}?_ts=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "archivePlayer",
+          playerName,
+          ...getAuthPayload(),
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data?.success) {
+        setPlayerActionMessage(data?.message || "Could not archive player.");
+        return;
+      }
+
+      setPlayerActionMessage("Player archived.");
+      setSelected((prev) => prev.filter((name) => name !== playerName));
+      await loadPlayers();
+    } catch (error) {
+      console.error("Kunne ikke arkivere spiller:", error);
+      setPlayerActionMessage("Could not archive player.");
+    }
+  }
+
+  async function restorePlayer(playerName) {
+    try {
+      setPlayerActionMessage("");
+
+      const res = await fetch(`${API}?_ts=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "restorePlayer",
+          playerName,
+          ...getAuthPayload(),
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data?.success) {
+        setPlayerActionMessage(data?.message || "Could not restore player.");
+        return;
+      }
+
+      setPlayerActionMessage("Player restored.");
+      await loadPlayers();
+    } catch (error) {
+      console.error("Kunne ikke gjenopprette spiller:", error);
+      setPlayerActionMessage("Could not restore player.");
+    }
+  }
+
   useEffect(() => {
     if (!auth.loggedIn) {
       setPlayers([]);
+      setArchivedPlayers([]);
       setTrainerUsers([]);
       return;
     }
@@ -921,6 +967,14 @@ export default function App() {
     }
   }, [showSkillInTeams]);
 
+useEffect(() => {
+try {
+localStorage.setItem(TEAM_LOCK_VISIBILITY_KEY, String(showLockInTeams));
+} catch (error) {
+console.error("Could not save team lock visibility:", error);
+}
+}, [showLockInTeams]);
+
   useEffect(() => {
     try {
       localStorage.setItem(MATCH_METHOD_KEY, matchMethod);
@@ -928,6 +982,14 @@ export default function App() {
       console.error("Kunne ikke lagre match method:", error);
     }
   }, [matchMethod]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(PLAYER_SORT_KEY, playerSortMode);
+    } catch (error) {
+      console.error("Kunne ikke lagre player sort:", error);
+    }
+  }, [playerSortMode]);
 
   useEffect(() => {
     try {
@@ -1014,6 +1076,7 @@ export default function App() {
           skill: Number(player.skill) || 1,
           cannot: Array.isArray(player.cannot) ? player.cannot : [],
           locked: Boolean(player.locked),
+          club: String(player.club || "").trim(),
         }))
       );
 
@@ -1075,13 +1138,15 @@ export default function App() {
   }
 
   async function addPlayer() {
-    const trimmed = newPlayerName.trim();
-    if (!trimmed) return;
+    const trimmedName = newPlayerName.trim();
+    const trimmedClub = newPlayerClub.trim();
+
+    if (!trimmedName) return;
 
     try {
       setSavingPlayer(true);
 
-      await fetch(`${API}?_ts=${Date.now()}`, {
+      const res = await fetch(`${API}?_ts=${Date.now()}`, {
         method: "POST",
         cache: "no-store",
         headers: {
@@ -1090,19 +1155,28 @@ export default function App() {
         body: JSON.stringify({
           action: "addPlayer",
           player: {
-            name: trimmed,
+            name: trimmedName,
             skill: Number(newPlayerSkill),
+            club: trimmedClub,
           },
           ...getAuthPayload(),
         }),
       });
 
+      const data = await res.json();
+      if (!data?.success) {
+        setPlayerActionMessage(data?.message || "Could not save player.");
+        return;
+      }
+
       setNewPlayerName("");
       setNewPlayerSkill(1);
+      setNewPlayerClub("");
       setShowAddForm(false);
       await loadPlayers();
     } catch (error) {
       console.error("Kunne ikke legge til spiller:", error);
+      setPlayerActionMessage("Could not save player.");
     } finally {
       setSavingPlayer(false);
     }
@@ -1112,12 +1186,14 @@ export default function App() {
     setEditingPlayer(player);
     setEditName(player.name);
     setEditSkill(Number(player.skill) || 1);
+    setEditClub(String(player.club || ""));
   }
 
   function closeEditPlayer() {
     setEditingPlayer(null);
     setEditName("");
     setEditSkill(1);
+    setEditClub("");
   }
 
   async function savePlayerEdit() {
@@ -1126,44 +1202,50 @@ export default function App() {
     const oldName = editingPlayer.name;
     const newName = editName.trim();
     const newSkill = Number(editSkill);
+    const newClub = editClub.trim();
 
     if (!newName) return;
 
     try {
       setSavingPlayer(true);
 
-      if (oldName !== newName) {
-        await fetch(`${API}?_ts=${Date.now()}`, {
-          method: "POST",
-          cache: "no-store",
-          headers: {
-            "Content-Type": "text/plain;charset=utf-8",
-          },
-          body: JSON.stringify({
-            action: "updatePlayerName",
-            oldName,
-            newName,
-            ...getAuthPayload(),
-          }),
-        });
-      }
-
-      await fetch(`${API}?_ts=${Date.now()}`, {
+      const res = await fetch(`${API}?_ts=${Date.now()}`, {
         method: "POST",
         cache: "no-store",
         headers: {
           "Content-Type": "text/plain;charset=utf-8",
         },
         body: JSON.stringify({
-          action: "saveSkills",
-          players: [{ name: newName, skill: newSkill }],
+          action: "updatePlayer",
+          oldName,
+          player: {
+            name: newName,
+            skill: newSkill,
+            club: newClub,
+          },
           ...getAuthPayload(),
         }),
       });
 
+      const data = await res.json();
+      if (!data?.success) {
+        setPlayerActionMessage(data?.message || "Could not update player.");
+        return;
+      }
+
       setPlayers((prev) =>
         prev.map((p) =>
-          p.name === oldName ? { ...p, name: newName, skill: newSkill } : p
+          p.name === oldName
+            ? { ...p, name: newName, skill: newSkill, club: newClub }
+            : p
+        )
+      );
+
+      setArchivedPlayers((prev) =>
+        prev.map((p) =>
+          p.name === oldName
+            ? { ...p, name: newName, skill: newSkill, club: newClub }
+            : p
         )
       );
 
@@ -1175,7 +1257,9 @@ export default function App() {
         prevTeams.map((team) => ({
           ...team,
           players: (team.players || []).map((p) =>
-            p.name === oldName ? { ...p, name: newName, skill: newSkill } : p
+            p.name === oldName
+              ? { ...p, name: newName, skill: newSkill, club: newClub }
+              : p
           ),
         }))
       );
@@ -1184,6 +1268,7 @@ export default function App() {
       await loadPlayers();
     } catch (error) {
       console.error("Kunne ikke lagre spiller:", error);
+      setPlayerActionMessage("Could not update player.");
     } finally {
       setSavingPlayer(false);
     }
@@ -1280,15 +1365,25 @@ export default function App() {
   }
 
   function handleSelectMobileMove(teamIndex, playerIndex) {
-    const player = teams?.[teamIndex]?.players?.[playerIndex];
-    if (!player || player.locked) return;
+const player = teams?.[teamIndex]?.players?.[playerIndex];
+if (!player || player.locked) return;
 
-    setMobileMoveSelection({
-      fromTeamIndex: teamIndex,
-      playerIndex,
-      name: player.name,
-    });
-  }
+const isSame =
+mobileMoveSelection &&
+mobileMoveSelection.fromTeamIndex === teamIndex &&
+mobileMoveSelection.playerIndex === playerIndex;
+
+if (isSame) {
+setMobileMoveSelection(null);
+return;
+}
+
+setMobileMoveSelection({
+fromTeamIndex: teamIndex,
+playerIndex,
+name: player.name,
+});
+}
 
   function confirmMobileMove(toTeamIndex) {
     if (!mobileMoveSelection) return;
@@ -1325,8 +1420,28 @@ export default function App() {
   }
 
   const sortedPlayers = useMemo(() => {
-    return [...players].sort((a, b) => a.name.localeCompare(b.name));
-  }, [players]);
+    const nextPlayers = [...players];
+
+    if (playerSortMode === "recent") {
+      return nextPlayers.reverse();
+    }
+
+    return nextPlayers.sort((a, b) =>
+      displayPlayerName(a).localeCompare(displayPlayerName(b))
+    );
+  }, [players, playerSortMode]);
+
+  const sortedArchivedPlayers = useMemo(() => {
+    const nextPlayers = [...archivedPlayers];
+
+    if (playerSortMode === "recent") {
+      return nextPlayers.reverse();
+    }
+
+    return nextPlayers.sort((a, b) =>
+      displayPlayerName(a).localeCompare(displayPlayerName(b))
+    );
+  }, [archivedPlayers, playerSortMode]);
 
   const teamsWithTotals = useMemo(() => {
     return teams.map((team, index) => ({
@@ -1338,7 +1453,7 @@ export default function App() {
   }, [teams]);
 
   const teamsGridColumns =
-    isMobile ? "1fr" : teams.length <= 1 ? "1fr" : "1fr 1fr";
+    teams.length <= 1 ? "1fr" : "repeat(2, minmax(0, 1fr))";
 
   const balancedScheduleRounds = useMemo(() => {
     const names = teamsWithTotals.map((team) => team.name);
@@ -1399,21 +1514,28 @@ export default function App() {
         <div style={styles.authCard}>
           <div style={styles.authHeader}>
             <div>
-              <div style={styles.authTitle}>
-                {auth.loggedIn ? "Trainer Profile" : "Trainer Login"}
-              </div>
-              <div style={styles.authSubtitle}>
-                {auth.loggedIn
-                  ? `${auth.username} (${auth.role})`
-                  : "Login required to view players"}
-              </div>
-            </div>
+              {auth.loggedIn ? (
+<>
+  <div style={styles.profileCompactRow}>
+    <div style={styles.profileCompactLeft}>
+      <div style={styles.profileCompactName}>{auth.username}</div>
+      <div style={styles.profileCompactRole}>{auth.role}</div>
+    </div>
 
-            {auth.loggedIn && (
-              <button style={styles.secondaryButton} onClick={handleLogout}>
-                Logout
-              </button>
-            )}
+    <button style={styles.profileCompactLogout} onClick={handleLogout}>
+      Logout
+    </button>
+  </div>
+</>
+              ) : (
+                <>
+                  <div style={styles.authTitle}>Trainer Login</div>
+                  <div style={styles.authSubtitle}>
+                    Login required to view players
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           {!auth.loggedIn && (
@@ -1478,8 +1600,8 @@ export default function App() {
                   placeholder="Trainer password"
                 />
 
-                <div style={styles.settingsRow}>
-                  <div style={styles.settingsCard}>
+                <div style={styles.settingsCompactRow}>
+                  <div style={styles.compactSettingsCard}>
                     <span style={styles.settingsLabel}>Skill View</span>
                     <div style={styles.settingsToggleRow}>
                       <button
@@ -1507,7 +1629,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div style={styles.settingsCard}>
+                  <div style={styles.compactSettingsCard}>
                     <span style={styles.settingsLabel}>Skill Scale</span>
                     <div style={styles.settingsToggleRow}>
                       {SKILL_SCALE_OPTIONS.map((scale) => (
@@ -1802,8 +1924,8 @@ export default function App() {
                   </div>
                 </div>
 
-                <div style={styles.settingsRow}>
-                  <div style={styles.settingsCard}>
+                <div style={styles.settingsCompactRow}>
+                  <div style={styles.compactSettingsCard}>
                     <span style={styles.settingsLabel}>Skill View</span>
                     <div style={styles.settingsToggleRow}>
                       <button
@@ -1831,7 +1953,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div style={styles.settingsCard}>
+                  <div style={styles.compactSettingsCard}>
                     <span style={styles.settingsLabel}>Skill Scale</span>
                     <div style={styles.settingsToggleRow}>
                       {SKILL_SCALE_OPTIONS.map((scale) => (
@@ -1850,6 +1972,26 @@ export default function App() {
                       ))}
                     </div>
                   </div>
+
+                  <div style={styles.compactSettingsCard}>
+                    <span style={styles.settingsLabel}>Sort</span>
+                    <div style={styles.settingsToggleRow}>
+                      {PLAYER_SORT_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          style={{
+                            ...styles.smallToggleButton,
+                            ...(playerSortMode === option.value
+                              ? styles.smallToggleButtonActive
+                              : {}),
+                          }}
+                          onClick={() => setPlayerSortMode(option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
 
                 <div style={styles.actionRow}>
@@ -1859,10 +2001,30 @@ export default function App() {
                   >
                     {showAddForm ? "Close" : "+ Add Player"}
                   </button>
+
+                  <button
+                    style={styles.secondaryButton}
+                    onClick={() => setShowArchivedPlayers((prev) => !prev)}
+                  >
+                    {showArchivedPlayers
+                      ? "Hide Archived"
+                      : `Archived (${archivedPlayers.length})`}
+                  </button>
                 </div>
+
+                {playerActionMessage && (
+                  <div style={styles.loginMessage}>{playerActionMessage}</div>
+                )}
 
                 {showAddForm && (
                   <div style={styles.formCard}>
+                    <input
+                      style={styles.input}
+                      value={newPlayerClub}
+                      onChange={(e) => setNewPlayerClub(e.target.value)}
+                      placeholder="Club short name (ex. L, F, NS, N)"
+                    />
+
                     <input
                       style={styles.input}
                       value={newPlayerName}
@@ -1902,16 +2064,26 @@ export default function App() {
                     );
 
                     return (
-                      <button
+                      <div
                         key={p.name}
                         style={{
                           ...styles.playerCardCompact,
                           ...(isSelected ? styles.playerCardSelected : {}),
                         }}
                         onClick={() => togglePlayer(p.name)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            togglePlayer(p.name);
+                          }
+                        }}
                       >
                         <div style={styles.playerCompactTop}>
-                          <div style={styles.playerNameCompact}>{p.name}</div>
+                          <div style={styles.playerNameCompact}>
+                            {displayPlayerName(p)}
+                          </div>
                           <div
                             style={{
                               ...styles.skillMini,
@@ -1928,20 +2100,58 @@ export default function App() {
                             {isSelected ? "Selected" : "Tap"}
                           </span>
 
-                          <button
-                            style={styles.editMiniButton}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEditPlayer(p);
-                            }}
-                          >
-                            Edit
-                          </button>
+                          <div style={styles.playerCardActions}>
+                            <button
+                              style={styles.editMiniButton}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEditPlayer(p);
+                              }}
+                            >
+                              Edit
+                            </button>
+
+                            <button
+                              style={styles.archiveMiniButton}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                archivePlayer(p.name);
+                              }}
+                            >
+                              Archive
+                            </button>
+                          </div>
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
+
+                {showArchivedPlayers && (
+                  <div style={styles.archivedCard}>
+                    <div style={styles.authTitle}>Archived Players</div>
+
+                    <div style={styles.archivedPlayersWrap}>
+                      {sortedArchivedPlayers.length === 0 ? (
+                        <div style={styles.emptyText}>No archived players.</div>
+                      ) : (
+                        sortedArchivedPlayers.map((player) => (
+                          <div key={player.name} style={styles.archivedPlayerRow}>
+                            <div style={styles.archivedPlayerName}>
+                              {displayPlayerName(player)}
+                            </div>
+                            <button
+                              style={styles.primaryButtonSmall}
+                              onClick={() => restorePlayer(player.name)}
+                            >
+                              Restore
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1955,32 +2165,34 @@ export default function App() {
               </div>
             ) : (
               <>
-                <div style={styles.topTeamActions}>
+                <div style={styles.topTeamActionsCompact}>
                   <button
                     style={{
-                      ...styles.primaryButton,
+                      ...styles.compactActionButtonPrimary,
                       opacity: teams.length === 0 || loading ? 0.6 : 1,
                     }}
                     onClick={generateNewRound}
                     disabled={teams.length === 0 || loading}
+                    title="New Round"
                   >
-                    {loading ? "Generating..." : "New Round"}
+                    {loading ? "..." : "↻"}
                   </button>
 
                   <button
                     style={{
-                      ...styles.secondaryButton,
+                      ...styles.compactActionButton,
                       opacity: teams.length === 0 ? 0.6 : 1,
                     }}
                     onClick={saveRoundForSixHours}
                     disabled={teams.length === 0}
+                    title="Save Round"
                   >
-                    Save Round
+                    💾
                   </button>
 
                   <button
                     style={{
-                      ...styles.secondaryButton,
+                      ...styles.compactActionButton,
                       opacity: teams.length >= 3 ? 1 : 0.6,
                     }}
                     onClick={() => {
@@ -1988,41 +2200,46 @@ export default function App() {
                       setMatchRoundIndex(0);
                     }}
                     disabled={teams.length < 3}
+                    title={matchMode ? "Hide Match" : "Match Mode"}
                   >
-                    {matchMode ? "Hide Match Mode" : "Match Mode"}
+                    🏐
                   </button>
 
                   <button
-                    style={styles.secondaryButton}
+                    style={styles.compactActionButton}
                     onClick={clearStoredRounds}
+                    title="Clear Saved"
                   >
-                    Clear Saved
+                    ✕
                   </button>
 
                   {skillView === "numbers" && teams.length > 0 && (
                     <button
-                      style={styles.secondaryButton}
+                      style={styles.compactActionButton}
                       onClick={() => setShowSkillInTeams((prev) => !prev)}
+                      title={showSkillInTeams ? "Hide Skill" : "Show Skill"}
                     >
-                      {showSkillInTeams ? "Hide Skill" : "Show Skill"}
+                      ★
                     </button>
                   )}
 
-                  {isMobile && mobileMoveSelection && (
-                    <button
-                      style={styles.secondaryButton}
-                      onClick={() => setMobileMoveSelection(null)}
-                    >
-                      Cancel Move
-                    </button>
-                  )}
+{teams.length > 0 && (
+<button
+style={styles.iconActionButton}
+onClick={() => setShowLockInTeams((prev) => !prev)}
+title={showLockInTeams ? "Hide Lock" : "Show Lock"}
+
+>
+{showLockInTeams ? "🔒" : "🔓"}
+</button>
+)}
                 </div>
 
                 {isMobile && teams.length > 0 && (
                   <div style={styles.mobileHintCard}>
                     {mobileMoveSelection
                       ? `Selected: ${mobileMoveSelection.name}. Tap "Move Here" on a team.`
-                      : "iPhone/Safari move mode: tap Select Move on a player, then tap Move Here on the target team."}
+                      : "Tap ↔ on a player, then tap Move Here on another team."}
                   </div>
                 )}
 
@@ -2104,7 +2321,12 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div style={styles.matchGrid}>
+                    <div
+                      style={{
+                        ...styles.matchGrid,
+                        gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+                      }}
+                    >
                       {currentMatches.length > 0 ? (
                         currentMatches.map((match, index) => (
                           <div
@@ -2241,7 +2463,7 @@ export default function App() {
                             >
                               <div style={styles.teamPlayerLeft}>
                                 <div style={styles.teamPlayerName}>
-                                  {player.name}
+                                  {displayPlayerName(player)}
                                 </div>
                               </div>
 
@@ -2249,9 +2471,9 @@ export default function App() {
                                 {isMobile && (
                                   <button
                                     style={{
-                                      ...styles.selectMoveButton,
+                                      ...styles.iconMoveButton,
                                       ...(isSelectedForMove
-                                        ? styles.selectMoveButtonActive
+                                        ? styles.iconMoveButtonActive
                                         : {}),
                                       opacity: player.locked ? 0.45 : 1,
                                     }}
@@ -2263,10 +2485,10 @@ export default function App() {
                                       );
                                     }}
                                     disabled={player.locked}
+                                    aria-label="Select move"
+                                    title="Select move"
                                   >
-                                    {isSelectedForMove
-                                      ? "Selected"
-                                      : "Select Move"}
+                                    ↔
                                   </button>
                                 )}
 
@@ -2294,20 +2516,22 @@ export default function App() {
                                   </span>
                                 )}
 
-                                <button
-                                  style={{
-                                    ...styles.inlineActionButton,
-                                    ...(player.locked
-                                      ? styles.lockButtonActive
-                                      : {}),
-                                  }}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleLock(teamIndex, playerIndex);
-                                  }}
-                                >
-                                  {player.locked ? "Unlock" : "Lock"}
-                                </button>
+{showLockInTeams && (
+<button
+style={{
+...styles.lockIconButton,
+...(player.locked ? styles.lockIconButtonActive : {}),
+}}
+onClick={(e) => {
+e.stopPropagation();
+toggleLock(teamIndex, playerIndex);
+}}
+title={player.locked ? "Unlock player" : "Lock player"}
+aria-label={player.locked ? "Unlock player" : "Lock player"}
+>
+{player.locked ? "🔒" : "🔓"}
+</button>
+)}
                               </div>
                             </div>
                           );
@@ -2326,6 +2550,13 @@ export default function App() {
         <div style={styles.modalOverlay} onClick={closeEditPlayer}>
           <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
             <h3 style={styles.modalTitle}>Edit Player</h3>
+
+            <input
+              style={styles.input}
+              value={editClub}
+              onChange={(e) => setEditClub(e.target.value)}
+              placeholder="Club short name"
+            />
 
             <input
               style={styles.input}
@@ -2374,35 +2605,35 @@ const styles = {
   },
 
   shell: {
-    maxWidth: "900px",
+    maxWidth: "940px",
     margin: "0 auto",
   },
 
   header: {
-    marginBottom: "12px",
+    marginBottom: "8px",
   },
 
   title: {
     margin: 0,
-    fontSize: "24px",
+    fontSize: "20px",
     fontWeight: "700",
     color: "#111827",
   },
 
   subtitle: {
-    margin: "4px 0 0 0",
+    margin: "2px 0 0 0",
     color: "#6b7280",
-    fontSize: "13px",
+    fontSize: "11px",
   },
 
   authCard: {
     background: "#fff",
     borderRadius: "14px",
-    padding: "12px",
+    padding: "8px",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
     display: "grid",
-    gap: "10px",
-    marginBottom: "12px",
+    gap: "6px",
+    marginBottom: "8px",
   },
 
   adminCard: {
@@ -2495,6 +2726,13 @@ const styles = {
     flexWrap: "wrap",
   },
 
+  profileName: {
+    fontSize: "18px",
+    fontWeight: "700",
+    color: "#111827",
+    marginBottom: "2px",
+  },
+
   authTitle: {
     fontSize: "15px",
     fontWeight: "700",
@@ -2543,15 +2781,15 @@ const styles = {
   tabBar: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
-    gap: "8px",
+    gap: "6px",
     marginBottom: "12px",
   },
 
   tabButton: {
     border: "none",
-    borderRadius: "12px",
-    padding: "12px",
-    fontSize: "14px",
+    borderRadius: "10px",
+    padding: "9px 10px",
+    fontSize: "13px",
     fontWeight: "600",
     background: "#e5e7eb",
     color: "#111827",
@@ -2566,7 +2804,7 @@ const styles = {
   section: {
     display: "flex",
     flexDirection: "column",
-    gap: "12px",
+    gap: "10px",
   },
 
   lockedCard: {
@@ -2582,20 +2820,20 @@ const styles = {
   toolbarTop: {
     display: "grid",
     gridTemplateColumns: "1fr auto",
-    gap: "8px",
+    gap: "6px",
     alignItems: "stretch",
   },
 
   teamCountCard: {
     background: "#fff",
     borderRadius: "14px",
-    padding: "10px 12px",
+    padding: "8px 10px",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
   },
 
   teamCountLabel: {
     display: "block",
-    fontSize: "12px",
+    fontSize: "11px",
     color: "#6b7280",
     marginBottom: "6px",
   },
@@ -2604,7 +2842,7 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: "10px",
+    gap: "8px",
     flexWrap: "wrap",
   },
 
@@ -2615,8 +2853,8 @@ const styles = {
   },
 
   countButton: {
-    width: "34px",
-    height: "34px",
+    width: "30px",
+    height: "30px",
     border: "none",
     borderRadius: "10px",
     background: "#111827",
@@ -2628,7 +2866,7 @@ const styles = {
   countValue: {
     minWidth: "30px",
     textAlign: "center",
-    fontSize: "18px",
+    fontSize: "16px",
     fontWeight: "700",
     color: "#111827",
   },
@@ -2636,8 +2874,8 @@ const styles = {
   selectedBadge: {
     background: "#fff",
     borderRadius: "14px",
-    padding: "10px 12px",
-    fontSize: "13px",
+    padding: "8px 10px",
+    fontSize: "12px",
     fontWeight: "600",
     color: "#111827",
     display: "flex",
@@ -2645,10 +2883,10 @@ const styles = {
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
   },
 
-  settingsRow: {
-    display: "flex",
+  settingsCompactRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
     gap: "8px",
-    flexWrap: "wrap",
   },
 
   settingsCard: {
@@ -2661,6 +2899,16 @@ const styles = {
     minWidth: "220px",
   },
 
+  compactSettingsCard: {
+    background: "#fff",
+    borderRadius: "14px",
+    padding: "10px 10px",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+
   settingsLabel: {
     fontSize: "12px",
     color: "#6b7280",
@@ -2669,17 +2917,17 @@ const styles = {
 
   settingsToggleRow: {
     display: "flex",
-    gap: "8px",
+    gap: "6px",
     flexWrap: "wrap",
   },
 
   smallToggleButton: {
     border: "none",
     borderRadius: "10px",
-    padding: "8px 10px",
+    padding: "7px 9px",
     background: "#e5e7eb",
     color: "#111827",
-    fontSize: "12px",
+    fontSize: "11px",
     fontWeight: "700",
     cursor: "pointer",
   },
@@ -2705,12 +2953,13 @@ const styles = {
   actionRow: {
     display: "flex",
     gap: "8px",
+    flexWrap: "wrap",
   },
 
-  topTeamActions: {
-    display: "flex",
+  topTeamActionsCompact: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(48px, 1fr))",
     gap: "8px",
-    flexWrap: "wrap",
   },
 
   primaryButton: {
@@ -2723,6 +2972,17 @@ const styles = {
     cursor: "pointer",
   },
 
+  primaryButtonSmall: {
+    border: "none",
+    borderRadius: "10px",
+    padding: "8px 10px",
+    background: "#111827",
+    color: "#fff",
+    fontWeight: "600",
+    cursor: "pointer",
+    fontSize: "12px",
+  },
+
   secondaryButton: {
     border: "none",
     borderRadius: "12px",
@@ -2731,6 +2991,30 @@ const styles = {
     color: "#111827",
     fontWeight: "600",
     cursor: "pointer",
+  },
+
+  compactActionButtonPrimary: {
+    border: "none",
+    borderRadius: "10px",
+    padding: "9px 10px",
+    background: "#111827",
+    color: "#fff",
+    fontWeight: "700",
+    cursor: "pointer",
+    fontSize: "12px",
+    whiteSpace: "nowrap",
+  },
+
+  compactActionButton: {
+    border: "none",
+    borderRadius: "10px",
+    padding: "9px 10px",
+    background: "#e5e7eb",
+    color: "#111827",
+    fontWeight: "700",
+    cursor: "pointer",
+    fontSize: "12px",
+    whiteSpace: "nowrap",
   },
 
   formCard: {
@@ -2776,14 +3060,13 @@ const styles = {
   },
 
   playerCardCompact: {
-    border: "none",
     borderRadius: "12px",
     background: "#fff",
     padding: "8px 10px",
     textAlign: "left",
     cursor: "pointer",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-    minHeight: "62px",
+    minHeight: "72px",
     userSelect: "none",
     WebkitUserSelect: "none",
     WebkitTouchCallout: "none",
@@ -2835,6 +3118,12 @@ const styles = {
     color: "#6b7280",
   },
 
+  playerCardActions: {
+    display: "flex",
+    gap: "6px",
+    alignItems: "center",
+  },
+
   editMiniButton: {
     border: "none",
     borderRadius: "8px",
@@ -2846,16 +3135,58 @@ const styles = {
     cursor: "pointer",
   },
 
+  archiveMiniButton: {
+    border: "none",
+    borderRadius: "8px",
+    padding: "5px 8px",
+    background: "#fee2e2",
+    color: "#b91c1c",
+    fontSize: "11px",
+    fontWeight: "700",
+    cursor: "pointer",
+  },
+
   generateButtonInline: {
     border: "none",
     borderRadius: "12px",
-    padding: "10px 14px",
+    padding: "8px 12px",
     background: "#16a34a",
     color: "#fff",
-    fontSize: "14px",
+    fontSize: "13px",
     fontWeight: "700",
     cursor: "pointer",
     whiteSpace: "nowrap",
+  },
+
+  archivedCard: {
+    background: "#fff",
+    borderRadius: "14px",
+    padding: "12px",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    display: "grid",
+    gap: "10px",
+  },
+
+  archivedPlayersWrap: {
+    display: "grid",
+    gap: "8px",
+  },
+
+  archivedPlayerRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+    background: "#f8fafc",
+    border: "1px solid #e5e7eb",
+    borderRadius: "12px",
+    padding: "10px",
+  },
+
+  archivedPlayerName: {
+    fontSize: "13px",
+    fontWeight: "700",
+    color: "#111827",
   },
 
   mobileHintCard: {
@@ -2863,18 +3194,18 @@ const styles = {
     color: "#9a3412",
     border: "1px solid #fdba74",
     borderRadius: "12px",
-    padding: "10px 12px",
-    fontSize: "12px",
+    padding: "8px 10px",
+    fontSize: "11px",
     fontWeight: "600",
   },
 
   matchModeCard: {
     background: "#fff",
     borderRadius: "14px",
-    padding: "12px",
+    padding: "10px",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
     display: "grid",
-    gap: "12px",
+    gap: "10px",
   },
 
   matchModeHeader: {
@@ -2923,7 +3254,6 @@ const styles = {
 
   matchGrid: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
     gap: "10px",
   },
 
@@ -2969,7 +3299,7 @@ const styles = {
   teamCard: {
     background: "#fff",
     borderRadius: "14px",
-    padding: "10px",
+    padding: "7px",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
     minWidth: 0,
   },
@@ -2979,11 +3309,11 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "center",
     gap: "8px",
-    marginBottom: "8px",
+    marginBottom: "4px",
   },
 
   teamTitle: {
-    fontSize: "15px",
+    fontSize: "13px",
     fontWeight: "700",
     color: "#111827",
   },
@@ -2992,8 +3322,8 @@ const styles = {
     borderRadius: "999px",
     background: "#111827",
     color: "#fff",
-    padding: "4px 8px",
-    fontSize: "12px",
+    padding: "3px 7px",
+    fontSize: "10px",
     fontWeight: "700",
     whiteSpace: "nowrap",
   },
@@ -3013,15 +3343,15 @@ const styles = {
   teamPlayers: {
     display: "flex",
     flexDirection: "column",
-    gap: "6px",
+    gap: "2px",
   },
 
   teamPlayerRow: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    gap: "8px",
-    padding: "6px 0",
+    gap: "6px",
+    padding: "3px 0",
     borderBottom: "1px solid #eef2f7",
     userSelect: "none",
     WebkitUserSelect: "none",
@@ -3043,19 +3373,21 @@ const styles = {
   },
 
   teamPlayerName: {
-    fontSize: "13px",
-    fontWeight: "700",
-    color: "#111827",
-    lineHeight: 1.2,
-    wordBreak: "break-word",
-  },
+fontSize: "13px",
+fontWeight: "700",
+color: "#111827",
+lineHeight: 1.15,
+whiteSpace: "nowrap",
+overflow: "hidden",
+textOverflow: "ellipsis",
+},
 
   teamPlayerRight: {
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
-    gap: "6px",
-    flexWrap: "wrap",
+    gap: "4px",
+    flexWrap: "nowrap",
     flexShrink: 0,
   },
 
@@ -3070,18 +3402,23 @@ const styles = {
     cursor: "pointer",
   },
 
-  selectMoveButton: {
+  iconMoveButton: {
     border: "none",
-    borderRadius: "8px",
-    padding: "5px 8px",
+    borderRadius: "999px",
+    width: "26px",
+    height: "26px",
     background: "#dbeafe",
     color: "#1d4ed8",
-    fontSize: "11px",
+    fontSize: "13px",
     fontWeight: "700",
     cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 0,
   },
 
-  selectMoveButtonActive: {
+  iconMoveButtonActive: {
     background: "#1d4ed8",
     color: "#fff",
   },
@@ -3123,4 +3460,95 @@ const styles = {
     gridTemplateColumns: "1fr 1fr",
     gap: "8px",
   },
+
+iconActionButton: {
+border: "none",
+borderRadius: "12px",
+height: "42px",
+minWidth: "42px",
+background: "#e5e7eb",
+color: "#111827",
+fontWeight: "700",
+cursor: "pointer",
+fontSize: "16px",
+display: "flex",
+alignItems: "center",
+justifyContent: "center",
+},
+
+iconActionButtonPrimary: {
+border: "none",
+borderRadius: "12px",
+height: "42px",
+minWidth: "42px",
+background: "#111827",
+color: "#fff",
+fontWeight: "700",
+cursor: "pointer",
+fontSize: "16px",
+display: "flex",
+alignItems: "center",
+justifyContent: "center",
+},
+
+profileCompactRow: {
+display: "flex",
+justifyContent: "space-between",
+alignItems: "center",
+gap: "8px",
+},
+
+profileCompactLeft: {
+minWidth: 0,
+display: "grid",
+gap: "1px",
+},
+
+profileCompactName: {
+fontSize: "14px",
+fontWeight: "800",
+color: "#111827",
+whiteSpace: "nowrap",
+overflow: "hidden",
+textOverflow: "ellipsis",
+},
+
+profileCompactRole: {
+fontSize: "11px",
+color: "#6b7280",
+textTransform: "capitalize",
+},
+
+profileCompactLogout: {
+border: "none",
+borderRadius: "9px",
+padding: "7px 10px",
+background: "#e5e7eb",
+color: "#111827",
+fontWeight: "700",
+cursor: "pointer",
+fontSize: "12px",
+flexShrink: 0,
+},
+
+lockIconButton: {
+border: "none",
+borderRadius: "999px",
+width: "26px",
+height: "26px",
+background: "#e5e7eb",
+color: "#111827",
+fontSize: "12px",
+cursor: "pointer",
+display: "flex",
+alignItems: "center",
+justifyContent: "center",
+padding: 0,
+flexShrink: 0,
+},
+
+lockIconButtonActive: {
+background: "#111827",
+color: "#fff",
+},
 };
