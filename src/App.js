@@ -17,19 +17,332 @@ const CURRENT_ROUND_TTL_MS = 60 * 60 * 1000;
 const SAVED_ROUND_TTL_MS = 6 * 60 * 60 * 1000;
 
 const SKILL_SCALE_OPTIONS = [3, 5];
-const TRAINER_COPY_OPTIONS = [
-  { value: "blank", label: "Blank sheet" },
-  { value: "main", label: "Copy players from main sheet" },
-  { value: "trainer", label: "Copy players from existing trainer" },
+const TRAINER_COPY_OPTIONS_BASE = [
+  { value: "blank", key: "blankSheet" },
+  { value: "main", key: "copyPlayersFromMainSheet" },
+  { value: "trainer", key: "copyPlayersFromExistingTrainer" },
 ];
 const MATCH_METHOD_OPTIONS = [
-  { value: "balanced", label: "Pattern" },
-  { value: "shuffle", label: "Shuffle" },
+  { value: "balanced" },
+  { value: "shuffle" },
 ];
+
+const CLUB_OPTIONS = [
+  "Bergen Vest",
+  "Drammen",
+  "Furuset",
+  "Haried",
+  "LTSK",
+  "Nanbargal",
+  "New Star",
+  "Sangam",
+  "Senkathir",
+  "Sevvanam",
+  "Other",
+];
+
+const DEFAULT_VISIBLE_ACTIONS = {
+  saveRound: true,
+  clearSaved: true,
+  skillToggle: true,
+  lockToggle: true,
+  export: false,
+};
+
+function getToolbarSettingsStorageKey(username) {
+  return `volleyball-visible-actions-${String(username || "guest").trim()}`;
+}
+
+function getLanguageStorageKey(username) {
+  return `volleyball-language-${String(username || "guest").trim()}`;
+}
+
+const TRANSLATIONS = {
+  en: {
+    trainer: "Trainer",
+    logout: "Logout",
+    loginOk: "Login ok.",
+    trainerLogin: "Trainer Login",
+    loginRequired: "Login required to view players",
+    username: "Username",
+    password: "Password",
+    login: "Login",
+    loggingIn: "Logging in...",
+    players: "Players",
+    teams: "Teams",
+    numberOfTeams: "Number of Teams",
+    selected: "Selected",
+    skillView: "Skill View",
+    skillScale: "Skill Scale",
+    sort: "Sort",
+    club: "Club",
+    all: "All",
+    addPlayer: "Add Player",
+    archived: "Archived",
+    manage: "Manage",
+    done: "Done",
+    savePlayer: "Save Player",
+    edit: "Edit",
+    archive: "Archive",
+    restore: "Restore",
+    noArchivedPlayers: "No archived players.",
+    newRound: "New Round",
+    saveRound: "Save Round",
+    matchMode: "Match Mode",
+    hideMatch: "Hide Match",
+    clearSaved: "Clear Saved",
+    showSkill: "Show Skill",
+    hideSkill: "Hide Skill",
+    toolbarSettings: "Toolbar Settings",
+    removePlayer: "Remove Player",
+    moveHere: "Move Here",
+    lock: "Lock",
+    unlock: "Unlock",
+    editPlayer: "Edit Player",
+    cancel: "Cancel",
+    save: "Save",
+    close: "Close",
+    removePlayerFromCurrentTeams: "Remove player from current teams",
+    noPlayersToRemove: "No players to remove",
+    addPlayerToCurrentTeams: "Add player to current teams",
+    noPlayersAvailable: "No players available",
+    add: "Add",
+    noClub: "No Club",
+    export: "Export",
+    skillToggleLabel: "Skill Toggle",
+    lockToggleLabel: "Lock Toggle",
+    generateTeams: "Generate Teams",
+    generating: "Generating...",
+    hideArchived: "Hide Archived",
+    archivedPlayers: "Archived Players",
+    saving: "Saving...",
+    selectClub: "Select club",
+    customClubName: "Custom club name",
+    playerName: "Player name",
+    saveShare: "Save / Share",
+    method: "Method",
+    courts: "Courts",
+    prevRound: "Prev Round",
+    nextRound: "Next Round",
+    noMatchesAvailable: "No matches available.",
+    selectMove: "Select move",
+    createTrainer: "Create Trainer",
+    newTrainer: "New Trainer",
+    creating: "Creating...",
+    trainerUsernamePlaceholder: "Trainer username",
+    trainerPasswordPlaceholder: "Trainer password",
+    selectTrainer: "Select trainer",
+    openSheet: "Open sheet",
+    activeStatus: "Active",
+    inactiveStatus: "Inactive",
+    deactivate: "Deactivate",
+    activate: "Activate",
+    resetPassword: "Reset Password",
+    newPassword: "New password",
+    archivedTrainers: "Archived Trainers",
+    createTrainerSubtitle: "Creates a new trainer and Google Sheet automatically",
+    skillViewNumbers: "Numbers",
+    skillViewColors: "Colors",
+    copyPlayers: "Copy players",
+    blankSheet: "Blank sheet",
+    copyPlayersFromMainSheet: "Copy players from main sheet",
+    copyPlayersFromExistingTrainer: "Copy players from existing trainer",
+    usernameLabel: "Username:",
+    spreadsheetIdLabel: "Spreadsheet ID:",
+    copyModeLabel: "Copy mode:",
+    openTrainerSheet: "Open trainer sheet",
+    trainerUsersTitle: "Trainer Users",
+    trainerUsersSubtitle: "Admin can activate, deactivate, reset passwords and archive trainers",
+    noActiveTrainers: "No active trainers yet.",
+    archivedTrainersSubtitle: "Archived trainers can be restored later",
+    noArchivedTrainers: "No archived trainers.",
+    archivedStatus: "Archived",
+    playersLoginRequired: "Log in as admin or trainer to view the player list.",
+    teamsLoginRequired: "Log in as admin or trainer to use Teams.",
+    roundLabel: "Round",
+    ofLabel: "of",
+    courtLabel: "Court",
+    vsLabel: "vs",
+    enterUsernamePassword: "Please enter username and password.",
+    loginFailed: "Login failed.",
+    selectTrainerToCopy: "Select a trainer to copy from.",
+    couldNotCreateTrainer: "Could not create trainer.",
+    trainerCreated: "Trainer created.",
+    trainerActivated: "Trainer activated.",
+    trainerDeactivated: "Trainer deactivated.",
+    enterNewPasswordFirst: "Enter a new password first.",
+    couldNotResetPassword: "Could not reset password.",
+    passwordResetOk: "Password reset ok.",
+    archiveTrainerConfirm: "Are you sure you want to archive trainer",
+    trainerArchived: "Trainer archived.",
+    couldNotArchiveTrainer: "Could not archive trainer.",
+    trainerRestored: "Trainer restored.",
+    couldNotRestoreTrainer: "Could not restore trainer.",
+    archivePlayerConfirm: "Archive player",
+    couldNotArchivePlayer: "Could not archive player.",
+    playerArchived: "Player archived.",
+    couldNotRestorePlayer: "Could not restore player.",
+    playerRestored: "Player restored.",
+    roundSavedForSixHours: "Round saved for 6 hours on this device.",
+    couldNotSaveRound: "Could not save round.",
+    savedRoundCleared: "Saved round cleared on this device.",
+    couldNotSavePlayer: "Could not save player.",
+    couldNotUpdatePlayer: "Could not update player.",
+    pointsLabel: "pt",
+    appTitle: "Make Teams Pro",
+    appSubtitle: "Thines Vijay ©",
+    matchPattern: "Pattern",
+    matchShuffle: "Shuffle",
+    otherClub: "Other",
+    loadingShort: "...",
+  },
+  no: {
+    trainer: "Trener",
+    logout: "Logg ut",
+    loginOk: "Innlogging ok.",
+    trainerLogin: "Trenerinnlogging",
+    loginRequired: "Innlogging kreves for å se spillere",
+    username: "Brukernavn",
+    password: "Passord",
+    login: "Logg inn",
+    loggingIn: "Logger inn...",
+    players: "Spillere",
+    teams: "Lag",
+    numberOfTeams: "Antall lag",
+    selected: "Valgt",
+    skillView: "Visning",
+    skillScale: "Nivåskala",
+    sort: "Sortering",
+    club: "Klubb",
+    all: "Alle",
+    addPlayer: "Legg til spiller",
+    archived: "Arkiv",
+    manage: "Administrer",
+    done: "Ferdig",
+    savePlayer: "Lagre spiller",
+    edit: "Rediger",
+    archive: "Arkiver",
+    restore: "Gjenopprett",
+    noArchivedPlayers: "Ingen arkiverte spillere.",
+    newRound: "Ny runde",
+    saveRound: "Lagre runde",
+    matchMode: "Kampmodus",
+    hideMatch: "Skjul kampmodus",
+    clearSaved: "Tøm lagret",
+    showSkill: "Vis nivå",
+    hideSkill: "Skjul nivå",
+    toolbarSettings: "Verktøylinje",
+    removePlayer: "Fjern spiller",
+    moveHere: "Flytt hit",
+    lock: "Lås",
+    unlock: "Lås opp",
+    editPlayer: "Rediger spiller",
+    cancel: "Avbryt",
+    save: "Lagre",
+    close: "Lukk",
+    removePlayerFromCurrentTeams: "Fjern spiller fra dagens lag",
+    noPlayersToRemove: "Ingen spillere å fjerne",
+    addPlayerToCurrentTeams: "Legg til spiller i dagens lag",
+    noPlayersAvailable: "Ingen tilgjengelige spillere",
+    add: "Legg til",
+    noClub: "Ingen klubb",
+    export: "Eksporter",
+    skillToggleLabel: "Nivå-knapp",
+    lockToggleLabel: "Lås-knapp",
+    generateTeams: "Generer lag",
+    generating: "Genererer...",
+    hideArchived: "Skjul arkiv",
+    archivedPlayers: "Arkiverte spillere",
+    saving: "Lagrer...",
+    selectClub: "Velg klubb",
+    customClubName: "Tilpasset klubbnavn",
+    playerName: "Spillernavn",
+    saveShare: "Lagre / Del",
+    method: "Metode",
+    courts: "Baner",
+    prevRound: "Forrige runde",
+    nextRound: "Neste runde",
+    noMatchesAvailable: "Ingen kamper tilgjengelig.",
+    selectMove: "Velg flytt",
+    createTrainer: "Opprett trener",
+    newTrainer: "Ny trener",
+    creating: "Oppretter...",
+    trainerUsernamePlaceholder: "Trener-brukernavn",
+    trainerPasswordPlaceholder: "Trener-passord",
+    selectTrainer: "Velg trener",
+    openSheet: "Åpne ark",
+    activeStatus: "Aktiv",
+    inactiveStatus: "Inaktiv",
+    deactivate: "Deaktiver",
+    activate: "Aktiver",
+    resetPassword: "Nullstill passord",
+    newPassword: "Nytt passord",
+    archivedTrainers: "Arkiverte trenere",
+    createTrainerSubtitle: "Opprett en ny trener og Google Sheet automatisk",
+    skillViewNumbers: "Tall",
+    skillViewColors: "Farger",
+    copyPlayers: "Kopier spillere",
+    blankSheet: "Tomt ark",
+    copyPlayersFromMainSheet: "Kopier spillere fra hovedarket",
+    copyPlayersFromExistingTrainer: "Kopier spillere fra eksisterende trener",
+    usernameLabel: "Brukernavn:",
+    spreadsheetIdLabel: "Google Sheet ID:",
+    copyModeLabel: "Kopieringsmodus:",
+    openTrainerSheet: "Åpne trenerark",
+    trainerUsersTitle: "Trenere",
+    trainerUsersSubtitle: "Admin kan aktivere, deaktivere, tilbakestille passord og arkivere trenere",
+    noActiveTrainers: "Ingen aktive trenere ennå.",
+    archivedTrainersSubtitle: "Arkiverte trenere kan gjenopprettes senere",
+    noArchivedTrainers: "Ingen arkiverte trenere.",
+    archivedStatus: "Arkivert",
+    playersLoginRequired: "Logg inn som admin eller trener for å se spillerlisten.",
+    teamsLoginRequired: "Logg inn som admin eller trener for å bruke Lag.",
+    roundLabel: "Runde",
+    ofLabel: "av",
+    courtLabel: "Bane",
+    vsLabel: "mot",
+    enterUsernamePassword: "Vennligst skriv inn brukernavn og passord.",
+    loginFailed: "Innlogging mislyktes.",
+    selectTrainerToCopy: "Velg en trener å kopiere fra.",
+    couldNotCreateTrainer: "Kunne ikke opprette trener.",
+    trainerCreated: "Trener opprettet.",
+    trainerActivated: "Trener aktivert.",
+    trainerDeactivated: "Trener deaktivert.",
+    enterNewPasswordFirst: "Skriv inn nytt passord først.",
+    couldNotResetPassword: "Kunne ikke tilbakestille passord.",
+    passwordResetOk: "Passord tilbakestilt ok.",
+    archiveTrainerConfirm: "Er du sikker på at du vil arkivere trener",
+    trainerArchived: "Trener arkivert.",
+    couldNotArchiveTrainer: "Kunne ikke arkivere trener.",
+    trainerRestored: "Trener gjenopprettet.",
+    couldNotRestoreTrainer: "Kunne ikke gjenopprette trener.",
+    archivePlayerConfirm: "Arkiver spiller",
+    couldNotArchivePlayer: "Kunne ikke arkivere spiller.",
+    playerArchived: "Spiller arkivert.",
+    couldNotRestorePlayer: "Kunne ikke gjenopprette spiller.",
+    playerRestored: "Spiller gjenopprettet.",
+    roundSavedForSixHours: "Runde lagret i 6 timer på denne enheten.",
+    couldNotSaveRound: "Kunne ikke lagre runde.",
+    savedRoundCleared: "Lagret runde slettet fra denne enheten.",
+    couldNotSavePlayer: "Kunne ikke lagre spiller.",
+    couldNotUpdatePlayer: "Kunne ikke oppdatere spiller.",
+    pointsLabel: "poeng",
+    appTitle: "Make Teams Pro",
+    appSubtitle: "Thines Vijay ©",
+    matchPattern: "Mønster",
+    matchShuffle: "Bland",
+    otherClub: "Annet",
+    loadingShort: "...",
+  },
+};
+
+function getPlayerViewModeStorageKey(username) {
+  return `volleyball-player-view-mode-${String(username || "guest").trim()}`;
+}
 
 function normalizeTeamName(index, existingName) {
   if (existingName && String(existingName).trim()) return existingName;
-  return `Team ${String.fromCharCode(65 + index)}`;
+  return `Lag ${String.fromCharCode(65 + index)}`;
 }
 
 function normalizeTeams(rawTeams) {
@@ -85,7 +398,7 @@ function readStorageWithTtl(key, ttlMs) {
       teamCount: Number(parsed.teamCount) || 2,
     };
   } catch (error) {
-    console.error("Kunne ikke lese lagring:", error);
+    console.error("Could not read storage:", error);
     localStorage.removeItem(key);
     return null;
   }
@@ -276,12 +589,10 @@ export default function App() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState("");
   const [newPlayerSkill, setNewPlayerSkill] = useState(1);
-  const [newPlayerClub, setNewPlayerClub] = useState("");
 
   const [editingPlayer, setEditingPlayer] = useState(null);
   const [editName, setEditName] = useState("");
   const [editSkill, setEditSkill] = useState(1);
-  const [editClub, setEditClub] = useState("");
   const [savingPlayer, setSavingPlayer] = useState(false);
 
   const [matchMode, setMatchMode] = useState(false);
@@ -299,11 +610,11 @@ export default function App() {
     return raw === null ? true : raw === "true";
   });
 
-const [showLockInTeams, setShowLockInTeams] = useState(() => {
-if (typeof window === "undefined") return true;
-const raw = localStorage.getItem(TEAM_LOCK_VISIBILITY_KEY);
-return raw === null ? true : raw === "true";
-});
+  const [showLockInTeams, setShowLockInTeams] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const raw = localStorage.getItem(TEAM_LOCK_VISIBILITY_KEY);
+    return raw === null ? true : raw === "true";
+  });
 
   const [playerSortMode, setPlayerSortMode] = useState(() => {
     if (typeof window === "undefined") return "name";
@@ -313,8 +624,7 @@ return raw === null ? true : raw === "true";
 
   const [showArchivedPlayers, setShowArchivedPlayers] = useState(false);
   const [playerActionMessage, setPlayerActionMessage] = useState("");
-
-const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
+  const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
 
   const [showCreateTrainerForm, setShowCreateTrainerForm] = useState(false);
   const [trainerUsername, setTrainerUsername] = useState("");
@@ -337,37 +647,21 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
   const [showAddToTeamsModal, setShowAddToTeamsModal] = useState(false);
   const [showExportView, setShowExportView] = useState(false);
   const [showToolbarSettings, setShowToolbarSettings] = useState(false);
-  const [showRemoveFromTeamsModal, setShowRemoveFromTeamsModal] = useState(false);
+  const [showRemoveFromTeamsModal, setShowRemoveFromTeamsModal] =
+    useState(false);
 
-  const [visibleActions, setVisibleActions] = useState(() => {
-    try {
-      const raw = localStorage.getItem("volleyball-visible-actions");
-      if (!raw) {
-        return {
-          newRound: true,
-          matchMode: true,
-          addPlayer: true,
-          saveRound: false,
-          clearSaved: false,
-          skillToggle: false,
-          lockToggle: false,
-          export: true,
-        };
-      }
-      return JSON.parse(raw);
-    } catch {
-      return {
-        newRound: true,
-        matchMode: true,
-        addPlayer: true,
-        saveRound: false,
-        clearSaved: false,
-        skillToggle: false,
-        lockToggle: false,
-        export: true,
-      };
-    }
+  const [visibleActions, setVisibleActions] = useState(DEFAULT_VISIBLE_ACTIONS);
+  const [playerViewMode, setPlayerViewMode] = useState("all");
+  const [language, setLanguage] = useState(() => {
+    if (typeof window === "undefined") return "en";
+    return localStorage.getItem(getLanguageStorageKey("guest")) || "en";
   });
+  const t = TRANSLATIONS[language] || TRANSLATIONS.en;
+  const [newPlayerClubOption, setNewPlayerClubOption] = useState("");
+  const [newPlayerClubCustom, setNewPlayerClubCustom] = useState("");
+  const [editClubOption, setEditClubOption] = useState("");
+  const [editClubCustom, setEditClubCustom] = useState("");
+
 
   const removablePlayersFromTeams = useMemo(() => {
     return teams.flatMap((team, teamIndex) =>
@@ -466,7 +760,10 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
           return;
         }
 
-        if (Array.isArray(data?.players) || Array.isArray(data?.archivedPlayers)) {
+        if (
+          Array.isArray(data?.players) ||
+          Array.isArray(data?.archivedPlayers)
+        ) {
           setPlayers(Array.isArray(data.players) ? data.players : []);
           setArchivedPlayers(
             Array.isArray(data.archivedPlayers) ? data.archivedPlayers : []
@@ -477,7 +774,7 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
         setPlayers([]);
         setArchivedPlayers([]);
       } catch (error) {
-        console.error("Kunne ikke hente spillere:", error);
+        console.error("Could not load players:", error);
         setPlayers([]);
         setArchivedPlayers([]);
       }
@@ -508,7 +805,7 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
       const data = await res.json();
       setTrainerUsers(Array.isArray(data?.users) ? data.users : []);
     } catch (error) {
-      console.error("Kunne ikke hente trainer users:", error);
+      console.error("Could not load trainer users:", error);
       setTrainerUsers([]);
     }
   }, [auth.loggedIn, auth.password, auth.role, auth.username]);
@@ -533,7 +830,7 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
           }),
         });
       } catch (error) {
-        console.error("Kunne ikke lagre brukerinnstillinger:", error);
+        console.error("Could not save user settings:", error);
       }
     },
     [auth.loggedIn, auth.password, auth.username]
@@ -544,7 +841,7 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
     const password = loginPassword.trim();
 
     if (!username || !password) {
-      setLoginMessage("Skriv inn brukernavn og passord.");
+      setLoginMessage(t.enterUsernamePassword);
       return;
     }
 
@@ -567,7 +864,7 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
       const data = await res.json();
 
       if (!data?.success) {
-        setLoginMessage(data?.message || "Login failed.");
+        setLoginMessage(data?.message || t.loginFailed);
         setPlayers([]);
         setArchivedPlayers([]);
         return;
@@ -592,7 +889,7 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
       setSkillScale(nextSkillScale);
       setLoginUsername("");
       setLoginPassword("");
-      setLoginMessage("Login ok.");
+      setLoginMessage(t.loginOk);
       setTrainerActionMessage("");
       setCreateTrainerMessage("");
       setCreatedTrainerInfo(null);
@@ -603,8 +900,8 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
         password,
       });
     } catch (error) {
-      console.error("Kunne ikke logge inn:", error);
-      setLoginMessage("Login failed.");
+      console.error("Could not log in:", error);
+      setLoginMessage(t.loginFailed);
       setPlayers([]);
       setArchivedPlayers([]);
     } finally {
@@ -633,7 +930,7 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
     const newTrainerPassword = trainerPassword.trim();
 
     if (!newTrainerUsername || !newTrainerPassword) {
-      setCreateTrainerMessage("Skriv inn username og password.");
+      setCreateTrainerMessage(t.enterUsernamePassword);
       return;
     }
 
@@ -641,7 +938,7 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
       trainerCopyMode === "trainer" &&
       !String(copyFromTrainerUsername || "").trim()
     ) {
-      setCreateTrainerMessage("Velg en trainer å kopiere fra.");
+      setCreateTrainerMessage(t.selectTrainerToCopy);
       return;
     }
 
@@ -674,12 +971,12 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
       const data = await res.json();
 
       if (!data?.success) {
-        setCreateTrainerMessage(data?.message || "Kunne ikke opprette trener.");
+        setCreateTrainerMessage(data?.message || t.couldNotCreateTrainer);
         return;
       }
 
       setCreatedTrainerInfo(data.user || null);
-      setCreateTrainerMessage("Trainer opprettet.");
+      setCreateTrainerMessage(t.trainerCreated);
       setTrainerUsername("");
       setTrainerPassword("");
       setTrainerSkillView("numbers");
@@ -689,8 +986,8 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
       setShowCreateTrainerForm(false);
       await loadTrainerUsers();
     } catch (error) {
-      console.error("Kunne ikke opprette trener:", error);
-      setCreateTrainerMessage("Kunne ikke opprette trener.");
+      console.error("Could not create trainer:", error);
+      setCreateTrainerMessage(t.couldNotCreateTrainer);
     } finally {
       setCreatingTrainer(false);
     }
@@ -718,17 +1015,17 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
       const data = await res.json();
 
       if (!data?.success) {
-        setTrainerActionMessage(data?.message || "Kunne ikke oppdatere trener.");
+        setTrainerActionMessage(data?.message || t.couldNotCreateTrainer);
         return;
       }
 
       setTrainerActionMessage(
-        active ? "Trainer activated." : "Trainer deactivated."
+        active ? t.trainerActivated : t.trainerDeactivated
       );
       await loadTrainerUsers();
     } catch (error) {
-      console.error("Kunne ikke oppdatere trenerstatus:", error);
-      setTrainerActionMessage("Kunne ikke oppdatere trener.");
+      console.error("Could not update trainer status:", error);
+      setTrainerActionMessage("Could not update trainer.");
     }
   }
 
@@ -736,7 +1033,7 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
     const newPassword = String(trainerPasswords[targetUsername] || "").trim();
 
     if (!newPassword) {
-      setTrainerActionMessage("Skriv inn nytt passord først.");
+      setTrainerActionMessage(t.enterNewPasswordFirst);
       return;
     }
 
@@ -761,7 +1058,7 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
       const data = await res.json();
 
       if (!data?.success) {
-        setTrainerActionMessage(data?.message || "Kunne ikke resette passord.");
+        setTrainerActionMessage(data?.message || t.couldNotResetPassword);
         return;
       }
 
@@ -769,16 +1066,16 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
         ...prev,
         [targetUsername]: "",
       }));
-      setTrainerActionMessage("Password reset ok.");
+      setTrainerActionMessage(t.passwordResetOk);
     } catch (error) {
-      console.error("Kunne ikke resette passord:", error);
-      setTrainerActionMessage("Kunne ikke resette passord.");
+      console.error("Could not reset password:", error);
+      setTrainerActionMessage(t.couldNotResetPassword);
     }
   }
 
   async function archiveTrainer(targetUsername) {
     const confirmed = window.confirm(
-      `Er du sikker på at du vil arkivere trainer "${targetUsername}"?`
+      `${t.archiveTrainerConfirm} "${targetUsername}"?`
     );
     if (!confirmed) return;
 
@@ -802,15 +1099,15 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
       const data = await res.json();
 
       if (!data?.success) {
-        setTrainerActionMessage(data?.message || "Kunne ikke arkivere trainer.");
+        setTrainerActionMessage(data?.message || t.couldNotArchiveTrainer);
         return;
       }
 
-      setTrainerActionMessage("Trainer archived.");
+      setTrainerActionMessage(t.trainerArchived);
       await loadTrainerUsers();
     } catch (error) {
-      console.error("Kunne ikke arkivere trainer:", error);
-      setTrainerActionMessage("Kunne ikke arkivere trainer.");
+      console.error("Could not archive trainer:", error);
+      setTrainerActionMessage(t.couldNotArchiveTrainer);
     }
   }
 
@@ -835,22 +1132,20 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
       const data = await res.json();
 
       if (!data?.success) {
-        setTrainerActionMessage(
-          data?.message || "Kunne ikke gjenopprette trainer."
-        );
+        setTrainerActionMessage(data?.message || t.couldNotRestoreTrainer);
         return;
       }
 
-      setTrainerActionMessage("Trainer restored.");
+      setTrainerActionMessage(t.trainerRestored);
       await loadTrainerUsers();
     } catch (error) {
-      console.error("Kunne ikke gjenopprette trainer:", error);
-      setTrainerActionMessage("Kunne ikke gjenopprette trainer.");
+      console.error("Could not restore trainer:", error);
+      setTrainerActionMessage(t.couldNotRestoreTrainer);
     }
   }
 
   async function archivePlayer(playerName) {
-    const confirmed = window.confirm(`Archive player "${playerName}"?`);
+    const confirmed = window.confirm(`${t.archivePlayerConfirm} "${playerName}"?`);
     if (!confirmed) return;
 
     try {
@@ -872,16 +1167,16 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
       const data = await res.json();
 
       if (!data?.success) {
-        setPlayerActionMessage(data?.message || "Could not archive player.");
+        setPlayerActionMessage(data?.message || t.couldNotArchivePlayer);
         return;
       }
 
-      setPlayerActionMessage("Player archived.");
+      setPlayerActionMessage(t.playerArchived);
       setSelected((prev) => prev.filter((name) => name !== playerName));
       await loadPlayers();
     } catch (error) {
-      console.error("Kunne ikke arkivere spiller:", error);
-      setPlayerActionMessage("Could not archive player.");
+      console.error("Could not archive player:", error);
+      setPlayerActionMessage(t.couldNotArchivePlayer);
     }
   }
 
@@ -905,15 +1200,15 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
       const data = await res.json();
 
       if (!data?.success) {
-        setPlayerActionMessage(data?.message || "Could not restore player.");
+        setPlayerActionMessage(data?.message || t.couldNotRestorePlayer);
         return;
       }
 
-      setPlayerActionMessage("Player restored.");
+      setPlayerActionMessage(t.playerRestored);
       await loadPlayers();
     } catch (error) {
-      console.error("Kunne ikke gjenopprette spiller:", error);
-      setPlayerActionMessage("Could not restore player.");
+      console.error("Could not restore player:", error);
+      setPlayerActionMessage(t.couldNotRestorePlayer);
     }
   }
 
@@ -985,7 +1280,7 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
       const payload = buildStoragePayload(teams, teamCount);
       localStorage.setItem(roundCacheKey, JSON.stringify(payload));
     } catch (error) {
-      console.error("Kunne ikke lagre nåværende runde:", error);
+      console.error("Could not save current round:", error);
     }
   }, [auth, teams, teamCount]);
 
@@ -993,7 +1288,7 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
     try {
       localStorage.setItem(SKILL_VIEW_KEY, skillView);
     } catch (error) {
-      console.error("Kunne ikke lagre skill view:", error);
+      console.error("Could not save skill view:", error);
     }
   }, [skillView]);
 
@@ -1001,7 +1296,7 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
     try {
       localStorage.setItem(SKILL_SCALE_KEY, String(skillScale));
     } catch (error) {
-      console.error("Kunne ikke lagre skill scale:", error);
+      console.error("Could not save skill scale:", error);
     }
   }, [skillScale]);
 
@@ -1009,23 +1304,23 @@ const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
     try {
       localStorage.setItem(TEAM_SKILL_VISIBILITY_KEY, String(showSkillInTeams));
     } catch (error) {
-      console.error("Kunne ikke lagre team skill visibility:", error);
+      console.error("Could not save team skill visibility:", error);
     }
   }, [showSkillInTeams]);
 
-useEffect(() => {
-try {
-localStorage.setItem(TEAM_LOCK_VISIBILITY_KEY, String(showLockInTeams));
-} catch (error) {
-console.error("Could not save team lock visibility:", error);
-}
-}, [showLockInTeams]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(TEAM_LOCK_VISIBILITY_KEY, String(showLockInTeams));
+    } catch (error) {
+      console.error("Could not save team lock visibility:", error);
+    }
+  }, [showLockInTeams]);
 
   useEffect(() => {
     try {
       localStorage.setItem(MATCH_METHOD_KEY, matchMethod);
     } catch (error) {
-      console.error("Kunne ikke lagre match method:", error);
+      console.error("Could not save match method:", error);
     }
   }, [matchMethod]);
 
@@ -1033,23 +1328,83 @@ console.error("Could not save team lock visibility:", error);
     try {
       localStorage.setItem(PLAYER_SORT_KEY, playerSortMode);
     } catch (error) {
-      console.error("Kunne ikke lagre player sort:", error);
+      console.error("Could not save player sort:", error);
     }
   }, [playerSortMode]);
 
   useEffect(() => {
+    const key = getToolbarSettingsStorageKey(auth.username);
     try {
-      localStorage.setItem("volleyball-visible-actions", JSON.stringify(visibleActions));
+      const raw = localStorage.getItem(key);
+      if (!raw) {
+        setVisibleActions(DEFAULT_VISIBLE_ACTIONS);
+        return;
+      }
+
+      const parsed = JSON.parse(raw);
+      setVisibleActions({ ...DEFAULT_VISIBLE_ACTIONS, ...parsed });
+    } catch (e) {
+      console.error("Could not load toolbar settings", e);
+      setVisibleActions(DEFAULT_VISIBLE_ACTIONS);
+    }
+  }, [auth.username]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        getToolbarSettingsStorageKey(auth.username),
+        JSON.stringify(visibleActions)
+      );
     } catch (e) {
       console.error("Could not save visible actions", e);
     }
-  }, [visibleActions]);
+  }, [visibleActions, auth.username]);
+
+  useEffect(() => {
+    const key = getPlayerViewModeStorageKey(auth.username);
+    try {
+      const raw = localStorage.getItem(key);
+      setPlayerViewMode(raw === "club" ? "club" : "all");
+    } catch (e) {
+      console.error("Could not load player view mode", e);
+      setPlayerViewMode("all");
+    }
+  }, [auth.username]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        getPlayerViewModeStorageKey(auth.username),
+        playerViewMode
+      );
+    } catch (e) {
+      console.error("Could not save player view mode", e);
+    }
+  }, [playerViewMode, auth.username]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(getLanguageStorageKey(auth.username));
+      setLanguage(raw === "no" ? "no" : "en");
+    } catch (e) {
+      console.error("Could not load language", e);
+      setLanguage("en");
+    }
+  }, [auth.username]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(getLanguageStorageKey(auth.username), language);
+    } catch (e) {
+      console.error("Could not save language", e);
+    }
+  }, [language, auth.username]);
 
   useEffect(() => {
     try {
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth));
     } catch (error) {
-      console.error("Kunne ikke lagre auth:", error);
+      console.error("Could not save auth:", error);
     }
   }, [auth]);
 
@@ -1087,7 +1442,10 @@ console.error("Could not save team lock visibility:", error);
       (team.players || []).map((player) => player.name)
     );
 
-    setSelected(namesInTeams);
+    setSelected((prev) => {
+      const merged = new Set([...(prev || []), ...namesInTeams]);
+      return Array.from(merged);
+    });
   }, [teams]);
 
   function togglePlayer(name) {
@@ -1126,7 +1484,7 @@ console.error("Could not save team lock visibility:", error);
       setMatchMode(false);
       setMobileMoveSelection(null);
     } catch (error) {
-      console.error("Kunne ikke generere lag:", error);
+      console.error("Could not generate teams:", error);
     } finally {
       setLoading(false);
     }
@@ -1135,14 +1493,13 @@ console.error("Could not save team lock visibility:", error);
   async function generateNewRound() {
     try {
       const currentPlayers = teams.flatMap((team) =>
-        (team.players || [])
-          .map((player) => ({
-            name: player.name,
-            skill: Number(player.skill) || 1,
-            cannot: Array.isArray(player.cannot) ? player.cannot : [],
-            locked: Boolean(player.locked),
-            club: String(player.club || "").trim(),
-          }))
+        (team.players || []).map((player) => ({
+          name: player.name,
+          skill: Number(player.skill) || 1,
+          cannot: Array.isArray(player.cannot) ? player.cannot : [],
+          locked: Boolean(player.locked),
+          club: String(player.club || "").trim(),
+        }))
       );
 
       if (currentPlayers.length < 2) return;
@@ -1172,7 +1529,7 @@ console.error("Could not save team lock visibility:", error);
       setMatchMode(false);
       setMobileMoveSelection(null);
     } catch (error) {
-      console.error("Kunne ikke lage ny runde:", error);
+      console.error("Could not create new round:", error);
     } finally {
       setLoading(false);
     }
@@ -1185,10 +1542,10 @@ console.error("Could not save team lock visibility:", error);
         savedRoundKey,
         JSON.stringify(buildStoragePayload(teams, teamCount))
       );
-      alert("Round saved for 6 hours on this device.");
+      alert(t.roundSavedForSixHours);
     } catch (error) {
-      console.error("Kunne ikke lagre round:", error);
-      alert("Could not save round.");
+      console.error("Could not save round:", error);
+      alert(t.couldNotSaveRound);
     }
   }
 
@@ -1199,12 +1556,15 @@ console.error("Could not save team lock visibility:", error);
     setSelected([]);
     setMobileMoveSelection(null);
     setActiveTab("players");
-    alert("Saved round cleared on this device.");
+    alert(t.savedRoundCleared);
   }
 
   async function addPlayer() {
     const trimmedName = newPlayerName.trim();
-    const trimmedClub = newPlayerClub.trim();
+    const clubValue =
+      newPlayerClubOption === "Other"
+        ? newPlayerClubCustom.trim()
+        : newPlayerClubOption || "";
 
     if (!trimmedName) return;
 
@@ -1222,7 +1582,7 @@ console.error("Could not save team lock visibility:", error);
           player: {
             name: trimmedName,
             skill: Number(newPlayerSkill),
-            club: trimmedClub,
+            club: clubValue,
           },
           ...getAuthPayload(),
         }),
@@ -1230,18 +1590,19 @@ console.error("Could not save team lock visibility:", error);
 
       const data = await res.json();
       if (!data?.success) {
-        setPlayerActionMessage(data?.message || "Could not save player.");
+        setPlayerActionMessage(data?.message || t.couldNotSavePlayer);
         return;
       }
 
       setNewPlayerName("");
       setNewPlayerSkill(1);
-      setNewPlayerClub("");
+      setNewPlayerClubOption("");
+      setNewPlayerClubCustom("");
       setShowAddForm(false);
       await loadPlayers();
     } catch (error) {
-      console.error("Kunne ikke legge til spiller:", error);
-      setPlayerActionMessage("Could not save player.");
+      console.error("Could not add player:", error);
+      setPlayerActionMessage(t.couldNotSavePlayer);
     } finally {
       setSavingPlayer(false);
     }
@@ -1251,14 +1612,30 @@ console.error("Could not save team lock visibility:", error);
     setEditingPlayer(player);
     setEditName(player.name);
     setEditSkill(Number(player.skill) || 1);
-    setEditClub(String(player.club || ""));
+
+    const trimmedClub = String(player.club || "").trim();
+    if (
+      trimmedClub &&
+      CLUB_OPTIONS.includes(trimmedClub) &&
+      trimmedClub !== "Other"
+    ) {
+      setEditClubOption(trimmedClub);
+      setEditClubCustom("");
+    } else if (trimmedClub) {
+      setEditClubOption("Other");
+      setEditClubCustom(trimmedClub);
+    } else {
+      setEditClubOption("");
+      setEditClubCustom("");
+    }
   }
 
   function closeEditPlayer() {
     setEditingPlayer(null);
     setEditName("");
     setEditSkill(1);
-    setEditClub("");
+    setEditClubOption("");
+    setEditClubCustom("");
   }
 
   async function savePlayerEdit() {
@@ -1267,7 +1644,10 @@ console.error("Could not save team lock visibility:", error);
     const oldName = editingPlayer.name;
     const newName = editName.trim();
     const newSkill = Number(editSkill);
-    const newClub = editClub.trim();
+    const newClub =
+      editClubOption === "Other"
+        ? editClubCustom.trim()
+        : editClubOption || "";
 
     if (!newName) return;
 
@@ -1294,7 +1674,7 @@ console.error("Could not save team lock visibility:", error);
 
       const data = await res.json();
       if (!data?.success) {
-        setPlayerActionMessage(data?.message || "Could not update player.");
+        setPlayerActionMessage(data?.message || t.couldNotUpdatePlayer);
         return;
       }
 
@@ -1332,8 +1712,8 @@ console.error("Could not save team lock visibility:", error);
       closeEditPlayer();
       await loadPlayers();
     } catch (error) {
-      console.error("Kunne ikke lagre spiller:", error);
-      setPlayerActionMessage("Could not update player.");
+      console.error("Could not save player:", error);
+      setPlayerActionMessage(t.couldNotUpdatePlayer);
     } finally {
       setSavingPlayer(false);
     }
@@ -1355,19 +1735,29 @@ console.error("Could not save team lock visibility:", error);
     );
   }
 
-
-
   function removeExistingPlayerFromCurrentTeams(teamIndex, playerIndex) {
+    let removedName = "";
+
     setTeams((prevTeams) =>
       prevTeams.map((team, tIdx) => {
         if (tIdx !== teamIndex) return team;
 
         return {
           ...team,
-          players: (team.players || []).filter((_, pIdx) => pIdx !== playerIndex),
+          players: (team.players || []).filter((player, pIdx) => {
+            const keep = pIdx !== playerIndex;
+            if (!keep) {
+              removedName = player.name;
+            }
+            return keep;
+          }),
         };
       })
     );
+
+    if (removedName) {
+      setSelected((prev) => (prev || []).filter((name) => name !== removedName));
+    }
 
     setShowRemoveFromTeamsModal(false);
   }
@@ -1447,25 +1837,25 @@ console.error("Could not save team lock visibility:", error);
   }
 
   function handleSelectMobileMove(teamIndex, playerIndex) {
-const player = teams?.[teamIndex]?.players?.[playerIndex];
-if (!player || player.locked) return;
+    const player = teams?.[teamIndex]?.players?.[playerIndex];
+    if (!player || player.locked) return;
 
-const isSame =
-mobileMoveSelection &&
-mobileMoveSelection.fromTeamIndex === teamIndex &&
-mobileMoveSelection.playerIndex === playerIndex;
+    const isSame =
+      mobileMoveSelection &&
+      mobileMoveSelection.fromTeamIndex === teamIndex &&
+      mobileMoveSelection.playerIndex === playerIndex;
 
-if (isSame) {
-setMobileMoveSelection(null);
-return;
-}
+    if (isSame) {
+      setMobileMoveSelection(null);
+      return;
+    }
 
-setMobileMoveSelection({
-fromTeamIndex: teamIndex,
-playerIndex,
-name: player.name,
-});
-}
+    setMobileMoveSelection({
+      fromTeamIndex: teamIndex,
+      playerIndex,
+      name: player.name,
+    });
+  }
 
   function confirmMobileMove(toTeamIndex) {
     if (!mobileMoveSelection) return;
@@ -1508,26 +1898,30 @@ name: player.name,
       if (!prevTeams.length) return prevTeams;
 
       let bestIndex = 0;
-      let bestScore = null;
 
-      prevTeams.forEach((team, index) => {
-        const total = (team.players || []).reduce(
+      for (let i = 1; i < prevTeams.length; i += 1) {
+        const bestTeam = prevTeams[bestIndex];
+        const currentTeam = prevTeams[i];
+
+        const bestTotal = (bestTeam.players || []).reduce(
           (sum, p) => sum + (Number(p.skill) || 0),
           0
         );
-        const size = (team.players || []).length;
+        const currentTotal = (currentTeam.players || []).reduce(
+          (sum, p) => sum + (Number(p.skill) || 0),
+          0
+        );
 
-        const score = { total, size };
+        const bestCount = (bestTeam.players || []).length;
+        const currentCount = (currentTeam.players || []).length;
 
         if (
-          !bestScore ||
-          score.total < bestScore.total ||
-          (score.total === bestScore.total && score.size < bestScore.size)
+          currentTotal < bestTotal ||
+          (currentTotal === bestTotal && currentCount < bestCount)
         ) {
-          bestScore = score;
-          bestIndex = index;
+          bestIndex = i;
         }
-      });
+      }
 
       return prevTeams.map((team, index) => {
         if (index !== bestIndex) return team;
@@ -1542,11 +1936,15 @@ name: player.name,
               cannot: Array.isArray(player.cannot) ? player.cannot : [],
               locked: false,
               club: String(player.club || "").trim(),
-              leaving: false,
             },
           ],
         };
       });
+    });
+
+    setSelected((prev) => {
+      const merged = new Set([...(prev || []), player.name]);
+      return Array.from(merged);
     });
 
     setShowAddToTeamsModal(false);
@@ -1575,6 +1973,39 @@ name: player.name,
       displayPlayerName(a).localeCompare(displayPlayerName(b))
     );
   }, [archivedPlayers, playerSortMode]);
+
+  const noClubLabel = t.noClub;
+
+  const groupedPlayersByClub = useMemo(() => {
+    const sourcePlayers = [...players];
+
+    if (playerSortMode === "recent") {
+      sourcePlayers.reverse();
+    } else {
+      sourcePlayers.sort((a, b) =>
+        displayPlayerName(a).localeCompare(displayPlayerName(b))
+      );
+    }
+
+    const groups = {};
+
+    sourcePlayers.forEach((player) => {
+      const clubName = String(player.club || "").trim() || noClubLabel;
+      if (!groups[clubName]) groups[clubName] = [];
+      groups[clubName].push(player);
+    });
+
+    const clubNames = Object.keys(groups).sort((a, b) => {
+      if (a === noClubLabel) return 1;
+      if (b === noClubLabel) return -1;
+      return a.localeCompare(b);
+    });
+
+    return clubNames.map((clubName) => ({
+      clubName,
+      players: groups[clubName],
+    }));
+  }, [players, playerSortMode, noClubLabel]);
 
   const teamsWithTotals = useMemo(() => {
     return teams.map((team, index) => ({
@@ -1647,8 +2078,8 @@ name: player.name,
       <div style={styles.shell}>
         <div style={styles.header}>
           <div>
-            <h1 style={styles.title}>Make Teams Pro</h1>
-            <p style={styles.subtitle}>Thines Vijay ©</p>
+            <h1 style={styles.title}>{t.appTitle}</h1>
+            <p style={styles.subtitle}>{t.appSubtitle}</p>
           </div>
         </div>
 
@@ -1656,24 +2087,52 @@ name: player.name,
           <div style={styles.authHeader}>
             <div>
               {auth.loggedIn ? (
-<>
-  <div style={styles.profileCompactRow}>
-    <div style={styles.profileCompactLeft}>
-      <div style={styles.profileCompactName}>{auth.username}</div>
-      <div style={styles.profileCompactRole}>{auth.role}</div>
-    </div>
+                <>
+                  <div style={styles.profileCompactRow}>
+                    <div style={styles.profileCompactLeft}>
+                      <div style={styles.profileCompactName}>
+                        {auth.username}
+                      </div>
+                      <div style={styles.profileCompactRole}>{auth.role}</div>
+                    </div>
 
-    <button style={styles.profileCompactLogout} onClick={handleLogout}>
-      Logout
-    </button>
-  </div>
-</>
+                    <div style={styles.profileCompactLanguageRow}>
+                      <button
+                        style={{
+                          ...styles.languageToggleButton,
+                          ...(language === "en"
+                            ? styles.languageToggleButtonActive
+                            : {}),
+                        }}
+                        onClick={() => setLanguage("en")}
+                      >
+                        EN
+                      </button>
+                      <button
+                        style={{
+                          ...styles.languageToggleButton,
+                          ...(language === "no"
+                            ? styles.languageToggleButtonActive
+                            : {}),
+                        }}
+                        onClick={() => setLanguage("no")}
+                      >
+                        NO
+                      </button>
+                    </div>
+
+                    <button
+                      style={styles.profileCompactLogout}
+                      onClick={handleLogout}
+                    >
+                      {t.logout}
+                    </button>
+                  </div>
+                </>
               ) : (
                 <>
-                  <div style={styles.authTitle}>Trainer Login</div>
-                  <div style={styles.authSubtitle}>
-                    Login required to view players
-                  </div>
+                  <div style={styles.authTitle}>{t.trainerLogin}</div>
+                  <div style={styles.authSubtitle}>{t.loginRequired}</div>
                 </>
               )}
             </div>
@@ -1685,21 +2144,21 @@ name: player.name,
                 style={styles.input}
                 value={loginUsername}
                 onChange={(e) => setLoginUsername(e.target.value)}
-                placeholder="Username"
+                placeholder={t.username}
               />
               <input
                 style={styles.input}
                 type="password"
                 value={loginPassword}
                 onChange={(e) => setLoginPassword(e.target.value)}
-                placeholder="Password"
+                placeholder={t.password}
               />
               <button
                 style={styles.primaryButton}
                 onClick={handleLogin}
                 disabled={loginLoading}
               >
-                {loginLoading ? "Logging in..." : "Login"}
+                {loginLoading ? t.loggingIn : t.login}
               </button>
             </div>
           )}
@@ -1711,9 +2170,9 @@ name: player.name,
           <div style={styles.adminCard}>
             <div style={styles.authHeader}>
               <div>
-                <div style={styles.authTitle}>Create Trainer</div>
+                <div style={styles.authTitle}>{t.createTrainer}</div>
                 <div style={styles.authSubtitle}>
-                  Lager ny trener og nytt Google Sheet automatisk
+                  {t.createTrainerSubtitle}
                 </div>
               </div>
 
@@ -1721,7 +2180,7 @@ name: player.name,
                 style={styles.secondaryButton}
                 onClick={() => setShowCreateTrainerForm((prev) => !prev)}
               >
-                {showCreateTrainerForm ? "Close" : "New Trainer"}
+                {showCreateTrainerForm ? t.close : t.newTrainer}
               </button>
             </div>
 
@@ -1731,19 +2190,19 @@ name: player.name,
                   style={styles.input}
                   value={trainerUsername}
                   onChange={(e) => setTrainerUsername(e.target.value)}
-                  placeholder="Trainer username"
+                  placeholder={t.trainerUsernamePlaceholder}
                 />
 
                 <input
                   style={styles.input}
                   value={trainerPassword}
                   onChange={(e) => setTrainerPassword(e.target.value)}
-                  placeholder="Trainer password"
+                  placeholder={t.trainerPasswordPlaceholder}
                 />
 
                 <div style={styles.settingsCompactRow}>
                   <div style={styles.compactSettingsCard}>
-                    <span style={styles.settingsLabel}>Skill View</span>
+                    <span style={styles.settingsLabel}>{t.skillView}</span>
                     <div style={styles.settingsToggleRow}>
                       <button
                         style={{
@@ -1754,7 +2213,7 @@ name: player.name,
                         }}
                         onClick={() => setTrainerSkillView("numbers")}
                       >
-                        Numbers
+                        {t.skillViewNumbers}
                       </button>
                       <button
                         style={{
@@ -1765,13 +2224,13 @@ name: player.name,
                         }}
                         onClick={() => setTrainerSkillView("colors")}
                       >
-                        Colors
+                        {t.skillViewColors}
                       </button>
                     </div>
                   </div>
 
                   <div style={styles.compactSettingsCard}>
-                    <span style={styles.settingsLabel}>Skill Scale</span>
+                    <span style={styles.settingsLabel}>{t.skillScale}</span>
                     <div style={styles.settingsToggleRow}>
                       {SKILL_SCALE_OPTIONS.map((scale) => (
                         <button
@@ -1792,9 +2251,9 @@ name: player.name,
                 </div>
 
                 <div style={styles.settingsCard}>
-                  <span style={styles.settingsLabel}>Copy players</span>
+                  <span style={styles.settingsLabel}>{t.copyPlayers}</span>
                   <div style={styles.copyOptionList}>
-                    {TRAINER_COPY_OPTIONS.map((option) => (
+                    {TRAINER_COPY_OPTIONS_BASE.map((option) => (
                       <label key={option.value} style={styles.radioRow}>
                         <input
                           type="radio"
@@ -1802,7 +2261,7 @@ name: player.name,
                           checked={trainerCopyMode === option.value}
                           onChange={() => setTrainerCopyMode(option.value)}
                         />
-                        <span>{option.label}</span>
+                        <span>{t[option.key]}</span>
                       </label>
                     ))}
                   </div>
@@ -1815,7 +2274,7 @@ name: player.name,
                         setCopyFromTrainerUsername(e.target.value)
                       }
                     >
-                      <option value="">Select trainer</option>
+                      <option value="">{t.selectTrainer}</option>
                       {trainerCopySourceUsers.map((trainer) => (
                         <option key={trainer.username} value={trainer.username}>
                           {trainer.username}
@@ -1830,7 +2289,7 @@ name: player.name,
                   onClick={createTrainerFromApp}
                   disabled={creatingTrainer}
                 >
-                  {creatingTrainer ? "Creating..." : "Create Trainer"}
+                  {creatingTrainer ? t.creating : t.createTrainer}
                 </button>
               </div>
             )}
@@ -1842,14 +2301,14 @@ name: player.name,
             {createdTrainerInfo && (
               <div style={styles.createdTrainerCard}>
                 <div>
-                  <strong>Username:</strong> {createdTrainerInfo.username}
+                  <strong>{t.usernameLabel}</strong> {createdTrainerInfo.username}
                 </div>
                 <div>
-                  <strong>Spreadsheet ID:</strong>{" "}
+                  <strong>{t.spreadsheetIdLabel}</strong>{" "}
                   {createdTrainerInfo.spreadsheetId}
                 </div>
                 <div>
-                  <strong>Copy mode:</strong> {createdTrainerInfo.copyMode}
+                  <strong>{t.copyModeLabel}</strong> {createdTrainerInfo.copyMode}
                 </div>
                 <div style={styles.createdTrainerLinkWrap}>
                   <a
@@ -1858,17 +2317,16 @@ name: player.name,
                     rel="noreferrer"
                     style={styles.link}
                   >
-                    Open trainer sheet
+                    {t.openTrainerSheet}
                   </a>
                 </div>
               </div>
             )}
 
             <div style={styles.trainerListCard}>
-              <div style={styles.authTitle}>Trainer Users</div>
+              <div style={styles.authTitle}>{t.trainerUsersTitle}</div>
               <div style={styles.authSubtitle}>
-                Admin kan aktivere, deaktivere, resette passord og arkivere
-                trainers
+                {t.trainerUsersSubtitle}
               </div>
 
               {trainerActionMessage && (
@@ -1877,7 +2335,7 @@ name: player.name,
 
               <div style={styles.trainerUsersWrap}>
                 {visibleTrainerUsers.length === 0 ? (
-                  <div style={styles.emptyText}>Ingen aktive trainers ennå.</div>
+                  <div style={styles.emptyText}>{t.noActiveTrainers}</div>
                 ) : (
                   visibleTrainerUsers.map((trainer) => (
                     <div key={trainer.username} style={styles.trainerUserRow}>
@@ -1887,7 +2345,7 @@ name: player.name,
                             {trainer.username}
                           </div>
                           <div style={styles.trainerUserMeta}>
-                            {trainer.active ? "Active" : "Inactive"} •{" "}
+                            {trainer.active ? t.activeStatus : t.inactiveStatus} •{" "}
                             {trainer.skillView} • 1-{trainer.skillScale}
                           </div>
                         </div>
@@ -1898,7 +2356,7 @@ name: player.name,
                           rel="noreferrer"
                           style={styles.link}
                         >
-                          Open sheet
+                          {t.openSheet}
                         </a>
                       </div>
 
@@ -1909,7 +2367,7 @@ name: player.name,
                             updateTrainerStatus(trainer.username, !trainer.active)
                           }
                         >
-                          {trainer.active ? "Deactivate" : "Activate"}
+                          {trainer.active ? t.deactivate : t.activate}
                         </button>
 
                         <input
@@ -1921,21 +2379,21 @@ name: player.name,
                               [trainer.username]: e.target.value,
                             }))
                           }
-                          placeholder="New password"
+                          placeholder={t.newPassword}
                         />
 
                         <button
                           style={styles.secondaryButton}
                           onClick={() => resetTrainerPassword(trainer.username)}
                         >
-                          Reset Password
+                          {t.resetPassword}
                         </button>
 
                         <button
                           style={styles.archiveButton}
                           onClick={() => archiveTrainer(trainer.username)}
                         >
-                          Archive
+                          {t.archive}
                         </button>
                       </div>
                     </div>
@@ -1945,14 +2403,14 @@ name: player.name,
             </div>
 
             <div style={styles.trainerListCard}>
-              <div style={styles.authTitle}>Archived Trainers</div>
+              <div style={styles.authTitle}>{t.archivedTrainers}</div>
               <div style={styles.authSubtitle}>
-                Arkiverte trenere kan gjenopprettes senere
+                {t.archivedTrainersSubtitle}
               </div>
 
               <div style={styles.trainerUsersWrap}>
                 {archivedTrainerUsers.length === 0 ? (
-                  <div style={styles.emptyText}>Ingen arkiverte trainers.</div>
+                  <div style={styles.emptyText}>{t.noArchivedTrainers}</div>
                 ) : (
                   archivedTrainerUsers.map((trainer) => (
                     <div key={trainer.username} style={styles.trainerUserRow}>
@@ -1962,7 +2420,8 @@ name: player.name,
                             {trainer.username}
                           </div>
                           <div style={styles.trainerUserMeta}>
-                            Archived • {trainer.skillView} • 1-{trainer.skillScale}
+                            {t.archivedStatus} • {trainer.skillView} • 1-
+                            {trainer.skillScale}
                           </div>
                         </div>
 
@@ -1972,7 +2431,7 @@ name: player.name,
                           rel="noreferrer"
                           style={styles.link}
                         >
-                          Open sheet
+                          {t.openSheet}
                         </a>
                       </div>
 
@@ -1981,7 +2440,7 @@ name: player.name,
                           style={styles.primaryButton}
                           onClick={() => restoreTrainer(trainer.username)}
                         >
-                          Restore
+                          {t.restore}
                         </button>
                       </div>
                     </div>
@@ -2000,7 +2459,7 @@ name: player.name,
             }}
             onClick={() => setActiveTab("players")}
           >
-            Players
+            {t.players}
           </button>
 
           <button
@@ -2010,7 +2469,7 @@ name: player.name,
             }}
             onClick={() => setActiveTab("teams")}
           >
-            Teams
+            {t.teams}
           </button>
         </div>
 
@@ -2018,13 +2477,13 @@ name: player.name,
           <div style={styles.section}>
             {!auth.loggedIn ? (
               <div style={styles.lockedCard}>
-                Logg inn som admin eller trener for å se spillerlisten.
+                {t.playersLoginRequired}
               </div>
             ) : (
               <>
                 <div style={styles.toolbarTop}>
                   <div style={styles.teamCountCard}>
-                    <span style={styles.teamCountLabel}>Number of Teams</span>
+                    <span style={styles.teamCountLabel}>{t.numberOfTeams}</span>
 
                     <div style={styles.teamCountRow}>
                       <div style={styles.teamCountInline}>
@@ -2055,47 +2514,72 @@ name: player.name,
                         onClick={generateTeams}
                         disabled={selected.length < 2 || loading}
                       >
-                        {loading ? "Generating..." : "Generate Teams"}
+                        {loading ? t.generating : t.generateTeams}
                       </button>
                     </div>
                   </div>
 
                   <div style={styles.selectedBadge}>
-                    Selected: {selected.length} / {totalPlayers}
+                    {t.selected}: {selected.length} / {totalPlayers}
                   </div>
                 </div>
 
                 <div style={styles.settingsCompactRow}>
                   <div style={styles.compactSettingsCard}>
-                    <span style={styles.settingsLabel}>Skill View</span>
+                    <span style={styles.settingsLabel}>{t.skillView}</span>
                     <button
                       style={styles.smallToggleButtonActive}
-                      onClick={() => setSkillView((prev) => (prev === "numbers" ? "colors" : "numbers"))}
-                      title="Toggle Skill View"
+                      onClick={() =>
+                        setSkillView((prev) =>
+                          prev === "numbers" ? "colors" : "numbers"
+                        )
+                      }
+                      title={t.skillView}
                     >
                       {skillView === "numbers" ? "123" : "🎨"}
                     </button>
                   </div>
 
                   <div style={styles.compactSettingsCard}>
-                    <span style={styles.settingsLabel}>Skill Scale</span>
+                    <span style={styles.settingsLabel}>{t.skillScale}</span>
                     <button
                       style={styles.smallToggleButtonActive}
-                      onClick={() => setSkillScale((prev) => (prev === 3 ? 5 : 3))}
-                      title="Toggle Skill Scale"
+                      onClick={() =>
+                        setSkillScale((prev) => (prev === 3 ? 5 : 3))
+                      }
+                      title={t.skillScale}
                     >
                       {skillScale === 3 ? "1-3" : "1-5"}
                     </button>
                   </div>
 
                   <div style={styles.compactSettingsCard}>
-                    <span style={styles.settingsLabel}>Sort</span>
+                    <span style={styles.settingsLabel}>{t.sort}</span>
                     <button
                       style={styles.smallToggleButtonActive}
-                      onClick={() => setPlayerSortMode((prev) => (prev === "name" ? "recent" : "name"))}
-                      title="Toggle Sort"
+                      onClick={() =>
+                        setPlayerSortMode((prev) =>
+                          prev === "name" ? "recent" : "name"
+                        )
+                      }
+                      title={t.sort}
                     >
                       {playerSortMode === "name" ? "A-Z" : "↓"}
+                    </button>
+                  </div>
+
+                  <div style={styles.compactSettingsCard}>
+                    <span style={styles.settingsLabel}>{t.club}</span>
+                    <button
+                      style={styles.smallToggleButtonActive}
+                      onClick={() =>
+                        setPlayerViewMode((prev) =>
+                          prev === "all" ? "club" : "all"
+                        )
+                      }
+                      title={t.club}
+                    >
+                      {playerViewMode === "all" ? t.all : t.club}
                     </button>
                   </div>
                 </div>
@@ -2105,7 +2589,7 @@ name: player.name,
                     style={styles.secondaryButton}
                     onClick={() => setShowAddForm((prev) => !prev)}
                   >
-                    {showAddForm ? "Close" : "+ Add Player"}
+                    {showAddForm ? t.close : `+ ${t.addPlayer}`}
                   </button>
 
                   <button
@@ -2113,15 +2597,15 @@ name: player.name,
                     onClick={() => setShowArchivedPlayers((prev) => !prev)}
                   >
                     {showArchivedPlayers
-                      ? "Hide Archived"
-                      : `Archived (${archivedPlayers.length})`}
+                      ? t.hideArchived
+                      : `${t.archived} (${archivedPlayers.length})`}
                   </button>
 
                   <button
                     style={styles.secondaryButtonCompact}
                     onClick={() => setShowPlayerManageActions((prev) => !prev)}
                   >
-                    {showPlayerManageActions ? "Done" : "Manage"}
+                    {showPlayerManageActions ? t.done : t.manage}
                   </button>
                 </div>
 
@@ -2131,18 +2615,33 @@ name: player.name,
 
                 {showAddForm && (
                   <div style={styles.formCard}>
-                    <input
-                      style={styles.input}
-                      value={newPlayerClub}
-                      onChange={(e) => setNewPlayerClub(e.target.value)}
-                      placeholder="Club short name (ex. L, F, NS, N)"
-                    />
+                    <select
+                      style={styles.select}
+                      value={newPlayerClubOption}
+                      onChange={(e) => setNewPlayerClubOption(e.target.value)}
+                    >
+                      <option value="">{t.selectClub}</option>
+                      {CLUB_OPTIONS.map((club) => (
+                        <option key={club} value={club}>
+                          {club === "Other" ? t.otherClub : club}
+                        </option>
+                      ))}
+                    </select>
+
+                    {newPlayerClubOption === "Other" && (
+                      <input
+                        style={styles.input}
+                        value={newPlayerClubCustom}
+                        onChange={(e) => setNewPlayerClubCustom(e.target.value)}
+                        placeholder={t.customClubName}
+                      />
+                    )}
 
                     <input
                       style={styles.input}
                       value={newPlayerName}
                       onChange={(e) => setNewPlayerName(e.target.value)}
-                      placeholder="Player name"
+                      placeholder={t.playerName}
                     />
 
                     <select
@@ -2162,119 +2661,231 @@ name: player.name,
                       onClick={addPlayer}
                       disabled={savingPlayer}
                     >
-                      {savingPlayer ? "Saving..." : "Save Player"}
+                      {savingPlayer ? t.saving : t.savePlayer}
                     </button>
                   </div>
                 )}
 
-                <div style={styles.playersGrid}>
-                  {sortedPlayers.map((p) => {
-                    const isSelected = selected.includes(p.name);
-                    const skillStyle = getSkillStyle(
-                      p.skill,
-                      skillView,
-                      skillScale
-                    );
+                {playerViewMode === "club" ? (
+                  groupedPlayersByClub.map((group) => (
+                    <div key={group.clubName} style={styles.clubSection}>
+                      <div style={styles.clubSectionTitle}>{group.clubName}</div>
+                      <div style={styles.clubSectionPlayers}>
+                        {group.players.map((p) => {
+                          const isSelected = selected.includes(p.name);
+                          const skillStyle = getSkillStyle(
+                            p.skill,
+                            skillView,
+                            skillScale
+                          );
 
-                    return !showPlayerManageActions ? (
-                      <div
-                        key={p.name}
-                        style={{
-                          ...styles.playerCardListCompact,
-                          ...(isSelected ? styles.playerCardListCompactSelected : {}),
-                        }}
-                        onClick={() => togglePlayer(p.name)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            togglePlayer(p.name);
-                          }
-                        }}
-                      >
-                        <div style={styles.playerListCompactName}>
-                          {displayPlayerName(p)}
-                        </div>
-                        <div style={styles.playerListCompactRight}>
-                          <div
-                            style={{
-                              ...styles.skillMini,
-                              background: skillStyle.background,
-                              color: skillStyle.color,
-                            }}
-                          >
-                            {skillStyle.text}
-                          </div>
-                        </div>
+                          return !showPlayerManageActions ? (
+                            <div
+                              key={p.name}
+                              style={{
+                                ...styles.playerCardListCompact,
+                                ...(isSelected
+                                  ? styles.playerCardListCompactSelected
+                                  : {}),
+                              }}
+                              onClick={() => togglePlayer(p.name)}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  togglePlayer(p.name);
+                                }
+                              }}
+                            >
+                              <div style={styles.playerListCompactName}>
+                                {displayPlayerName(p)}
+                              </div>
+                              <div style={styles.playerListCompactRight}>
+                                <div
+                                  style={{
+                                    ...styles.skillMini,
+                                    background: skillStyle.background,
+                                    color: skillStyle.color,
+                                  }}
+                                >
+                                  {skillStyle.text}
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              key={p.name}
+                              style={{
+                                ...styles.playerCardCompact,
+                                ...(isSelected ? styles.playerCardSelected : {}),
+                              }}
+                              onClick={() => togglePlayer(p.name)}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  togglePlayer(p.name);
+                                }
+                              }}
+                            >
+                              <div style={styles.playerCompactTop}>
+                                <div style={styles.playerNameCompact}>
+                                  {displayPlayerName(p)}
+                                </div>
+                                <div
+                                  style={{
+                                    ...styles.skillMini,
+                                    background: skillStyle.background,
+                                    color: skillStyle.color,
+                                  }}
+                                >
+                                  {skillStyle.text}
+                                </div>
+                              </div>
+
+                              <div style={styles.playerCompactBottom}>
+                                <div style={styles.playerCardActions}>
+                                  <button
+                                    style={styles.editMiniButton}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openEditPlayer(p);
+                                    }}
+                                  >
+                                    {t.edit}
+                                  </button>
+
+                                  <button
+                                    style={styles.archiveMiniButton}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      archivePlayer(p.name);
+                                    }}
+                                  >
+                                    {t.archive}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ) : (
-                      <div
-                        key={p.name}
-                        style={{
-                          ...styles.playerCardCompact,
-                          ...(isSelected ? styles.playerCardSelected : {}),
-                        }}
-                        onClick={() => togglePlayer(p.name)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            togglePlayer(p.name);
-                          }
-                        }}
-                      >
-                        <div style={styles.playerCompactTop}>
-                          <div style={styles.playerNameCompact}>
+                    </div>
+                  ))
+                ) : playerViewMode === "all" ? (
+                  <div style={styles.playersGrid}>
+                    {sortedPlayers.map((p) => {
+                      const isSelected = selected.includes(p.name);
+                      const skillStyle = getSkillStyle(
+                        p.skill,
+                        skillView,
+                        skillScale
+                      );
+
+                      return !showPlayerManageActions ? (
+                        <div
+                          key={p.name}
+                          style={{
+                            ...styles.playerCardListCompact,
+                            ...(isSelected
+                              ? styles.playerCardListCompactSelected
+                              : {}),
+                          }}
+                          onClick={() => togglePlayer(p.name)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              togglePlayer(p.name);
+                            }
+                          }}
+                        >
+                          <div style={styles.playerListCompactName}>
                             {displayPlayerName(p)}
                           </div>
-                          <div
-                            style={{
-                              ...styles.skillMini,
-                              background: skillStyle.background,
-                              color: skillStyle.color,
-                            }}
-                          >
-                            {skillStyle.text}
-                          </div>
-                        </div>
-
-                        <div style={styles.playerCompactBottom}>
-                          <div style={styles.playerCardActions}>
-                            <button
-                              style={styles.editMiniButton}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openEditPlayer(p);
+                          <div style={styles.playerListCompactRight}>
+                            <div
+                              style={{
+                                ...styles.skillMini,
+                                background: skillStyle.background,
+                                color: skillStyle.color,
                               }}
                             >
-                              Edit
-                            </button>
-
-                            <button
-                              style={styles.archiveMiniButton}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                archivePlayer(p.name);
-                              }}
-                            >
-                              Archive
-                            </button>
+                              {skillStyle.text}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      ) : (
+                        <div
+                          key={p.name}
+                          style={{
+                            ...styles.playerCardCompact,
+                            ...(isSelected ? styles.playerCardSelected : {}),
+                          }}
+                          onClick={() => togglePlayer(p.name)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              togglePlayer(p.name);
+                            }
+                          }}
+                        >
+                          <div style={styles.playerCompactTop}>
+                            <div style={styles.playerNameCompact}>
+                              {displayPlayerName(p)}
+                            </div>
+                            <div
+                              style={{
+                                ...styles.skillMini,
+                                background: skillStyle.background,
+                                color: skillStyle.color,
+                              }}
+                            >
+                              {skillStyle.text}
+                            </div>
+                          </div>
+
+                          <div style={styles.playerCompactBottom}>
+                            <div style={styles.playerCardActions}>
+                              <button
+                                style={styles.editMiniButton}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditPlayer(p);
+                                }}
+                              >
+                                {t.edit}
+                              </button>
+
+                              <button
+                                style={styles.archiveMiniButton}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  archivePlayer(p.name);
+                                }}
+                              >
+                                {t.archive}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
 
                 {showArchivedPlayers && (
                   <div style={styles.archivedCard}>
-                    <div style={styles.authTitle}>Archived Players</div>
+                    <div style={styles.authTitle}>{t.archivedPlayers}</div>
 
                     <div style={styles.archivedPlayersWrap}>
                       {sortedArchivedPlayers.length === 0 ? (
-                        <div style={styles.emptyText}>No archived players.</div>
+                        <div style={styles.emptyText}>{t.noArchivedPlayers}</div>
                       ) : (
                         sortedArchivedPlayers.map((player) => (
                           <div key={player.name} style={styles.archivedPlayerRow}>
@@ -2285,7 +2896,7 @@ name: player.name,
                               style={styles.primaryButtonSmall}
                               onClick={() => restorePlayer(player.name)}
                             >
-                              Restore
+                              {t.restore}
                             </button>
                           </div>
                         ))
@@ -2302,7 +2913,7 @@ name: player.name,
           <div style={styles.section}>
             {!auth.loggedIn ? (
               <div style={styles.lockedCard}>
-                Logg inn som admin eller trener for å bruke Teams.
+                {t.teamsLoginRequired}
               </div>
             ) : (
               <>
@@ -2314,9 +2925,9 @@ name: player.name,
                     }}
                     onClick={generateNewRound}
                     disabled={teams.length === 0 || loading}
-                    title="New Round"
+                    title={t.newRound}
                   >
-                    {loading ? "..." : "↻"}
+                    {loading ? t.loadingShort : "↻"}
                   </button>
 
                   {visibleActions.saveRound && (
@@ -2327,123 +2938,109 @@ name: player.name,
                       }}
                       onClick={saveRoundForSixHours}
                       disabled={teams.length === 0}
-                      title="Save Round"
+                      title={t.saveRound}
                     >
                       💾
                     </button>
                   )}
 
-                  {visibleActions.matchMode && teams.length >= 3 && (
+                  {teams.length >= 3 && (
                     <button
-                      style={{
-                        ...styles.compactActionButton,
-                        opacity: teams.length >= 3 ? 1 : 0.6,
-                      }}
+                      style={styles.compactActionButton}
                       onClick={() => {
                         setMatchMode((prev) => !prev);
                         setMatchRoundIndex(0);
                       }}
-                      disabled={teams.length < 3}
-                      title={matchMode ? "Hide Match" : "Match Mode"}
+                      title={matchMode ? t.hideMatch : t.matchMode}
                     >
                       🆚
                     </button>
                   )}
 
-                  {visibleActions.addPlayer && teams.length > 0 && (
-                    <button
-                      style={styles.addIconActionButton}
-                      onClick={() => setShowAddToTeamsModal(true)}
-                      title="Add Player"
-                    >
-                      +
-                    </button>
-                  )}
+                  <button
+                    style={styles.addIconActionButton}
+                    onClick={() => setShowAddToTeamsModal(true)}
+                    disabled={teams.length === 0}
+                    title={t.addPlayer}
+                  >
+                    +
+                  </button>
 
-                  {teams.length > 0 && (
-                    <button
-                      style={styles.removeIconActionButton}
-                      onClick={() => setShowRemoveFromTeamsModal(true)}
-                      title="Remove Player"
-                    >
-                      −
-                    </button>
-                  )}
+                  <button
+                    style={styles.removeIconActionButton}
+                    onClick={() => setShowRemoveFromTeamsModal(true)}
+                    disabled={teams.length === 0}
+                    title={t.removePlayer}
+                  >
+                    −
+                  </button>
 
                   {visibleActions.export && teams.length > 0 && (
                     <button
                       style={styles.iconActionButton}
                       onClick={() => setShowExportView(true)}
-                      title="Export"
+                      title={t.export}
                     >
                       📤
                     </button>
                   )}
 
-                  {teams.length > 0 && (
-                    <button
-                      style={styles.iconActionButton}
-                      onClick={() => setShowToolbarSettings(true)}
-                      title="Toolbar Settings"
-                    >
-                      ⚙
-                    </button>
-                  )}
+                  <button
+                    style={styles.iconActionButton}
+                    onClick={() => setShowToolbarSettings(true)}
+                    title={t.toolbarSettings}
+                  >
+                    ⚙
+                  </button>
 
                   {visibleActions.clearSaved && (
                     <button
                       style={styles.compactActionButton}
                       onClick={clearStoredRounds}
-                      title="Clear Saved"
+                      title={t.clearSaved}
                     >
                       ✕
                     </button>
                   )}
 
-                  {visibleActions.skillToggle && skillView === "numbers" && teams.length > 0 && (
+                  {visibleActions.skillToggle &&
+                    skillView === "numbers" &&
+                    teams.length > 0 && (
+                      <button
+                        style={styles.compactActionButton}
+                        onClick={() => setShowSkillInTeams((prev) => !prev)}
+                        title={showSkillInTeams ? t.hideSkill : t.showSkill}
+                      >
+                        ★
+                      </button>
+                    )}
+
+                  {visibleActions.lockToggle && teams.length > 0 && (
                     <button
-                      style={styles.compactActionButton}
-                      onClick={() => setShowSkillInTeams((prev) => !prev)}
-                      title={showSkillInTeams ? "Hide Skill" : "Show Skill"}
+                      style={styles.iconActionButton}
+                      onClick={() => setShowLockInTeams((prev) => !prev)}
+                      title={showLockInTeams ? t.unlock : t.lock}
                     >
-                      ★
+                      {showLockInTeams ? "🔒" : "🔓"}
                     </button>
                   )}
-
-{visibleActions.lockToggle && teams.length > 0 && (
-<button
-style={styles.iconActionButton}
-onClick={() => setShowLockInTeams((prev) => !prev)}
-title={showLockInTeams ? "Hide Lock" : "Show Lock"}
-
->
-{showLockInTeams ? "🔒" : "🔓"}
-</button>
-)}
                 </div>
-
-                {isMobile && teams.length > 0 && (
-                  <div style={styles.mobileHintCard}>
-                    {mobileMoveSelection
-                      ? `Selected: ${mobileMoveSelection.name}. Tap "Move Here" on a team.`
-                      : "Tap ↔ on a player, then tap Move Here on another team."}
-                  </div>
-                )}
 
                 {matchMode && teams.length >= 3 && (
                   <div style={styles.matchModeCard}>
                     <div style={styles.matchModeHeader}>
                       <div>
-                        <div style={styles.matchModeTitle}>Match Mode</div>
+                        <div style={styles.matchModeTitle}>{t.matchMode}</div>
                         <div style={styles.matchModeSubtitle}>
-                          Round {activeScheduleRounds.length ? matchRoundIndex + 1 : 0} of{" "}
-                          {activeScheduleRounds.length}
+                          {t.roundLabel}{" "}
+                          {activeScheduleRounds.length ? matchRoundIndex + 1 : 0}{" "}
+                          {t.ofLabel} {activeScheduleRounds.length}
                         </div>
                       </div>
 
                       <div style={styles.matchControlsWrap}>
                         <div style={styles.courtWrap}>
-                          <span style={styles.courtLabel}>Method</span>
+                          <span style={styles.courtLabel}>{t.method}</span>
                           <select
                             style={styles.smallSelect}
                             value={matchMethod}
@@ -2454,14 +3051,16 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                           >
                             {MATCH_METHOD_OPTIONS.map((option) => (
                               <option key={option.value} value={option.value}>
-                                {option.label}
+                                {option.value === "balanced"
+                                  ? t.matchPattern
+                                  : t.matchShuffle}
                               </option>
                             ))}
                           </select>
                         </div>
 
                         <div style={styles.courtWrap}>
-                          <span style={styles.courtLabel}>Courts</span>
+                          <span style={styles.courtLabel}>{t.courts}</span>
                           <select
                             style={styles.smallSelect}
                             value={courtCount}
@@ -2490,7 +3089,7 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                         }
                         disabled={!activeScheduleRounds.length}
                       >
-                        Prev Round
+                        {t.prevRound}
                       </button>
 
                       <button
@@ -2504,7 +3103,7 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                         }
                         disabled={!activeScheduleRounds.length}
                       >
-                        Next Round
+                        {t.nextRound}
                       </button>
                     </div>
 
@@ -2521,18 +3120,18 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                             style={styles.matchCard}
                           >
                             <div style={styles.matchCourt}>
-                              Court {match.court}
+                              {t.courtLabel} {match.court}
                             </div>
                             <div style={styles.matchTeams}>
                               <span>{match.leftTeam}</span>
-                              <span style={styles.vsText}>vs</span>
+                              <span style={styles.vsText}>{t.vsLabel}</span>
                               <span>{match.rightTeam}</span>
                             </div>
                           </div>
                         ))
                       ) : (
                         <div style={styles.noMatchesText}>
-                          No matches available.
+                          {t.noMatchesAvailable}
                         </div>
                       )}
                     </div>
@@ -2583,12 +3182,12 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                                 mobileMoveSelection.fromTeamIndex === teamIndex
                               }
                             >
-                              Move Here
+                              {t.moveHere}
                             </button>
                           )}
                         </div>
 
-                        <div style={styles.teamPointsBadge}>{team.total} pt</div>
+                        <div style={styles.teamPointsBadge}>{team.total} {t.pointsLabel}</div>
                       </div>
 
                       <div style={styles.teamPlayers}>
@@ -2667,8 +3266,8 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                                       );
                                     }}
                                     disabled={player.locked}
-                                    aria-label="Select move"
-                                    title="Select move"
+                                    aria-label={t.selectMove}
+                                    title={t.selectMove}
                                   >
                                     ↔
                                   </button>
@@ -2702,14 +3301,24 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                                   <button
                                     style={{
                                       ...styles.lockIconButton,
-                                      ...(player.locked ? styles.lockIconButtonActive : {}),
+                                      ...(player.locked
+                                        ? styles.lockIconButtonActive
+                                        : {}),
                                     }}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       toggleLock(teamIndex, playerIndex);
                                     }}
-                                    title={player.locked ? "Unlock player" : "Lock player"}
-                                    aria-label={player.locked ? "Unlock player" : "Lock player"}
+                                    title={
+                                      player.locked
+                                        ? `${t.unlock} player`
+                                        : `${t.lock} player`
+                                    }
+                                    aria-label={
+                                      player.locked
+                                        ? `${t.unlock} player`
+                                        : `${t.lock} player`
+                                    }
                                   >
                                     {player.locked ? "🔒" : "🔓"}
                                   </button>
@@ -2731,20 +3340,35 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
       {editingPlayer && (
         <div style={styles.modalOverlay} onClick={closeEditPlayer}>
           <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-            <h3 style={styles.modalTitle}>Edit Player</h3>
+            <h3 style={styles.modalTitle}>{t.editPlayer}</h3>
 
-            <input
-              style={styles.input}
-              value={editClub}
-              onChange={(e) => setEditClub(e.target.value)}
-              placeholder="Club short name"
-            />
+            <select
+              style={styles.select}
+              value={editClubOption}
+              onChange={(e) => setEditClubOption(e.target.value)}
+            >
+              <option value="">{t.selectClub}</option>
+              {CLUB_OPTIONS.map((club) => (
+                <option key={club} value={club}>
+                  {club === "Other" ? t.otherClub : club}
+                </option>
+              ))}
+            </select>
+
+            {editClubOption === "Other" && (
+              <input
+                style={styles.input}
+                value={editClubCustom}
+                onChange={(e) => setEditClubCustom(e.target.value)}
+                placeholder={t.customClubName}
+              />
+            )}
 
             <input
               style={styles.input}
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
-              placeholder="Player name"
+              placeholder={t.playerName}
             />
 
             <select
@@ -2761,14 +3385,14 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
 
             <div style={styles.modalActions}>
               <button style={styles.secondaryButton} onClick={closeEditPlayer}>
-                Cancel
+                {t.cancel}
               </button>
               <button
                 style={styles.primaryButton}
                 onClick={savePlayerEdit}
                 disabled={savingPlayer}
               >
-                {savingPlayer ? "Saving..." : "Save"}
+                {savingPlayer ? t.saving : t.save}
               </button>
             </div>
           </div>
@@ -2776,14 +3400,17 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
       )}
 
       {showAddToTeamsModal && (
-        <div style={styles.modalOverlay} onClick={() => setShowAddToTeamsModal(false)}>
+        <div
+          style={styles.modalOverlay}
+          onClick={() => setShowAddToTeamsModal(false)}
+        >
           <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-            <h3 style={styles.modalTitle}>Add Player</h3>
-            <p style={styles.addToTeamsSubtitle}>Select player to add</p>
+            <h3 style={styles.modalTitle}>{t.addPlayer}</h3>
+            <p style={styles.addToTeamsSubtitle}>{t.addPlayerToCurrentTeams}</p>
 
             <div style={styles.addToTeamsList}>
               {availablePlayersForTeams.length === 0 ? (
-                <div style={styles.emptyText}>No players available</div>
+                <div style={styles.emptyText}>{t.noPlayersAvailable}</div>
               ) : (
                 availablePlayersForTeams.map((player) => {
                   const skillStyle = getSkillStyle(
@@ -2798,6 +3425,9 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                         <div style={styles.addToTeamsName}>
                           {displayPlayerName(player)}
                         </div>
+                      </div>
+
+                      <div style={styles.addToTeamsActions}>
                         <div
                           style={{
                             ...styles.skillMini,
@@ -2807,14 +3437,14 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                         >
                           {skillStyle.text}
                         </div>
-                      </div>
 
-                      <button
-                        style={styles.smallPrimaryButton}
-                        onClick={() => addExistingPlayerToCurrentTeams(player)}
-                      >
-                        Add
-                      </button>
+                        <button
+                          style={styles.smallPrimaryButton}
+                          onClick={() => addExistingPlayerToCurrentTeams(player)}
+                        >
+                          {t.add}
+                        </button>
+                      </div>
                     </div>
                   );
                 })
@@ -2826,7 +3456,7 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                 style={styles.secondaryButton}
                 onClick={() => setShowAddToTeamsModal(false)}
               >
-                Close
+                {t.close}
               </button>
             </div>
           </div>
@@ -2834,7 +3464,10 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
       )}
 
       {showExportView && (
-        <div style={styles.exportOverlay} onClick={() => setShowExportView(false)}>
+        <div
+          style={styles.exportOverlay}
+          onClick={() => setShowExportView(false)}
+        >
           <div style={styles.exportCard} onClick={(e) => e.stopPropagation()}>
             <div ref={exportRef} style={styles.exportGrid}>
               {teams.map((team, index) => (
@@ -2861,7 +3494,7 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                 link.click();
               }}
             >
-              Save / Share
+              {t.saveShare}
             </button>
           </div>
         </div>
@@ -2873,12 +3506,14 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
           onClick={() => setShowRemoveFromTeamsModal(false)}
         >
           <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-            <h3 style={styles.modalTitle}>Remove Player</h3>
-            <p style={styles.addToTeamsSubtitle}>Remove player from current teams</p>
+            <h3 style={styles.modalTitle}>{t.removePlayer}</h3>
+            <p style={styles.addToTeamsSubtitle}>
+              {t.removePlayerFromCurrentTeams}
+            </p>
 
             <div style={styles.addToTeamsList}>
               {removablePlayersFromTeams.length === 0 ? (
-                <div style={styles.emptyText}>No players to remove</div>
+                <div style={styles.emptyText}>{t.noPlayersToRemove}</div>
               ) : (
                 removablePlayersFromTeams.map((player) => (
                   <div
@@ -2901,72 +3536,66 @@ title={showLockInTeams ? "Hide Lock" : "Show Lock"}
                         )
                       }
                     >
-                      Remove
+                      {t.removePlayer}
                     </button>
                   </div>
                 ))
               )}
             </div>
 
-            <button
-              style={styles.secondaryButton}
-              onClick={() => setShowRemoveFromTeamsModal(false)}
-            >
-              Close
-            </button>
+            <div style={styles.modalActions}>
+              <button
+                style={styles.secondaryButton}
+                onClick={() => setShowRemoveFromTeamsModal(false)}
+              >
+                {t.close}
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {showToolbarSettings && (
-        <div style={styles.modalOverlay} onClick={() => setShowToolbarSettings(false)}>
+        <div
+          style={styles.modalOverlay}
+          onClick={() => setShowToolbarSettings(false)}
+        >
           <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
-            <h3 style={styles.modalTitle}>Toolbar Settings</h3>
+            <h3 style={styles.modalTitle}>{t.toolbarSettings}</h3>
 
             <div style={styles.settingsList}>
-              {Object.entries(visibleActions).map(([key, value]) => {
-                const locked = ["newRound", "matchMode", "addPlayer"].includes(key);
+              {Object.entries(visibleActions).map(([key, value]) => (
+                <div key={key} style={styles.settingsRow}>
+                  <span>
+                    {{
+                      saveRound: t.saveRound,
+                      clearSaved: t.clearSaved,
+                      skillToggle: t.skillToggleLabel,
+                      lockToggle: t.lockToggleLabel,
+                      export: t.export,
+                    }[key] || key}
+                  </span>
 
-                return (
-                  <div key={key} style={styles.settingsRow}>
-                    <span>
-                      {{
-                        newRound: "New Round",
-                        matchMode: "Match",
-                        addPlayer: "Add Player",
-                        saveRound: "Save",
-                        clearSaved: "Clear",
-                        skillToggle: "Skill",
-                        lockToggle: "Lock",
-                        export: "Export",
-                      }[key] || key}
-                    </span>
-
-                    {!locked && (
-                      <button
-                        style={styles.smallToggleButton}
-                        onClick={() =>
-                          setVisibleActions((prev) => ({
-                            ...prev,
-                            [key]: !prev[key],
-                          }))
-                        }
-                      >
-                        {value ? "✓" : "✕"}
-                      </button>
-                    )}
-
-                    {locked && <span style={{ fontSize: 12, opacity: 0.6 }}>Locked</span>}
-                  </div>
-                );
-              })}
+                  <button
+                    style={styles.smallToggleButton}
+                    onClick={() =>
+                      setVisibleActions((prev) => ({
+                        ...prev,
+                        [key]: !prev[key],
+                      }))
+                    }
+                  >
+                    {value ? "✓" : "✕"}
+                  </button>
+                </div>
+              ))}
             </div>
 
             <button
               style={styles.primaryButton}
               onClick={() => setShowToolbarSettings(false)}
             >
-              Done
+              {t.done}
             </button>
           </div>
         </div>
@@ -3296,8 +3925,8 @@ const styles = {
 
   settingsCompactRow: {
     display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-    gap: "6px",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: "4px",
   },
 
   settingsCard: {
@@ -3313,10 +3942,10 @@ const styles = {
   compactSettingsCard: {
     background: "#fff",
     borderRadius: "12px",
-    padding: "8px",
+    padding: "6px",
     boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
     display: "grid",
-    gap: "6px",
+    gap: "4px",
     minWidth: 0,
   },
 
@@ -3363,7 +3992,7 @@ const styles = {
 
   actionRow: {
     display: "flex",
-    gap: "6px",
+    gap: "4px",
     flexWrap: "wrap",
   },
 
@@ -3404,16 +4033,39 @@ const styles = {
     cursor: "pointer",
   },
 
-secondaryButtonCompact: {
-border: "none",
-borderRadius: "10px",
-padding: "9px 12px",
-background: "#e5e7eb",
-color: "#111827",
-fontWeight: "600",
-cursor: "pointer",
-fontSize: "12px",
-},
+  secondaryButtonCompact: {
+    border: "none",
+    borderRadius: "10px",
+    padding: "8px 10px",
+    background: "#e5e7eb",
+    color: "#111827",
+    fontWeight: "600",
+    cursor: "pointer",
+    fontSize: "12px",
+  },
+
+  profileCompactLanguageRow: {
+    display: "flex",
+    gap: "4px",
+    alignItems: "center",
+    flexShrink: 0,
+  },
+
+  languageToggleButton: {
+    border: "none",
+    borderRadius: "9px",
+    padding: "5px 8px",
+    background: "#e5e7eb",
+    color: "#111827",
+    fontSize: "11px",
+    fontWeight: "700",
+    cursor: "pointer",
+  },
+
+  languageToggleButtonActive: {
+    background: "#111827",
+    color: "#fff",
+  },
 
   compactActionButtonPrimary: {
     border: "none",
@@ -3538,46 +4190,46 @@ fontSize: "12px",
     minHeight: "24px",
   },
 
-playerCardListCompact: {
-borderRadius: "10px",
-background: "#fff",
-padding: "8px 10px",
-textAlign: "left",
-cursor: "pointer",
-boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
-minHeight: "unset",
-display: "flex",
-alignItems: "center",
-justifyContent: "space-between",
-gap: "8px",
-userSelect: "none",
-WebkitUserSelect: "none",
-WebkitTouchCallout: "none",
-touchAction: "manipulation",
-},
+  playerCardListCompact: {
+    borderRadius: "10px",
+    background: "#fff",
+    padding: "8px 10px",
+    textAlign: "left",
+    cursor: "pointer",
+    boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+    minHeight: "unset",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px",
+    userSelect: "none",
+    WebkitUserSelect: "none",
+    WebkitTouchCallout: "none",
+    touchAction: "manipulation",
+  },
 
-playerCardListCompactSelected: {
-outline: "2px solid #111827",
-},
+  playerCardListCompactSelected: {
+    outline: "2px solid #111827",
+  },
 
-playerListCompactName: {
-fontSize: "12px",
-fontWeight: "700",
-color: "#111827",
-lineHeight: 1.15,
-whiteSpace: "nowrap",
-overflow: "hidden",
-textOverflow: "ellipsis",
-minWidth: 0,
-flex: 1,
-},
+  playerListCompactName: {
+    fontSize: "12px",
+    fontWeight: "700",
+    color: "#111827",
+    lineHeight: 1.15,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    minWidth: 0,
+    flex: 1,
+  },
 
-playerListCompactRight: {
-display: "flex",
-alignItems: "center",
-gap: "6px",
-flexShrink: 0,
-},
+  playerListCompactRight: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    flexShrink: 0,
+  },
 
   checkTiny: {
     fontSize: "11px",
@@ -3653,16 +4305,6 @@ flexShrink: 0,
     fontSize: "13px",
     fontWeight: "700",
     color: "#111827",
-  },
-
-  mobileHintCard: {
-    background: "#fff7ed",
-    color: "#9a3412",
-    border: "1px solid #fdba74",
-    borderRadius: "12px",
-    padding: "8px 10px",
-    fontSize: "11px",
-    fontWeight: "600",
   },
 
   matchModeCard: {
@@ -3839,14 +4481,14 @@ flexShrink: 0,
   },
 
   teamPlayerName: {
-fontSize: "13px",
-fontWeight: "700",
-color: "#111827",
-lineHeight: 1.15,
-whiteSpace: "nowrap",
-overflow: "hidden",
-textOverflow: "ellipsis",
-},
+    fontSize: "13px",
+    fontWeight: "700",
+    color: "#111827",
+    lineHeight: 1.15,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
 
   teamPlayerRight: {
     display: "flex",
@@ -3927,136 +4569,136 @@ textOverflow: "ellipsis",
     gap: "8px",
   },
 
-iconActionButton: {
-border: "none",
-borderRadius: "10px",
-height: "32px",
-minWidth: "32px",
-background: "#e5e7eb",
-color: "#111827",
-fontWeight: "700",
-cursor: "pointer",
-fontSize: "14px",
-display: "flex",
-alignItems: "center",
-justifyContent: "center",
-padding: 0,
-},
+  iconActionButton: {
+    border: "none",
+    borderRadius: "10px",
+    height: "32px",
+    minWidth: "32px",
+    background: "#e5e7eb",
+    color: "#111827",
+    fontWeight: "700",
+    cursor: "pointer",
+    fontSize: "14px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 0,
+  },
 
-iconActionButtonPrimary: {
-border: "none",
-borderRadius: "10px",
-height: "32px",
-minWidth: "32px",
-background: "#111827",
-color: "#fff",
-fontWeight: "700",
-cursor: "pointer",
-fontSize: "14px",
-display: "flex",
-alignItems: "center",
-justifyContent: "center",
-},
+  iconActionButtonPrimary: {
+    border: "none",
+    borderRadius: "10px",
+    height: "32px",
+    minWidth: "32px",
+    background: "#111827",
+    color: "#fff",
+    fontWeight: "700",
+    cursor: "pointer",
+    fontSize: "14px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
 
-profileCompactRow: {
-display: "flex",
-justifyContent: "space-between",
-alignItems: "center",
-gap: "8px",
-},
+  profileCompactRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+  },
 
-profileCompactLeft: {
-minWidth: 0,
-display: "grid",
-gap: "0px",
-flex: 1,
-},
+  profileCompactLeft: {
+    minWidth: 0,
+    display: "grid",
+    gap: "0px",
+    flex: 1,
+  },
 
-profileCompactName: {
-fontSize: "13px",
-fontWeight: "800",
-color: "#111827",
-whiteSpace: "nowrap",
-overflow: "hidden",
-textOverflow: "ellipsis",
-},
+  profileCompactName: {
+    fontSize: "13px",
+    fontWeight: "800",
+    color: "#111827",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
 
-profileCompactRole: {
-fontSize: "10px",
-color: "#6b7280",
-textTransform: "capitalize",
-},
+  profileCompactRole: {
+    fontSize: "10px",
+    color: "#6b7280",
+    textTransform: "capitalize",
+  },
 
-profileCompactLogout: {
-border: "none",
-borderRadius: "9px",
-padding: "6px 10px",
-background: "#e5e7eb",
-color: "#111827",
-fontWeight: "700",
-cursor: "pointer",
-fontSize: "12px",
-flexShrink: 0,
-},
+  profileCompactLogout: {
+    border: "none",
+    borderRadius: "9px",
+    padding: "6px 10px",
+    background: "#e5e7eb",
+    color: "#111827",
+    fontWeight: "700",
+    cursor: "pointer",
+    fontSize: "12px",
+    flexShrink: 0,
+  },
 
-lockIconButton: {
-border: "none",
-borderRadius: "999px",
+  lockIconButton: {
+    border: "none",
+    borderRadius: "999px",
     width: "22px",
     height: "22px",
     background: "#e5e7eb",
     color: "#111827",
     fontSize: "11px",
-justifyContent: "center",
-padding: 0,
-flexShrink: 0,
-},
+    justifyContent: "center",
+    padding: 0,
+    flexShrink: 0,
+  },
 
-lockIconButtonActive: {
-background: "#111827",
-color: "#fff",
-},
+  lockIconButtonActive: {
+    background: "#111827",
+    color: "#fff",
+  },
 
-addToTeamsList: {
-display: "grid",
-gap: "8px",
-maxHeight: "320px",
-overflowY: "auto",
-},
+  addToTeamsList: {
+    display: "grid",
+    gap: "8px",
+    maxHeight: "320px",
+    overflowY: "auto",
+  },
 
-addToTeamsRow: {
-display: "flex",
-justifyContent: "space-between",
-alignItems: "center",
-gap: "8px",
-padding: "8px 10px",
-borderRadius: "10px",
-background: "#f8fafc",
-border: "1px solid #e5e7eb",
-},
+  addToTeamsRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+    padding: "8px 10px",
+    borderRadius: "10px",
+    background: "#f8fafc",
+    border: "1px solid #e5e7eb",
+  },
 
-addToTeamsNameWrap: {
-minWidth: 0,
-display: "flex",
-alignItems: "center",
-gap: "8px",
-flex: 1,
-},
+  addToTeamsNameWrap: {
+    minWidth: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    flex: 1,
+  },
 
-addToTeamsName: {
-fontSize: "13px",
-fontWeight: "700",
-color: "#111827",
-whiteSpace: "nowrap",
-overflow: "hidden",
-textOverflow: "ellipsis",
-},
+  addToTeamsName: {
+    fontSize: "13px",
+    fontWeight: "700",
+    color: "#111827",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
 
-addToTeamsSubtitle: {
-margin: 0,
-fontSize: "12px",
-color: "#6b7280",
-},
+  addToTeamsSubtitle: {
+    margin: 0,
+    fontSize: "12px",
+    color: "#6b7280",
+  },
 
   settingsList: {
     display: "grid",
@@ -4073,48 +4715,84 @@ color: "#6b7280",
     fontSize: "13px",
   },
 
-exportOverlay: {
-position: "fixed",
-inset: 0,
-background: "rgba(0,0,0,0.5)",
-display: "flex",
-alignItems: "center",
-justifyContent: "center",
-padding: "16px",
-zIndex: 9999,
-},
+  exportOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.5)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "16px",
+    zIndex: 9999,
+  },
 
-exportCard: {
-  width: "100%",
-  maxWidth: "700px",
-  background: "#fff",
-  borderRadius: "16px",
-  padding: "20px",
-  display: "grid",
-  gap: "16px",
-},
+  exportCard: {
+    width: "100%",
+    maxWidth: "700px",
+    background: "#fff",
+    borderRadius: "16px",
+    padding: "20px",
+    display: "grid",
+    gap: "16px",
+  },
 
-exportGrid: {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: "16px",
-},
+  exportGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "16px",
+  },
 
-exportTeam: {
-  display: "grid",
-  gap: "6px",
-},
+  exportTeam: {
+    display: "grid",
+    gap: "6px",
+  },
 
-exportTeamTitle: {
-  fontSize: "16px",
-  fontWeight: "800",
-  marginBottom: "6px",
-  color: "#111827",
-},
+  exportTeamTitle: {
+    fontSize: "16px",
+    fontWeight: "800",
+    marginBottom: "6px",
+    color: "#111827",
+  },
 
-exportPlayer: {
-  fontSize: "14px",
-  fontWeight: "600",
-  color: "#111827",
-},
+  exportPlayer: {
+    fontSize: "14px",
+    fontWeight: "600",
+    color: "#111827",
+  },
+
+  addToTeamsActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    flexShrink: 0,
+  },
+
+  smallPrimaryButton: {
+    border: "none",
+    borderRadius: "9px",
+    padding: "7px 10px",
+    background: "#111827",
+    color: "#fff",
+    fontWeight: "700",
+    cursor: "pointer",
+    fontSize: "12px",
+  },
+
+  clubSection: {
+    display: "grid",
+    gap: "6px",
+  },
+
+  clubSectionTitle: {
+    fontSize: "12px",
+    fontWeight: "800",
+    color: "#374151",
+    padding: "2px 2px 0 2px",
+  },
+
+  clubSectionPlayers: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "6px",
+  },
 };
