@@ -3480,43 +3480,44 @@ const savedRound = readStorageWithTtl(
         </div>
       )}
 
-      {showExportView && (
-        <div
-          style={styles.exportOverlay}
-          onClick={() => setShowExportView(false)}
-        >
-          <div style={styles.exportCard} onClick={(e) => e.stopPropagation()}>
-            <div ref={exportRef} style={styles.exportGrid}>
-              {teams.map((team, index) => (
-  <div key={index} style={styles.exportTeam}>
-    <div style={styles.exportTeamTitle}>
-      {normalizeTeamName(index, team.name, language)}
-    </div>
-    {(team.players || []).map((p, i) => (
-      <div key={i} style={styles.exportPlayer}>
-        {displayPlayerName(p)}
-      </div>
-    ))}
-  </div>
-))}
-
-            <button
-              style={styles.primaryButton}
-              onClick={async () => {
-                if (!exportRef.current) return;
-
-                const canvas = await html2canvas(exportRef.current);
-                const link = document.createElement("a");
-                link.download = "teams.png";
-                link.href = canvas.toDataURL();
-                link.click();
-              }}
-            >
-              {t.saveShare}
-            </button>
+{showExportView && (
+  <div
+    style={styles.exportOverlay}
+    onClick={() => setShowExportView(false)}
+  >
+    <div style={styles.exportCard} onClick={(e) => e.stopPropagation()}>
+      <div ref={exportRef} style={styles.exportGrid}>
+        {teams.map((team, index) => (
+          <div key={index} style={styles.exportTeam}>
+            <div style={styles.exportTeamTitle}>
+              {normalizeTeamName(index, team.name, language)}
+            </div>
+            {(team.players || []).map((p, i) => (
+              <div key={i} style={styles.exportPlayer}>
+                {displayPlayerName(p)}
+              </div>
+            ))}
           </div>
-        </div>
-      )}
+        ))}
+      </div>
+
+      <button
+        style={styles.primaryButton}
+        onClick={async () => {
+          if (!exportRef.current) return;
+
+          const canvas = await html2canvas(exportRef.current);
+          const link = document.createElement("a");
+          link.download = "teams.png";
+          link.href = canvas.toDataURL();
+          link.click();
+        }}
+      >
+        {t.saveShare}
+      </button>
+    </div>
+  </div>
+)}
 
       {showRemoveFromTeamsModal && (
         <div
