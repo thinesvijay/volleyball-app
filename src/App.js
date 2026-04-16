@@ -340,17 +340,29 @@ function getPlayerViewModeStorageKey(username) {
   return `volleyball-player-view-mode-${String(username || "guest").trim()}`;
 }
 
-function normalizeTeamName(index, existingName) {
-  if (existingName && String(existingName).trim()) return existingName;
-  return `Lag ${String.fromCharCode(65 + index)}`;
+function normalizeTeamName(index, existingName, language = "en") {
+  const trimmed = String(existingName || "").trim();
+  const fallbackLetter = String.fromCharCode(65 + index);
+  const prefix = language === "no" ? "Lag" : "Team";
+
+  if (!trimmed) {
+    return `${prefix} ${fallbackLetter}`;
+  }
+
+  const match = trimmed.match(/^(Team|Lag)\s+([A-Z])$/i);
+  if (match) {
+    return `${prefix} ${match[2].toUpperCase()}`;
+  }
+
+  return trimmed;
 }
 
-function normalizeTeams(rawTeams) {
+function normalizeTeams(rawTeams, language = "en") {
   if (!Array.isArray(rawTeams)) return [];
 
   return rawTeams.map((team, index) => ({
     ...team,
-    name: normalizeTeamName(index, team?.name),
+    name: normalizeTeamName(index, team?.name, language),
     players: Array.isArray(team?.players)
       ? team.players.map((player) => ({
           ...player,
@@ -377,7 +389,7 @@ function getRoundStorageKey(baseKey, auth) {
   return `${baseKey}-${username}`;
 }
 
-function readStorageWithTtl(key, ttlMs) {
+function readStorageWithTtl(key, ttlMs, language = "en") {
   try {
     const raw = localStorage.getItem(key);
     if (!raw) return null;
@@ -394,7 +406,7 @@ function readStorageWithTtl(key, ttlMs) {
     }
 
     return {
-      teams: normalizeTeams(parsed.teams),
+      teams: normalizeTeams(parsed.teams, language),
       teamCount: Number(parsed.teamCount) || 2,
     };
   } catch (error) {
@@ -664,15 +676,15 @@ export default function App() {
 
 
   const removablePlayersFromTeams = useMemo(() => {
-    return teams.flatMap((team, teamIndex) =>
-      (team.players || []).map((player, playerIndex) => ({
-        ...player,
-        teamIndex,
-        playerIndex,
-        teamName: team.name,
-      }))
-    );
-  }, [teams]);
+  return teams.flatMap((team, teamIndex) =>
+    (team.players || []).map((player, playerIndex) => ({
+      ...player,
+      teamIndex,
+      playerIndex,
+      teamName: normalizeTeamName(teamIndex, team.name, language),
+    }))
+  );
+}, [teams, language]);
 
   const [auth, setAuth] = useState(() => {
     if (typeof window === "undefined") return getDefaultAuth();
@@ -1242,10 +1254,15 @@ export default function App() {
     const savedRoundKey = getRoundStorageKey(ROUND_SAVE_KEY, auth);
 
     const currentRound = readStorageWithTtl(
-      currentRoundKey,
-      CURRENT_ROUND_TTL_MS
-    );
-    const savedRound = readStorageWithTtl(savedRoundKey, SAVED_ROUND_TTL_MS);
+  currentRoundKey,
+  CURRENT_ROUND_TTL_MS,
+  language
+);
+const savedRound = readStorageWithTtl(
+  savedRoundKey,
+  SAVED_ROUND_TTL_MS,
+  language
+);
     const restored = currentRound || savedRound;
 
     if (restored?.teams?.length) {
@@ -1257,7 +1274,7 @@ export default function App() {
 
     setTeams([]);
     setActiveTab("players");
-  }, [auth]);
+  }, [auth, language]);
 
   useEffect(() => {
     function handleResize() {
@@ -1476,7 +1493,7 @@ export default function App() {
       });
 
       const data = await res.json();
-      const normalized = normalizeTeams(data);
+      const normalized = normalizeTeams(data, language);
 
       setTeams(normalized);
       setMatchRoundIndex(0);
@@ -1522,7 +1539,7 @@ export default function App() {
       });
 
       const data = await res.json();
-      const normalized = normalizeTeams(data);
+      const normalized = normalizeTeams(data, language);
 
       setTeams(normalized);
       setMatchRoundIndex(0);
@@ -2008,13 +2025,13 @@ export default function App() {
   }, [players, playerSortMode, noClubLabel]);
 
   const teamsWithTotals = useMemo(() => {
-    return teams.map((team, index) => ({
-      ...team,
-      name: normalizeTeamName(index, team.name),
-      players: team.players || [],
-      total: teamTotal(team),
-    }));
-  }, [teams]);
+  return teams.map((team, index) => ({
+    ...team,
+    name: normalizeTeamName(index, team.name, language),
+    players: team.players || [],
+    total: teamTotal(team),
+  }));
+}, [teams, language]);
 
   const teamsGridColumns =
     teams.length <= 1 ? "1fr" : "repeat(2, minmax(0, 1fr))";
@@ -3471,16 +3488,17 @@ export default function App() {
           <div style={styles.exportCard} onClick={(e) => e.stopPropagation()}>
             <div ref={exportRef} style={styles.exportGrid}>
               {teams.map((team, index) => (
-                <div key={index} style={styles.exportTeam}>
-                  <div style={styles.exportTeamTitle}>{team.name}</div>
-                  {(team.players || []).map((p, i) => (
-                    <div key={i} style={styles.exportPlayer}>
-                      {displayPlayerName(p)}
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
+  <div key={index} style={styles.exportTeam}>
+    <div style={styles.exportTeamTitle}>
+      {normalizeTeamName(index, team.name, language)}
+    </div>
+    {(team.players || []).map((p, i) => (
+      <div key={i} style={styles.exportPlayer}>
+        {displayPlayerName(p)}
+      </div>
+    ))}
+  </div>
+))}
 
             <button
               style={styles.primaryButton}
