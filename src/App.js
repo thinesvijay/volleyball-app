@@ -577,6 +577,51 @@ function getDefaultAuth() {
   };
 }
 
+function getDefaultTournamentConfig() {
+  return {
+    format: "group-stage",
+    groupCount: 2,
+    bracketSize: 4,
+    thirdPlaceMatch: false,
+    displaySettings: {
+      showScores: true,
+      showDates: false,
+      showLocations: false,
+      showRoundTitles: true,
+    },
+    groups: [],
+    knockout: {
+      semiFinals: [],
+      final: null,
+      thirdPlace: null,
+    },
+    matches: [],
+  };
+}
+
+function applyTournamentDefaults(tournament) {
+  const defaults = getDefaultTournamentConfig();
+  if (!tournament) return defaults;
+
+  return {
+    ...defaults,
+    ...tournament,
+    displaySettings: {
+      ...defaults.displaySettings,
+      ...(tournament.displaySettings || {}),
+    },
+    groups: Array.isArray(tournament.groups) ? tournament.groups : [],
+    knockout: {
+      ...defaults.knockout,
+      ...(tournament.knockout || {}),
+      semiFinals: Array.isArray(tournament?.knockout?.semiFinals)
+        ? tournament.knockout.semiFinals
+        : [],
+    },
+    matches: Array.isArray(tournament.matches) ? tournament.matches : [],
+  };
+}
+
 function displayPlayerName(player) {
   const club = String(player?.club || "").trim();
   const name = String(player?.name || "").trim();
@@ -716,7 +761,40 @@ export default function App() {
     matchesTitle: "Kamper",
     notEnoughTeamsForMatches: "Minst 2 lag kreves for å generere kamper.",
     matchesGenerated: "Kamper generert.",
-    noMatchesYet: "Ingen kamper ennå."
+    noMatchesYet: "Ingen kamper ennå.",
+    builderTitle: "Turneringsbygger",
+    builderSubtitle: "Planlegg format, grupper og sluttspill",
+    informationSection: "Turneringsinformasjon",
+    formatSection: "Turneringsformat",
+    participantsSection: "Deltakere / Lag",
+    settingsSection: "Turneringsinnstillinger",
+    previewSection: "Visuell turneringsforhåndsvisning",
+    groupStagePreview: "Gruppespill",
+    knockoutPreview: "Sluttspill",
+    formatLabel: "Format",
+    formatGroupStage: "Gruppespill",
+    formatRoundRobin: "Seriespill",
+    formatSingleElimination: "Enkel utslag",
+    groupCountLabel: "Antall grupper",
+    bracketSizeLabel: "Brakettstørrelse",
+    thirdPlaceLabel: "Bronsekamp",
+    generateGroups: "Generer grupper",
+    generateKnockout: "Generer sluttspill",
+    regenerateStructure: "Oppdater struktur",
+    noGroupsYet: "Ingen grupper ennå.",
+    noKnockoutYet: "Ingen sluttspillstruktur ennå.",
+    semiFinals: "Semifinaler",
+    final: "Finale",
+    thirdPlace: "Bronsekamp",
+    showScores: "Vis score",
+    showDates: "Vis datoer",
+    showLocations: "Vis steder",
+    showRoundTitles: "Vis rundenavn",
+    teamManagementTitle: "Lagadministrasjon",
+    addTeamButton: "Legg til lag",
+    addPlayerButton: "Legg til spiller",
+    noTeamsYet: "Ingen lag ennå.",
+    noPlayersYet: "Ingen spillere ennå."
   } : {
     tabTitle: "Tournaments",
     loginRequired: "Login required to manage tournaments",
@@ -763,7 +841,40 @@ export default function App() {
     matchesTitle: "Matches",
     notEnoughTeamsForMatches: "At least 2 teams are required to generate matches.",
     matchesGenerated: "Matches generated.",
-    noMatchesYet: "No matches yet."
+    noMatchesYet: "No matches yet.",
+    builderTitle: "Tournament Builder",
+    builderSubtitle: "Configure format, groups and knockout flow",
+    informationSection: "Tournament Information",
+    formatSection: "Tournament Format",
+    participantsSection: "Participants / Teams",
+    settingsSection: "Tournament Settings",
+    previewSection: "Visual Tournament Preview",
+    groupStagePreview: "Group Stage",
+    knockoutPreview: "Knockout",
+    formatLabel: "Format",
+    formatGroupStage: "Group Stage",
+    formatRoundRobin: "Round Robin",
+    formatSingleElimination: "Single Elimination",
+    groupCountLabel: "Number of Groups",
+    bracketSizeLabel: "Bracket Size",
+    thirdPlaceLabel: "Third Place Match",
+    generateGroups: "Generate Groups",
+    generateKnockout: "Generate Knockout",
+    regenerateStructure: "Regenerate Structure",
+    noGroupsYet: "No groups yet.",
+    noKnockoutYet: "No knockout structure yet.",
+    semiFinals: "Semi-finals",
+    final: "Final",
+    thirdPlace: "Third Place",
+    showScores: "Show Scores",
+    showDates: "Show Dates",
+    showLocations: "Show Locations",
+    showRoundTitles: "Show Round Titles",
+    teamManagementTitle: "Team Management",
+    addTeamButton: "Add team",
+    addPlayerButton: "Add player",
+    noTeamsYet: "No teams yet.",
+    noPlayersYet: "No players yet."
   };
 
   const [newPlayerClubOption, setNewPlayerClubOption] = useState("");
@@ -1214,6 +1325,98 @@ export default function App() {
     return tournament.status || tournamentText.unpublished;
   }
 
+  function updateActiveTournament(patch) {
+    if (!activeTournament) return;
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              ...patch,
+            }
+      )
+    );
+  }
+
+  function updateActiveTournamentDisplaySetting(key, value) {
+    if (!activeTournament) return;
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              displaySettings: {
+                ...getDefaultTournamentConfig().displaySettings,
+                ...(tournament.displaySettings || {}),
+                [key]: value,
+              },
+            }
+      )
+    );
+  }
+
+  function generateTournamentGroups() {
+    if (!activeTournament) return;
+    const teams = Array.isArray(activeTournament.teams) ? activeTournament.teams : [];
+    const safeGroupCount = Math.max(1, Number(activeTournament.groupCount || 2));
+    if (teams.length < 2) {
+      setTournamentActionMessage(tournamentText.notEnoughTeamsForMatches);
+      return;
+    }
+
+    const groups = Array.from({ length: safeGroupCount }, (_, idx) => ({
+      id: `g-${idx + 1}`,
+      name: `${language === "no" ? "Gruppe" : "Group"} ${idx + 1}`,
+      teams: [],
+    }));
+
+    teams.forEach((team, index) => {
+      groups[index % safeGroupCount].teams.push({
+        id: team.id,
+        name: team.name,
+        club: team.club || "",
+      });
+    });
+
+    updateActiveTournament({ groups });
+    setTournamentActionMessage(tournamentText.regenerateStructure);
+  }
+
+  function generateTournamentKnockout() {
+    if (!activeTournament) return;
+    const size = Math.max(2, Number(activeTournament.bracketSize || 4));
+    const semiCount = Math.max(1, Math.floor(size / 2 / 2));
+    const semiFinals = Array.from({ length: semiCount }, (_, idx) => ({
+      id: `sf-${idx + 1}`,
+      teamA: `${language === "no" ? "Vinner" : "Winner"} G${idx * 2 + 1}`,
+      teamB: `${language === "no" ? "Toer" : "Runner-up"} G${idx * 2 + 2}`,
+      status: "scheduled",
+    }));
+
+    updateActiveTournament({
+      knockout: {
+        semiFinals,
+        final: {
+          id: "final-1",
+          teamA: language === "no" ? "Vinner SF1" : "Winner SF1",
+          teamB: language === "no" ? "Vinner SF2" : "Winner SF2",
+          status: "scheduled",
+        },
+        thirdPlace: activeTournament.thirdPlaceMatch
+          ? {
+              id: "third-place-1",
+              teamA: language === "no" ? "Taper SF1" : "Loser SF1",
+              teamB: language === "no" ? "Taper SF2" : "Loser SF2",
+              status: "scheduled",
+            }
+          : null,
+      },
+    });
+    setTournamentActionMessage(tournamentText.regenerateStructure);
+  }
+
   function generateTournamentMatches() {
     if (!activeTournament) return;
     const teams = Array.isArray(activeTournament.teams) ? activeTournament.teams : [];
@@ -1250,7 +1453,8 @@ export default function App() {
   }
 
   const activeTournament = useMemo(() => {
-    return tournaments.find((t) => t.id === activeTournamentId) || null;
+    const tournament = tournaments.find((t) => t.id === activeTournamentId) || null;
+    return tournament ? applyTournamentDefaults(tournament) : null;
   }, [tournaments, activeTournamentId]);
 
   function createTournament() {
@@ -1270,7 +1474,7 @@ export default function App() {
       status: "draft",
       published: false,
       teams: [],
-      matches: [],
+      ...getDefaultTournamentConfig(),
     };
 
     setTournaments((prev) => [newTournament, ...prev]);
@@ -3903,261 +4107,607 @@ const savedRound = readStorageWithTtl(
 
                         {activeTournament && (
                           <div style={styles.tournamentDetails}>
-                            <div style={styles.tournamentDetailBlock}>
-                              <div style={styles.settingsLabel}>{tournamentText.nameLabel}</div>
-                              <div style={styles.tournamentDetailValue}>
-                                {activeTournament.name}
-                              </div>
-                            </div>
-
-                            <div style={styles.tournamentDetailBlock}>
-                              <div style={styles.settingsLabel}>{tournamentText.statusLabel}</div>
-                              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                                <div style={styles.tournamentStatusBadge}>
-                                  {getTournamentStatusLabel(activeTournament)}
+                            <div
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: isMobile
+                                  ? "1fr"
+                                  : "minmax(320px, 380px) minmax(0, 1fr)",
+                                gap: 16,
+                              }}
+                            >
+                              <div style={{ display: "grid", gap: 12, alignContent: "start" }}>
+                                <div style={styles.formCard}>
+                                  <div style={styles.authTitle}>{tournamentText.informationSection}</div>
+                                  <div style={styles.settingsLabel}>{tournamentText.nameLabel}</div>
+                                  <input
+                                    style={styles.input}
+                                    value={activeTournament.name || ""}
+                                    onChange={(e) =>
+                                      updateActiveTournament({ name: e.target.value })
+                                    }
+                                  />
+                                  <div style={styles.settingsLabel}>{tournamentText.rulesLabel}</div>
+                                  <textarea
+                                    style={styles.textarea}
+                                    value={activeTournament.rules || ""}
+                                    onChange={(e) =>
+                                      updateActiveTournament({ rules: e.target.value })
+                                    }
+                                  />
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      gap: 8,
+                                      alignItems: "center",
+                                      flexWrap: "wrap",
+                                    }}
+                                  >
+                                    <div style={styles.tournamentStatusBadge}>
+                                      {getTournamentStatusLabel(activeTournament)}
+                                    </div>
+                                    {activeTournament.published ||
+                                    activeTournament.status === "published" ? (
+                                      <button
+                                        style={styles.secondaryButton}
+                                        onClick={unpublishTournament}
+                                      >
+                                        {tournamentText.unpublish}
+                                      </button>
+                                    ) : (
+                                      <button
+                                        style={styles.primaryButton}
+                                        onClick={publishTournament}
+                                      >
+                                        {tournamentText.publish}
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
-                                {activeTournament.published || activeTournament.status === "published" ? (
-                                  <button
-                                    style={styles.secondaryButton}
-                                    onClick={unpublishTournament}
+
+                                <div style={styles.formCard}>
+                                  <div style={styles.authTitle}>{tournamentText.formatSection}</div>
+                                  <div style={styles.settingsLabel}>{tournamentText.formatLabel}</div>
+                                  <select
+                                    style={styles.select}
+                                    value={activeTournament.format}
+                                    onChange={(e) =>
+                                      updateActiveTournament({ format: e.target.value })
+                                    }
                                   >
-                                    {tournamentText.unpublish}
-                                  </button>
-                                ) : (
-                                  <button
-                                    style={styles.primaryButton}
-                                    onClick={publishTournament}
-                                  >
-                                    {tournamentText.publish}
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-
-                            <div style={styles.tournamentDetailBlock}>
-                              <div style={styles.settingsLabel}>{tournamentText.rulesLabel}</div>
-                              <div style={styles.tournamentRulesText}>
-                                {activeTournament.rules || tournamentText.noRules}
-                              </div>
-                            </div>
-
-                            <div style={styles.tournamentDetailBlock}>
-                              <button
-                                style={styles.primaryButton}
-                                onClick={generateTournamentMatches}
-                              >
-                                {tournamentText.generateBasicMatches}
-                              </button>
-                            </div>
-
-                            <div style={styles.tournamentDetailBlock}>
-                              <div style={styles.settingsLabel}>{tournamentText.matchesTitle}</div>
-                              {Array.isArray(activeTournament.matches) &&
-                              activeTournament.matches.length > 0 ? (
-                                <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                                  {activeTournament.matches.map((match) => (
-                                    <li
-                                      key={match.id}
-                                      style={{ fontSize: 14, marginBottom: 6 }}
+                                    <option value="group-stage">
+                                      {tournamentText.formatGroupStage}
+                                    </option>
+                                    <option value="round-robin">
+                                      {tournamentText.formatRoundRobin}
+                                    </option>
+                                    <option value="single-elimination">
+                                      {tournamentText.formatSingleElimination}
+                                    </option>
+                                  </select>
+                                  <div style={styles.settingsLabel}>{tournamentText.groupCountLabel}</div>
+                                  <input
+                                    style={styles.input}
+                                    type="number"
+                                    min={1}
+                                    value={activeTournament.groupCount}
+                                    onChange={(e) =>
+                                      updateActiveTournament({
+                                        groupCount: Math.max(1, Number(e.target.value) || 1),
+                                      })
+                                    }
+                                  />
+                                  <div style={styles.settingsLabel}>{tournamentText.bracketSizeLabel}</div>
+                                  <input
+                                    style={styles.input}
+                                    type="number"
+                                    min={2}
+                                    value={activeTournament.bracketSize}
+                                    onChange={(e) =>
+                                      updateActiveTournament({
+                                        bracketSize: Math.max(2, Number(e.target.value) || 2),
+                                      })
+                                    }
+                                  />
+                                  <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(activeTournament.thirdPlaceMatch)}
+                                      onChange={(e) =>
+                                        updateActiveTournament({
+                                          thirdPlaceMatch: e.target.checked,
+                                        })
+                                      }
+                                    />
+                                    <span>{tournamentText.thirdPlaceLabel}</span>
+                                  </label>
+                                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                    <button
+                                      style={styles.secondaryButton}
+                                      onClick={generateTournamentGroups}
                                     >
-                                      {match.teamA} vs {match.teamB} - {match.status}
-                                    </li>
+                                      {tournamentText.generateGroups}
+                                    </button>
+                                    <button
+                                      style={styles.secondaryButton}
+                                      onClick={generateTournamentKnockout}
+                                    >
+                                      {tournamentText.generateKnockout}
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div style={styles.formCard}>
+                                  <div style={styles.authTitle}>{tournamentText.settingsSection}</div>
+                                  {[
+                                    ["showScores", tournamentText.showScores],
+                                    ["showDates", tournamentText.showDates],
+                                    ["showLocations", tournamentText.showLocations],
+                                    ["showRoundTitles", tournamentText.showRoundTitles],
+                                  ].map(([key, label]) => (
+                                    <label
+                                      key={key}
+                                      style={{ display: "flex", gap: 8, alignItems: "center" }}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={Boolean(activeTournament.displaySettings?.[key])}
+                                        onChange={(e) =>
+                                          updateActiveTournamentDisplaySetting(
+                                            key,
+                                            e.target.checked
+                                          )
+                                        }
+                                      />
+                                      <span>{label}</span>
+                                    </label>
                                   ))}
-                                </ul>
-                              ) : (
-                                <div style={{ color: "#888", fontSize: 13 }}>
-                                  {tournamentText.noMatchesYet}
                                 </div>
-                              )}
-                            </div>
 
-                            {/* BEGIN: Tournament Team Registration */}
-                            <div style={{ marginTop: 24, borderTop: "1px solid #eee", paddingTop: 16 }}>
-                              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                                <input
-                                  style={styles.input}
-                                  value={newTournamentTeamName}
-                                  onChange={e => setNewTournamentTeamName(e.target.value)}
-                                  placeholder={language === "no" ? "Lagnavn" : "Team name"}
-                                />
-                                <input
-                                  style={styles.input}
-                                  value={newTournamentTeamClub}
-                                  onChange={e => setNewTournamentTeamClub(e.target.value)}
-                                  placeholder={language === "no" ? "Klubb" : "Club"}
-                                />
-                                <button style={styles.primaryButton} onClick={addTournamentTeam}>
-                                  {language === "no" ? "Legg til lag" : "Add team"}
-                                </button>
-                              </div>
-                              <div>
-                                {Array.isArray(activeTournament.teams) && activeTournament.teams.length > 0 ? (
-                                  <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                                    {activeTournament.teams.map(team => (
-                                      <li key={team.id} style={{ marginBottom: 16, borderBottom: "1px solid #eee", paddingBottom: 8 }}>
-                                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
-                                          <div>
-                                            {editingTournamentTeamId === team.id ? (
-                                              <input
-                                                style={styles.input}
-                                                value={editingTournamentTeamName}
-                                                onChange={(e) => setEditingTournamentTeamName(e.target.value)}
-                                                placeholder={language === "no" ? "Lagnavn" : "Team name"}
-                                              />
-                                            ) : (
-                                              <span style={{ fontWeight: 500 }}>{team.name}</span>
-                                            )}
-                                            {team.club && (
-                                              <span style={{ fontSize: 12, color: "#888", marginLeft: 8 }}>
-                                                {team.club}
-                                              </span>
-                                            )}
-                                            <span style={{ fontSize: 12, color: "#888", marginLeft: 12 }}>
-                                              {team.locked
-                                                ? (language === "no" ? "Låst" : "Locked")
-                                                : (language === "no" ? "Åpen" : "Open")}
-                                            </span>
-                                          </div>
-                                          <div style={{ display: "flex", gap: 6 }}>
-                                            {editingTournamentTeamId === team.id ? (
-                                              <>
-                                                <button
-                                                  style={styles.smallPrimaryButton}
-                                                  onClick={() => saveTournamentTeamName(team.id)}
-                                                >
-                                                  {tournamentText.saveTeam}
-                                                </button>
-                                                <button
-                                                  style={styles.secondaryButton}
-                                                  onClick={() => {
-                                                    setEditingTournamentTeamId("");
-                                                    setEditingTournamentTeamName("");
-                                                  }}
-                                                >
-                                                  {tournamentText.cancelEdit}
-                                                </button>
-                                              </>
-                                            ) : (
-                                              <>
-                                                <button
-                                                  style={styles.secondaryButton}
-                                                  onClick={() => toggleTournamentTeamLock(team.id)}
-                                                >
-                                                  {team.locked
-                                                    ? tournamentText.unlockTeam
-                                                    : tournamentText.lockTeam}
-                                                </button>
-                                                <button
-                                                  style={styles.secondaryButton}
-                                                  onClick={() => startEditTournamentTeam(team)}
-                                                >
-                                                  {tournamentText.editTeam}
-                                                </button>
-                                                <button
-                                                  style={styles.secondaryButton}
-                                                  onClick={() => deleteTournamentTeam(team.id)}
-                                                >
-                                                  {tournamentText.deleteTeam}
-                                                </button>
-                                              </>
-                                            )}
-                                          </div>
-                                        </div>
-                                        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                                          <input
-                                            style={styles.input}
-                                            value={newTournamentPlayerNames[team.id] || ""}
-                                            onChange={e =>
-                                              setNewTournamentPlayerNames(prev => ({
-                                                ...prev,
-                                                [team.id]: e.target.value
-                                              }))
-                                            }
-                                            placeholder={language === "no" ? "Spillernavn" : "Player name"}
-                                          />
-                                          <button
-                                            style={styles.primaryButton}
-                                            onClick={() => addTournamentPlayer(team.id)}
-                                          >
-                                            {language === "no" ? "Legg til spiller" : "Add player"}
-                                          </button>
-                                        </div>
-                                        <div style={{ marginTop: 4 }}>
-                                          {Array.isArray(team.players) && team.players.length > 0 ? (
-                                            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                                              {team.players.map(player => (
-                                                <li key={player.id} style={{ fontSize: 14, marginBottom: 2 }}>
-                                                  <span>{player.name}</span>
-                                                  <span style={{ color: "#888", marginLeft: 8 }}>
-                                                    {new Date(player.createdAt).toLocaleString()}
-                                                  </span>
-                                                  <span style={{ color: "#888", marginLeft: 8 }}>
-                                                    {player.registeredBy}
-                                                  </span>
-                                                </li>
-                                              ))}
-                                            </ul>
-                                          ) : (
-                                            <div style={{ color: "#888", fontSize: 13 }}>
-                                              {language === "no" ? "Ingen spillere ennå." : "No players yet."}
-                                            </div>
-                                          )}
-                                        </div>
-                                      </li>
-                                    ))}
-                                  </ul>
-                                ) : (
-                                  <div style={{ color: "#888", fontSize: 14 }}>
-                                    {language === "no" ? "Ingen lag ennå." : "No teams yet."}
+                                <div style={styles.formCard}>
+                                  <div style={styles.authTitle}>{tournamentText.participantsSection}</div>
+                                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                                    <input
+                                      style={styles.input}
+                                      value={newTournamentTeamName}
+                                      onChange={(e) => setNewTournamentTeamName(e.target.value)}
+                                      placeholder={language === "no" ? "Lagnavn" : "Team name"}
+                                    />
+                                    <input
+                                      style={styles.input}
+                                      value={newTournamentTeamClub}
+                                      onChange={(e) => setNewTournamentTeamClub(e.target.value)}
+                                      placeholder={language === "no" ? "Klubb" : "Club"}
+                                    />
+                                    <button
+                                      style={styles.primaryButton}
+                                      onClick={addTournamentTeam}
+                                    >
+                                      {tournamentText.addTeamButton}
+                                    </button>
                                   </div>
-                                )}
-                              </div>
-                            </div>
-                            {/* END: Tournament Team Registration */}
-
-                            {(activeTournament.published || activeTournament.status === "published") && (
-                              <div style={{ marginTop: 16, borderTop: "1px solid #eee", paddingTop: 16 }}>
-                                <div style={styles.authTitle}>{tournamentText.publicPreviewTitle}</div>
-                                <div style={styles.authSubtitle}>{tournamentText.publicPreviewSubtitle}</div>
-                                <div style={{ marginTop: 8 }}>
-                                  <div style={{ fontWeight: 600 }}>{activeTournament.name}</div>
-                                  <div style={{ color: "#555", marginTop: 4 }}>
-                                    {activeTournament.rules || tournamentText.noRules}
-                                  </div>
-                                </div>
-                                <div style={{ marginTop: 10 }}>
-                                  {Array.isArray(activeTournament.teams) && activeTournament.teams.length > 0 ? (
+                                  {Array.isArray(activeTournament.teams) &&
+                                  activeTournament.teams.length > 0 ? (
                                     <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                                       {activeTournament.teams.map((team) => (
-                                        <li key={`preview-${team.id}`} style={{ marginBottom: 10 }}>
-                                          <div style={{ fontWeight: 500 }}>
-                                            {team.name}
-                                            {team.club ? ` (${team.club})` : ""}
-                                          </div>
-                                          {Array.isArray(team.players) && team.players.length > 0 ? (
-                                            <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
-                                              {team.players.map((player) => (
-                                                <li key={`preview-${team.id}-${player.id || player.name}`}>
-                                                  {player.name}
-                                                </li>
-                                              ))}
-                                            </ul>
-                                          ) : (
-                                            <div style={{ color: "#888", fontSize: 13 }}>
-                                              {tournamentText.noPlayersInPreview}
+                                        <li
+                                          key={team.id}
+                                          style={{
+                                            marginBottom: 14,
+                                            borderBottom: "1px solid #eee",
+                                            paddingBottom: 8,
+                                          }}
+                                        >
+                                          <div
+                                            style={{
+                                              display: "flex",
+                                              justifyContent: "space-between",
+                                              gap: 8,
+                                              alignItems: "center",
+                                            }}
+                                          >
+                                            <div>
+                                              {editingTournamentTeamId === team.id ? (
+                                                <input
+                                                  style={styles.input}
+                                                  value={editingTournamentTeamName}
+                                                  onChange={(e) =>
+                                                    setEditingTournamentTeamName(
+                                                      e.target.value
+                                                    )
+                                                  }
+                                                  placeholder={
+                                                    language === "no"
+                                                      ? "Lagnavn"
+                                                      : "Team name"
+                                                  }
+                                                />
+                                              ) : (
+                                                <span style={{ fontWeight: 500 }}>{team.name}</span>
+                                              )}
+                                              {team.club && (
+                                                <span
+                                                  style={{
+                                                    fontSize: 12,
+                                                    color: "#888",
+                                                    marginLeft: 8,
+                                                  }}
+                                                >
+                                                  {team.club}
+                                                </span>
+                                              )}
+                                              <span
+                                                style={{
+                                                  fontSize: 12,
+                                                  color: "#888",
+                                                  marginLeft: 12,
+                                                }}
+                                              >
+                                                {team.locked
+                                                  ? language === "no"
+                                                    ? "Låst"
+                                                    : "Locked"
+                                                  : language === "no"
+                                                    ? "Åpen"
+                                                    : "Open"}
+                                              </span>
                                             </div>
-                                          )}
+                                            <div style={{ display: "flex", gap: 6 }}>
+                                              {editingTournamentTeamId === team.id ? (
+                                                <>
+                                                  <button
+                                                    style={styles.smallPrimaryButton}
+                                                    onClick={() =>
+                                                      saveTournamentTeamName(team.id)
+                                                    }
+                                                  >
+                                                    {tournamentText.saveTeam}
+                                                  </button>
+                                                  <button
+                                                    style={styles.secondaryButton}
+                                                    onClick={() => {
+                                                      setEditingTournamentTeamId("");
+                                                      setEditingTournamentTeamName("");
+                                                    }}
+                                                  >
+                                                    {tournamentText.cancelEdit}
+                                                  </button>
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <button
+                                                    style={styles.secondaryButton}
+                                                    onClick={() =>
+                                                      toggleTournamentTeamLock(team.id)
+                                                    }
+                                                  >
+                                                    {team.locked
+                                                      ? tournamentText.unlockTeam
+                                                      : tournamentText.lockTeam}
+                                                  </button>
+                                                  <button
+                                                    style={styles.secondaryButton}
+                                                    onClick={() =>
+                                                      startEditTournamentTeam(team)
+                                                    }
+                                                  >
+                                                    {tournamentText.editTeam}
+                                                  </button>
+                                                  <button
+                                                    style={styles.secondaryButton}
+                                                    onClick={() =>
+                                                      deleteTournamentTeam(team.id)
+                                                    }
+                                                  >
+                                                    {tournamentText.deleteTeam}
+                                                  </button>
+                                                </>
+                                              )}
+                                            </div>
+                                          </div>
+                                          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                                            <input
+                                              style={styles.input}
+                                              value={newTournamentPlayerNames[team.id] || ""}
+                                              onChange={(e) =>
+                                                setNewTournamentPlayerNames((prev) => ({
+                                                  ...prev,
+                                                  [team.id]: e.target.value,
+                                                }))
+                                              }
+                                              placeholder={
+                                                language === "no"
+                                                  ? "Spillernavn"
+                                                  : "Player name"
+                                              }
+                                            />
+                                            <button
+                                              style={styles.primaryButton}
+                                              onClick={() => addTournamentPlayer(team.id)}
+                                            >
+                                              {tournamentText.addPlayerButton}
+                                            </button>
+                                          </div>
+                                          <div style={{ marginTop: 4 }}>
+                                            {Array.isArray(team.players) &&
+                                            team.players.length > 0 ? (
+                                              <ul
+                                                style={{
+                                                  listStyle: "none",
+                                                  padding: 0,
+                                                  margin: 0,
+                                                }}
+                                              >
+                                                {team.players.map((player) => (
+                                                  <li
+                                                    key={player.id}
+                                                    style={{
+                                                      fontSize: 13,
+                                                      marginBottom: 2,
+                                                    }}
+                                                  >
+                                                    <span>{player.name}</span>
+                                                    <span
+                                                      style={{
+                                                        color: "#888",
+                                                        marginLeft: 8,
+                                                      }}
+                                                    >
+                                                      {new Date(
+                                                        player.createdAt
+                                                      ).toLocaleString()}
+                                                    </span>
+                                                    <span
+                                                      style={{
+                                                        color: "#888",
+                                                        marginLeft: 8,
+                                                      }}
+                                                    >
+                                                      {player.registeredBy}
+                                                    </span>
+                                                  </li>
+                                                ))}
+                                              </ul>
+                                            ) : (
+                                              <div style={{ color: "#888", fontSize: 13 }}>
+                                                {tournamentText.noPlayersYet}
+                                              </div>
+                                            )}
+                                          </div>
                                         </li>
                                       ))}
                                     </ul>
                                   ) : (
                                     <div style={{ color: "#888", fontSize: 14 }}>
-                                      {tournamentText.noTeamsInPreview}
+                                      {tournamentText.noTeamsYet}
                                     </div>
                                   )}
                                 </div>
                               </div>
-                            )}
+
+                              <div style={{ display: "grid", gap: 12, alignContent: "start" }}>
+                                <div style={styles.formCard}>
+                                  <div style={styles.authTitle}>{tournamentText.previewSection}</div>
+                                  <div style={styles.authSubtitle}>
+                                    {tournamentText.builderSubtitle}
+                                  </div>
+                                </div>
+
+                                <div style={styles.formCard}>
+                                  <div style={styles.authTitle}>{tournamentText.groupStagePreview}</div>
+                                  {Array.isArray(activeTournament.groups) &&
+                                  activeTournament.groups.length > 0 ? (
+                                    <div
+                                      style={{
+                                        display: "grid",
+                                        gridTemplateColumns: isMobile
+                                          ? "1fr"
+                                          : "repeat(2, minmax(0, 1fr))",
+                                        gap: 10,
+                                      }}
+                                    >
+                                      {activeTournament.groups.map((group) => (
+                                        <div
+                                          key={group.id}
+                                          style={{
+                                            border: "1px solid #e5e7eb",
+                                            borderRadius: 10,
+                                            padding: 10,
+                                          }}
+                                        >
+                                          <div style={{ fontWeight: 600 }}>{group.name}</div>
+                                          {Array.isArray(group.teams) &&
+                                          group.teams.length > 0 ? (
+                                            <ul style={{ margin: "6px 0 0 16px", padding: 0 }}>
+                                              {group.teams.map((team) => (
+                                                <li key={`${group.id}-${team.id}`}>
+                                                  {team.name}
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          ) : (
+                                            <div style={{ color: "#888", fontSize: 13 }}>
+                                              {tournamentText.noTeamsYet}
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div style={{ color: "#888", fontSize: 13 }}>
+                                      {tournamentText.noGroupsYet}
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div style={styles.formCard}>
+                                  <div style={styles.authTitle}>{tournamentText.knockoutPreview}</div>
+                                  {Array.isArray(activeTournament.knockout?.semiFinals) &&
+                                  activeTournament.knockout.semiFinals.length > 0 ? (
+                                    <div style={{ display: "grid", gap: 10 }}>
+                                      <div style={styles.settingsLabel}>
+                                        {tournamentText.semiFinals}
+                                      </div>
+                                      {activeTournament.knockout.semiFinals.map((match) => (
+                                        <div
+                                          key={match.id}
+                                          style={{
+                                            border: "1px solid #e5e7eb",
+                                            borderRadius: 10,
+                                            padding: 10,
+                                          }}
+                                        >
+                                          {match.teamA} vs {match.teamB}
+                                        </div>
+                                      ))}
+                                      {activeTournament.knockout.final && (
+                                        <>
+                                          <div style={styles.settingsLabel}>
+                                            {tournamentText.final}
+                                          </div>
+                                          <div
+                                            style={{
+                                              border: "1px solid #e5e7eb",
+                                              borderRadius: 10,
+                                              padding: 10,
+                                            }}
+                                          >
+                                            {activeTournament.knockout.final.teamA} vs{" "}
+                                            {activeTournament.knockout.final.teamB}
+                                          </div>
+                                        </>
+                                      )}
+                                      {activeTournament.thirdPlaceMatch &&
+                                        activeTournament.knockout.thirdPlace && (
+                                          <>
+                                            <div style={styles.settingsLabel}>
+                                              {tournamentText.thirdPlace}
+                                            </div>
+                                            <div
+                                              style={{
+                                                border: "1px solid #e5e7eb",
+                                                borderRadius: 10,
+                                                padding: 10,
+                                              }}
+                                            >
+                                              {activeTournament.knockout.thirdPlace.teamA} vs{" "}
+                                              {activeTournament.knockout.thirdPlace.teamB}
+                                            </div>
+                                          </>
+                                        )}
+                                    </div>
+                                  ) : (
+                                    <div style={{ color: "#888", fontSize: 13 }}>
+                                      {tournamentText.noKnockoutYet}
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div style={styles.formCard}>
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      alignItems: "center",
+                                      gap: 8,
+                                    }}
+                                  >
+                                    <div style={styles.authTitle}>{tournamentText.matchesTitle}</div>
+                                    <button
+                                      style={styles.primaryButton}
+                                      onClick={generateTournamentMatches}
+                                    >
+                                      {tournamentText.generateBasicMatches}
+                                    </button>
+                                  </div>
+                                  {Array.isArray(activeTournament.matches) &&
+                                  activeTournament.matches.length > 0 ? (
+                                    <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                                      {activeTournament.matches.map((match) => (
+                                        <li
+                                          key={match.id}
+                                          style={{ fontSize: 14, marginBottom: 6 }}
+                                        >
+                                          {match.teamA} vs {match.teamB} - {match.status}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <div style={{ color: "#888", fontSize: 13 }}>
+                                      {tournamentText.noMatchesYet}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {(activeTournament.published ||
+                                  activeTournament.status === "published") && (
+                                  <div
+                                    style={{
+                                      ...styles.formCard,
+                                      borderTop: "1px solid #eee",
+                                    }}
+                                  >
+                                    <div style={styles.authTitle}>
+                                      {tournamentText.publicPreviewTitle}
+                                    </div>
+                                    <div style={styles.authSubtitle}>
+                                      {tournamentText.publicPreviewSubtitle}
+                                    </div>
+                                    <div style={{ marginTop: 8 }}>
+                                      <div style={{ fontWeight: 600 }}>
+                                        {activeTournament.name}
+                                      </div>
+                                      <div style={{ color: "#555", marginTop: 4 }}>
+                                        {activeTournament.rules || tournamentText.noRules}
+                                      </div>
+                                    </div>
+                                    <div style={{ marginTop: 10 }}>
+                                      {Array.isArray(activeTournament.teams) &&
+                                      activeTournament.teams.length > 0 ? (
+                                        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                                          {activeTournament.teams.map((team) => (
+                                            <li
+                                              key={`preview-${team.id}`}
+                                              style={{ marginBottom: 10 }}
+                                            >
+                                              <div style={{ fontWeight: 500 }}>
+                                                {team.name}
+                                                {team.club ? ` (${team.club})` : ""}
+                                              </div>
+                                              {Array.isArray(team.players) &&
+                                              team.players.length > 0 ? (
+                                                <ul
+                                                  style={{
+                                                    margin: "4px 0 0 16px",
+                                                    padding: 0,
+                                                  }}
+                                                >
+                                                  {team.players.map((player) => (
+                                                    <li
+                                                      key={`preview-${team.id}-${player.id || player.name}`}
+                                                    >
+                                                      {player.name}
+                                                    </li>
+                                                  ))}
+                                                </ul>
+                                              ) : (
+                                                <div style={{ color: "#888", fontSize: 13 }}>
+                                                  {tournamentText.noPlayersInPreview}
+                                                </div>
+                                              )}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      ) : (
+                                        <div style={{ color: "#888", fontSize: 14 }}>
+                                          {tournamentText.noTeamsInPreview}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         )}
                       </>
