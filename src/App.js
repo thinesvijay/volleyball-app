@@ -698,7 +698,10 @@ export default function App() {
     teamNameRequired: "Skriv inn lagnavn.",
     teamUpdated: "Lag oppdatert.",
     teamDeleted: "Lag slettet.",
-    confirmDeleteTeam: "Slette dette laget?"
+    confirmDeleteTeam: "Slette dette laget?",
+    lockTeam: "Lås",
+    unlockTeam: "Lås opp",
+    teamEditLocked: "Laget er låst."
   } : {
     tabTitle: "Tournaments",
     loginRequired: "Login required to manage tournaments",
@@ -727,7 +730,10 @@ export default function App() {
     teamNameRequired: "Enter team name.",
     teamUpdated: "Team updated.",
     teamDeleted: "Team deleted.",
-    confirmDeleteTeam: "Delete this team?"
+    confirmDeleteTeam: "Delete this team?",
+    lockTeam: "Lock",
+    unlockTeam: "Unlock",
+    teamEditLocked: "Team is locked."
   };
 
   const [newPlayerClubOption, setNewPlayerClubOption] = useState("");
@@ -1027,6 +1033,10 @@ export default function App() {
 
   function startEditTournamentTeam(team) {
     if (!team?.id) return;
+    if (team.locked) {
+      setTournamentActionMessage(tournamentText.teamEditLocked);
+      return;
+    }
     setEditingTournamentTeamId(team.id);
     setEditingTournamentTeamName(team.name || "");
     setTournamentActionMessage("");
@@ -1034,6 +1044,12 @@ export default function App() {
 
   function saveTournamentTeamName(teamId) {
     if (!activeTournament) return;
+    const targetTeam = (activeTournament.teams || []).find((team) => team.id === teamId);
+    if (!targetTeam) return;
+    if (targetTeam.locked) {
+      setTournamentActionMessage(tournamentText.teamEditLocked);
+      return;
+    }
 
     const trimmedName = editingTournamentTeamName.trim();
     if (!trimmedName) {
@@ -1062,6 +1078,41 @@ export default function App() {
     setEditingTournamentTeamId("");
     setEditingTournamentTeamName("");
     setTournamentActionMessage(tournamentText.teamUpdated);
+  }
+
+  function toggleTournamentTeamLock(teamId) {
+    if (!activeTournament) return;
+
+    const targetTeam = (activeTournament.teams || []).find((team) => team.id === teamId);
+    if (!targetTeam) return;
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              teams: (tournament.teams || []).map((team) =>
+                team.id !== teamId
+                  ? team
+                  : {
+                      ...team,
+                      locked: !team.locked,
+                    }
+              ),
+            }
+      )
+    );
+
+    if (editingTournamentTeamId === teamId && !targetTeam.locked) {
+      setEditingTournamentTeamId("");
+      setEditingTournamentTeamName("");
+    }
+    setTournamentActionMessage(
+      targetTeam.locked
+        ? (language === "no" ? "Lag åpnet." : "Team unlocked.")
+        : (language === "no" ? "Lag låst." : "Team locked.")
+    );
   }
 
   function deleteTournamentTeam(teamId) {
@@ -3832,6 +3883,14 @@ const savedRound = readStorageWithTtl(
                                               </>
                                             ) : (
                                               <>
+                                                <button
+                                                  style={styles.secondaryButton}
+                                                  onClick={() => toggleTournamentTeamLock(team.id)}
+                                                >
+                                                  {team.locked
+                                                    ? tournamentText.unlockTeam
+                                                    : tournamentText.lockTeam}
+                                                </button>
                                                 <button
                                                   style={styles.secondaryButton}
                                                   onClick={() => startEditTournamentTeam(team)}
