@@ -669,22 +669,78 @@ export default function App() {
     return localStorage.getItem(getLanguageStorageKey("guest")) || "en";
   });
   const t = TRANSLATIONS[language] || TRANSLATIONS.en;
+
+  const tournamentText = language === "no" ? {
+    tabTitle: "Turneringer",
+    loginRequired: "Innlogging kreves for å administrere turneringer",
+    createTitle: "Opprett turnering",
+    createSubtitle: "Opprett en ny turnering",
+    newTournament: "Ny turnering",
+    namePlaceholder: "Turneringsnavn",
+    rulesPlaceholder: "Turneringsregler (valgfritt)",
+    createButton: "Opprett turnering",
+    enterName: "Vennligst skriv inn et turneringsnavn.",
+    createdOk: "Turnering opprettet.",
+    listTitle: "Turneringer",
+    emptyList: "Ingen turneringer ennå.",
+    detailsTitle: "Turneringsdetaljer",
+    noSelection: "Velg en turnering for å se detaljer.",
+    nameLabel: "Navn:",
+    statusLabel: "Status:",
+    rulesLabel: "Regler:",
+    createdLabel: "Opprettet:",
+    noRules: "Ingen regler spesifisert.",
+    draft: "Utkast"
+  } : {
+    tabTitle: "Tournaments",
+    loginRequired: "Login required to manage tournaments",
+    createTitle: "Create Tournament",
+    createSubtitle: "Create a new tournament",
+    newTournament: "New Tournament",
+    namePlaceholder: "Tournament name",
+    rulesPlaceholder: "Tournament rules (optional)",
+    createButton: "Create Tournament",
+    enterName: "Please enter a tournament name.",
+    createdOk: "Tournament created successfully.",
+    listTitle: "Tournaments",
+    emptyList: "No tournaments yet.",
+    detailsTitle: "Tournament Details",
+    noSelection: "Select a tournament to view details.",
+    nameLabel: "Name:",
+    statusLabel: "Status:",
+    rulesLabel: "Rules:",
+    createdLabel: "Created:",
+    noRules: "No rules specified.",
+    draft: "Draft"
+  };
+
   const [newPlayerClubOption, setNewPlayerClubOption] = useState("");
   const [newPlayerClubCustom, setNewPlayerClubCustom] = useState("");
   const [editClubOption, setEditClubOption] = useState("");
   const [editClubCustom, setEditClubCustom] = useState("");
 
+  const [tournaments, setTournaments] = useState([]);
+  const [activeTournamentId, setActiveTournamentId] = useState("");
+  const [showCreateTournamentForm, setShowCreateTournamentForm] =
+    useState(false);
+
+  const [newTournamentName, setNewTournamentName] = useState("");
+  const [newTournamentRules, setNewTournamentRules] = useState("");
+  const [tournamentActionMessage, setTournamentActionMessage] = useState("");
+  const [newTournamentTeamName, setNewTournamentTeamName] = useState("");
+  const [newTournamentTeamClub, setNewTournamentTeamClub] = useState("");
+  const [newTournamentPlayerNames, setNewTournamentPlayerNames] = useState({});
 
   const removablePlayersFromTeams = useMemo(() => {
-  return teams.flatMap((team, teamIndex) =>
-    (team.players || []).map((player, playerIndex) => ({
-      ...player,
-      teamIndex,
-      playerIndex,
-      teamName: normalizeTeamName(teamIndex, team.name, language),
-    }))
-  );
-}, [teams, language]);
+    return teams.flatMap((team, teamIndex) =>
+      (team.players || []).map((player, playerIndex) => ({
+        ...player,
+        teamIndex,
+        playerIndex,
+        teamName: normalizeTeamName(teamIndex, team.name, language),
+      }))
+    );
+  }, [teams, language]);
 
   const [auth, setAuth] = useState(() => {
     if (typeof window === "undefined") return getDefaultAuth();
@@ -847,6 +903,139 @@ export default function App() {
     },
     [auth.loggedIn, auth.password, auth.username]
   );
+
+  function addTournamentTeam() {
+    if (!activeTournament) return;
+
+    const trimmedName = newTournamentTeamName.trim();
+    const trimmedClub = newTournamentTeamClub.trim();
+
+    if (!trimmedName) {
+      setTournamentActionMessage(
+        language === "no" ? "Skriv inn lagnavn." : "Enter team name."
+      );
+      return;
+    }
+
+    const newTeam = {
+      id: `tt-${Date.now()}`,
+      name: trimmedName,
+      club: trimmedClub,
+      createdAt: new Date().toISOString(),
+      players: [],
+      locked: false,
+    };
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id === activeTournament.id
+          ? {
+              ...tournament,
+              teams: Array.isArray(tournament.teams)
+                ? [newTeam, ...tournament.teams]
+                : [newTeam],
+            }
+          : tournament
+      )
+    );
+
+    setNewTournamentTeamName("");
+    setNewTournamentTeamClub("");
+    setTournamentActionMessage(
+      language === "no" ? "Lag lagt til." : "Team added."
+    );
+  }
+
+  function addTournamentPlayer(teamId) {
+    if (!activeTournament) return;
+
+    const raw = newTournamentPlayerNames[teamId] || "";
+    const trimmedName = raw.trim();
+
+    if (!trimmedName) {
+      setTournamentActionMessage(
+        language === "no" ? "Skriv inn spillernavn." : "Enter player name."
+      );
+      return;
+    }
+
+    const team = (activeTournament.teams || []).find((item) => item.id === teamId);
+
+    if (!team) return;
+
+    if (team.locked) {
+      setTournamentActionMessage(
+        language === "no" ? "Laglisten er låst." : "Team list is locked."
+      );
+      return;
+    }
+
+    const newPlayer = {
+      id: `tp-${Date.now()}`,
+      name: trimmedName,
+      createdAt: new Date().toISOString(),
+      registeredBy: auth.username || "unknown",
+    };
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              teams: (tournament.teams || []).map((item) =>
+                item.id !== teamId
+                  ? item
+                  : {
+                      ...item,
+                      players: Array.isArray(item.players)
+                        ? [...item.players, newPlayer]
+                        : [newPlayer],
+                    }
+              ),
+            }
+      )
+    );
+
+    setNewTournamentPlayerNames((prev) => ({
+      ...prev,
+      [teamId]: "",
+    }));
+
+    setTournamentActionMessage(
+      language === "no" ? "Spiller lagt til." : "Player added."
+    );
+  }
+
+  const activeTournament = useMemo(() => {
+    return tournaments.find((t) => t.id === activeTournamentId) || null;
+  }, [tournaments, activeTournamentId]);
+
+  function createTournament() {
+    const name = newTournamentName.trim();
+    const rules = newTournamentRules.trim();
+
+    if (!name) {
+      setTournamentActionMessage(tournamentText.enterName);
+      return;
+    }
+
+    const newTournament = {
+      id: `t-${Date.now()}`,
+      name,
+      rules,
+      createdAt: new Date().toISOString(),
+      status: "draft",
+      teams: [],
+    };
+
+    setTournaments((prev) => [newTournament, ...prev]);
+    setActiveTournamentId(newTournament.id);
+    setNewTournamentName("");
+    setNewTournamentRules("");
+    setShowCreateTournamentForm(false);
+    setTournamentActionMessage(tournamentText.createdOk);
+  }
 
   async function handleLogin() {
     const username = loginUsername.trim();
@@ -1967,6 +2156,7 @@ const savedRound = readStorageWithTtl(
     setShowAddToTeamsModal(false);
   }
 
+
   const sortedPlayers = useMemo(() => {
     const nextPlayers = [...players];
 
@@ -1989,7 +2179,7 @@ const savedRound = readStorageWithTtl(
     return nextPlayers.sort((a, b) =>
       displayPlayerName(a).localeCompare(displayPlayerName(b))
     );
-  }, [archivedPlayers, playerSortMode]);
+    }, [archivedPlayers, playerSortMode]);
 
   const noClubLabel = t.noClub;
 
@@ -2487,6 +2677,16 @@ const savedRound = readStorageWithTtl(
             onClick={() => setActiveTab("teams")}
           >
             {t.teams}
+          </button>
+
+          <button
+            style={{
+              ...styles.tabButton,
+              ...(activeTab === "tournament" ? styles.tabButtonActive : {}),
+            }}
+            onClick={() => setActiveTab("tournament")}
+        >
+            {tournamentText.tabTitle}
           </button>
         </div>
 
@@ -3352,8 +3552,237 @@ const savedRound = readStorageWithTtl(
             )}
           </div>
         )}
-      </div>
 
+        {activeTab === "tournament" && (
+          <div style={styles.section}>
+            {!auth.loggedIn ? (
+              <div style={styles.lockedCard}>
+                {tournamentText.loginRequired}
+              </div>
+            ) : (
+              <>
+                <div style={styles.tournamentCard}>
+                  <div style={styles.tournamentHeader}>
+                    <div>
+                      <div style={styles.authTitle}>{tournamentText.createTitle}</div>
+                      <div style={styles.authSubtitle}>
+                        {tournamentText.createSubtitle}
+                      </div>
+                    </div>
+
+                    <button
+                      style={styles.secondaryButton}
+                      onClick={() =>
+                        setShowCreateTournamentForm((prev) => !prev)
+                      }
+                    >
+                      {showCreateTournamentForm
+                        ? t.close
+                        : tournamentText.newTournament}
+                    </button>
+                  </div>
+
+                  {showCreateTournamentForm && (
+                    <div style={styles.formCard}>
+                      <input
+                        style={styles.input}
+                        value={newTournamentName}
+                        onChange={(e) => setNewTournamentName(e.target.value)}
+                        placeholder={tournamentText.namePlaceholder}
+                      />
+
+                      <textarea
+                        style={styles.textarea}
+                        value={newTournamentRules}
+                        onChange={(e) => setNewTournamentRules(e.target.value)}
+                        placeholder={tournamentText.rulesPlaceholder}
+                      />
+
+                      <button
+                        style={styles.primaryButton}
+                        onClick={createTournament}
+                      >
+                        {tournamentText.createButton}
+                      </button>
+                    </div>
+                  )}
+
+                  {tournamentActionMessage && (
+                    <div style={styles.loginMessage}>{tournamentActionMessage}</div>
+                  )}
+                </div>
+
+                <div style={styles.tournamentGrid}>
+                  <div style={styles.tournamentCard}>
+                    <div style={styles.authTitle}>{tournamentText.listTitle}</div>
+
+                    <div style={styles.tournamentList}>
+                      {tournaments.length === 0 ? (
+                        <div style={styles.emptyText}>
+                          {tournamentText.emptyList}
+                        </div>
+                      ) : (
+                        tournaments.map((item) => {
+                          const isActive = item.id === activeTournamentId;
+
+                          return (
+                            <button
+                              key={item.id}
+                              style={{
+                                ...styles.tournamentListItem,
+                                ...(isActive
+                                  ? styles.tournamentListItemActive
+                                  : {}),
+                              }}
+                              onClick={() => {
+                                setActiveTournamentId(item.id);
+                                setTournamentActionMessage("");
+                              }}
+                            >
+                              <div style={styles.tournamentListItemTitle}>
+                                {item.name}
+                              </div>
+                              <div style={styles.tournamentListItemMeta}>
+                                {item.status === "draft" ? tournamentText.draft : item.status}
+                              </div>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={styles.tournamentCard}>
+                    {activeTournamentId ? (
+                      <>
+                        <div style={styles.authTitle}>{tournamentText.detailsTitle}</div>
+
+                        {activeTournament && (
+                          <div style={styles.tournamentDetails}>
+                            <div style={styles.tournamentDetailBlock}>
+                              <div style={styles.settingsLabel}>{tournamentText.nameLabel}</div>
+                              <div style={styles.tournamentDetailValue}>
+                                {activeTournament.name}
+                              </div>
+                            </div>
+
+                            <div style={styles.tournamentDetailBlock}>
+                              <div style={styles.settingsLabel}>{tournamentText.statusLabel}</div>
+                              <div style={styles.tournamentStatusBadge}>
+                                {activeTournament.status === "draft" ? tournamentText.draft : activeTournament.status}
+                              </div>
+                            </div>
+
+                            <div style={styles.tournamentDetailBlock}>
+                              <div style={styles.settingsLabel}>{tournamentText.rulesLabel}</div>
+                              <div style={styles.tournamentRulesText}>
+                                {activeTournament.rules || tournamentText.noRules}
+                              </div>
+                            </div>
+
+                            {/* BEGIN: Tournament Team Registration */}
+                            <div style={{ marginTop: 24, borderTop: "1px solid #eee", paddingTop: 16 }}>
+                              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                                <input
+                                  style={styles.input}
+                                  value={newTournamentTeamName}
+                                  onChange={e => setNewTournamentTeamName(e.target.value)}
+                                  placeholder={language === "no" ? "Lagnavn" : "Team name"}
+                                />
+                                <input
+                                  style={styles.input}
+                                  value={newTournamentTeamClub}
+                                  onChange={e => setNewTournamentTeamClub(e.target.value)}
+                                  placeholder={language === "no" ? "Klubb" : "Club"}
+                                />
+                                <button style={styles.primaryButton} onClick={addTournamentTeam}>
+                                  {language === "no" ? "Legg til lag" : "Add team"}
+                                </button>
+                              </div>
+                              <div>
+                                {Array.isArray(activeTournament.teams) && activeTournament.teams.length > 0 ? (
+                                  <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                                    {activeTournament.teams.map(team => (
+                                      <li key={team.id} style={{ marginBottom: 16, borderBottom: "1px solid #eee", paddingBottom: 8 }}>
+                                        <div>
+                                          <span style={{ fontWeight: 500 }}>{team.name}</span>
+                                          {team.club && (
+                                            <span style={{ fontSize: 12, color: "#888", marginLeft: 8 }}>
+                                              {team.club}
+                                            </span>
+                                          )}
+                                          <span style={{ fontSize: 12, color: "#888", marginLeft: 12 }}>
+                                            {team.locked
+                                              ? (language === "no" ? "Låst" : "Locked")
+                                              : (language === "no" ? "Åpen" : "Open")}
+                                          </span>
+                                        </div>
+                                        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                                          <input
+                                            style={styles.input}
+                                            value={newTournamentPlayerNames[team.id] || ""}
+                                            onChange={e =>
+                                              setNewTournamentPlayerNames(prev => ({
+                                                ...prev,
+                                                [team.id]: e.target.value
+                                              }))
+                                            }
+                                            placeholder={language === "no" ? "Spillernavn" : "Player name"}
+                                          />
+                                          <button
+                                            style={styles.primaryButton}
+                                            onClick={() => addTournamentPlayer(team.id)}
+                                          >
+                                            {language === "no" ? "Legg til spiller" : "Add player"}
+                                          </button>
+                                        </div>
+                                        <div style={{ marginTop: 4 }}>
+                                          {Array.isArray(team.players) && team.players.length > 0 ? (
+                                            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                                              {team.players.map(player => (
+                                                <li key={player.id} style={{ fontSize: 14, marginBottom: 2 }}>
+                                                  <span>{player.name}</span>
+                                                  <span style={{ color: "#888", marginLeft: 8 }}>
+                                                    {new Date(player.createdAt).toLocaleString()}
+                                                  </span>
+                                                  <span style={{ color: "#888", marginLeft: 8 }}>
+                                                    {player.registeredBy}
+                                                  </span>
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          ) : (
+                                            <div style={{ color: "#888", fontSize: 13 }}>
+                                              {language === "no" ? "Ingen spillere ennå." : "No players yet."}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                ) : (
+                                  <div style={{ color: "#888", fontSize: 14 }}>
+                                    {language === "no" ? "Ingen lag ennå." : "No teams yet."}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            {/* END: Tournament Team Registration */}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div style={styles.emptyText}>
+                        {tournamentText.noSelection}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+        
       {editingPlayer && (
         <div style={styles.modalOverlay} onClick={closeEditPlayer}>
           <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
@@ -3620,6 +4049,7 @@ const savedRound = readStorageWithTtl(
         </div>
       )}
     </div>
+    </div>
   );
 }
 
@@ -3839,7 +4269,7 @@ const styles = {
 
   tabBar: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    gridTemplateColumns: "1fr 1fr 1fr",
     gap: "6px",
     marginBottom: "12px",
   },
