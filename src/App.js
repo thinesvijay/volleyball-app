@@ -762,6 +762,20 @@ export default function App() {
     notEnoughTeamsForMatches: "Minst 2 lag kreves for å generere kamper.",
     matchesGenerated: "Kamper generert.",
     noMatchesYet: "Ingen kamper ennå.",
+    standingsTitle: "Tabell",
+    playedShort: "K",
+    winsShort: "V",
+    drawsShort: "U",
+    lossesShort: "T",
+    pointsShort: "P",
+    scoreForShort: "MF",
+    scoreAgainstShort: "MM",
+    scoreDiffShort: "DIFF",
+    noStandingsYet: "Ingen tabell ennå.",
+    matchStatusCompleted: "Ferdig",
+    matchStatusScheduled: "Planlagt",
+    winnerLabel: "Vinner",
+    runnerUpLabel: "Toer",
     builderTitle: "Turneringsbygger",
     builderSubtitle: "Planlegg format, grupper og sluttspill",
     informationSection: "Turneringsinformasjon",
@@ -842,6 +856,20 @@ export default function App() {
     notEnoughTeamsForMatches: "At least 2 teams are required to generate matches.",
     matchesGenerated: "Matches generated.",
     noMatchesYet: "No matches yet.",
+    standingsTitle: "Standings",
+    playedShort: "P",
+    winsShort: "W",
+    drawsShort: "D",
+    lossesShort: "L",
+    pointsShort: "Pts",
+    scoreForShort: "SF",
+    scoreAgainstShort: "SA",
+    scoreDiffShort: "GD",
+    noStandingsYet: "No standings yet.",
+    matchStatusCompleted: "Completed",
+    matchStatusScheduled: "Scheduled",
+    winnerLabel: "Winner",
+    runnerUpLabel: "Runner-up",
     builderTitle: "Tournament Builder",
     builderSubtitle: "Configure format, groups and knockout flow",
     informationSection: "Tournament Information",
@@ -1452,10 +1480,138 @@ export default function App() {
     setTournamentActionMessage(tournamentText.matchesGenerated);
   }
 
+  function updateTournamentMatchScore(matchId, scoreA, scoreB) {
+    if (!activeTournament) return;
+
+    const normalizedA = String(scoreA ?? "");
+    const normalizedB = String(scoreB ?? "");
+    const hasBoth = normalizedA.trim() !== "" && normalizedB.trim() !== "";
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              matches: (tournament.matches || []).map((match) =>
+                match.id !== matchId
+                  ? match
+                  : {
+                      ...match,
+                      scoreA: normalizedA,
+                      scoreB: normalizedB,
+                      status: hasBoth ? "completed" : "scheduled",
+                    }
+              ),
+            }
+      )
+    );
+  }
+
+  function computeTournamentStandings(tournament) {
+    if (!tournament || tournament.format !== "group-stage") return [];
+
+    const groups = Array.isArray(tournament.groups) ? tournament.groups : [];
+    const matches = Array.isArray(tournament.matches) ? tournament.matches : [];
+    if (!groups.length) return [];
+
+    const standings = groups.map((group) => {
+      const rowsByTeam = {};
+      const teamNames = (group.teams || []).map((team) => team.name);
+
+      teamNames.forEach((teamName) => {
+        rowsByTeam[teamName] = {
+          teamName,
+          played: 0,
+          wins: 0,
+          draws: 0,
+          losses: 0,
+          points: 0,
+          scoreFor: 0,
+          scoreAgainst: 0,
+          scoreDiff: 0,
+        };
+      });
+
+      matches.forEach((match) => {
+        if (!teamNames.includes(match.teamA) || !teamNames.includes(match.teamB)) return;
+
+        const scoreA = Number(match.scoreA);
+        const scoreB = Number(match.scoreB);
+        const isComplete =
+          match.status === "completed" &&
+          Number.isFinite(scoreA) &&
+          Number.isFinite(scoreB);
+        if (!isComplete) return;
+
+        const rowA = rowsByTeam[match.teamA];
+        const rowB = rowsByTeam[match.teamB];
+        if (!rowA || !rowB) return;
+
+        rowA.played += 1;
+        rowB.played += 1;
+        rowA.scoreFor += scoreA;
+        rowA.scoreAgainst += scoreB;
+        rowB.scoreFor += scoreB;
+        rowB.scoreAgainst += scoreA;
+
+        if (scoreA > scoreB) {
+          rowA.wins += 1;
+          rowA.points += 3;
+          rowB.losses += 1;
+        } else if (scoreA < scoreB) {
+          rowB.wins += 1;
+          rowB.points += 3;
+          rowA.losses += 1;
+        } else {
+          rowA.draws += 1;
+          rowB.draws += 1;
+          rowA.points += 1;
+          rowB.points += 1;
+        }
+      });
+
+      const rows = Object.values(rowsByTeam).map((row) => ({
+        ...row,
+        scoreDiff: row.scoreFor - row.scoreAgainst,
+      }));
+
+      rows.sort((a, b) => {
+        if (b.points !== a.points) return b.points - a.points;
+        if (b.scoreDiff !== a.scoreDiff) return b.scoreDiff - a.scoreDiff;
+        if (b.scoreFor !== a.scoreFor) return b.scoreFor - a.scoreFor;
+        return a.teamName.localeCompare(b.teamName);
+      });
+
+      return {
+        groupId: group.id,
+        groupName: group.name,
+        rows,
+      };
+    });
+
+    return standings;
+  }
+
   const activeTournament = useMemo(() => {
     const tournament = tournaments.find((t) => t.id === activeTournamentId) || null;
     return tournament ? applyTournamentDefaults(tournament) : null;
   }, [tournaments, activeTournamentId]);
+
+  const tournamentStandings = useMemo(() => {
+    return computeTournamentStandings(activeTournament);
+  }, [activeTournament]);
+
+  const advancingTeamsByGroup = useMemo(() => {
+    if (!activeTournament || activeTournament.format !== "group-stage") return [];
+    return tournamentStandings.map((group) => ({
+      groupId: group.groupId,
+      groupName: group.groupName,
+      winner: group.rows?.[0]?.teamName || `${group.groupName} ${tournamentText.winnerLabel}`,
+      runnerUp:
+        group.rows?.[1]?.teamName || `${group.groupName} ${tournamentText.runnerUpLabel}`,
+    }));
+  }, [activeTournament, tournamentStandings, tournamentText.winnerLabel, tournamentText.runnerUpLabel]);
 
   function createTournament() {
     const name = newTournamentName.trim();
@@ -4548,18 +4704,31 @@ const savedRound = readStorageWithTtl(
                                       <div style={styles.settingsLabel}>
                                         {tournamentText.semiFinals}
                                       </div>
-                                      {activeTournament.knockout.semiFinals.map((match) => (
-                                        <div
-                                          key={match.id}
-                                          style={{
-                                            border: "1px solid #e5e7eb",
-                                            borderRadius: 10,
-                                            padding: 10,
-                                          }}
-                                        >
-                                          {match.teamA} vs {match.teamB}
-                                        </div>
-                                      ))}
+                                      {activeTournament.knockout.semiFinals.map((match, idx) => {
+                                        const groupA = advancingTeamsByGroup[idx * 2];
+                                        const groupB = advancingTeamsByGroup[idx * 2 + 1];
+                                        const teamA =
+                                          activeTournament.format === "group-stage" && groupA
+                                            ? groupA.winner
+                                            : match.teamA;
+                                        const teamB =
+                                          activeTournament.format === "group-stage" && groupB
+                                            ? groupB.runnerUp
+                                            : match.teamB;
+
+                                        return (
+                                          <div
+                                            key={match.id}
+                                            style={{
+                                              border: "1px solid #e5e7eb",
+                                              borderRadius: 10,
+                                              padding: 10,
+                                            }}
+                                          >
+                                            {teamA} vs {teamB}
+                                          </div>
+                                        );
+                                      })}
                                       {activeTournament.knockout.final && (
                                         <>
                                           <div style={styles.settingsLabel}>
@@ -4626,15 +4795,122 @@ const savedRound = readStorageWithTtl(
                                       {activeTournament.matches.map((match) => (
                                         <li
                                           key={match.id}
-                                          style={{ fontSize: 14, marginBottom: 6 }}
+                                          style={{
+                                            fontSize: 14,
+                                            marginBottom: 8,
+                                            border: "1px solid #e5e7eb",
+                                            borderRadius: 8,
+                                            padding: 8,
+                                          }}
                                         >
-                                          {match.teamA} vs {match.teamB} - {match.status}
+                                          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                                            {match.teamA} vs {match.teamB}
+                                          </div>
+                                          <div
+                                            style={{
+                                              display: "flex",
+                                              alignItems: "center",
+                                              gap: 8,
+                                              flexWrap: "wrap",
+                                            }}
+                                          >
+                                            <input
+                                              style={{ ...styles.input, width: 72 }}
+                                              value={match.scoreA}
+                                              onChange={(e) =>
+                                                updateTournamentMatchScore(
+                                                  match.id,
+                                                  e.target.value,
+                                                  match.scoreB
+                                                )
+                                              }
+                                              placeholder="0"
+                                            />
+                                            <span>-</span>
+                                            <input
+                                              style={{ ...styles.input, width: 72 }}
+                                              value={match.scoreB}
+                                              onChange={(e) =>
+                                                updateTournamentMatchScore(
+                                                  match.id,
+                                                  match.scoreA,
+                                                  e.target.value
+                                                )
+                                              }
+                                              placeholder="0"
+                                            />
+                                            <span style={styles.tournamentListItemMeta}>
+                                              {match.status === "completed"
+                                                ? tournamentText.matchStatusCompleted
+                                                : tournamentText.matchStatusScheduled}
+                                            </span>
+                                          </div>
                                         </li>
                                       ))}
                                     </ul>
                                   ) : (
                                     <div style={{ color: "#888", fontSize: 13 }}>
                                       {tournamentText.noMatchesYet}
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div style={styles.formCard}>
+                                  <div style={styles.authTitle}>{tournamentText.standingsTitle}</div>
+                                  {activeTournament.format === "group-stage" &&
+                                  Array.isArray(tournamentStandings) &&
+                                  tournamentStandings.length > 0 ? (
+                                    <div style={{ display: "grid", gap: 10 }}>
+                                      {tournamentStandings.map((group) => (
+                                        <div
+                                          key={`standings-${group.groupId}`}
+                                          style={{
+                                            border: "1px solid #e5e7eb",
+                                            borderRadius: 10,
+                                            padding: 10,
+                                          }}
+                                        >
+                                          <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                                            {group.groupName}
+                                          </div>
+                                          <div style={{ overflowX: "auto" }}>
+                                            <table style={{ width: "100%", fontSize: 12 }}>
+                                              <thead>
+                                                <tr>
+                                                  <th align="left">Team</th>
+                                                  <th>{tournamentText.playedShort}</th>
+                                                  <th>{tournamentText.winsShort}</th>
+                                                  <th>{tournamentText.drawsShort}</th>
+                                                  <th>{tournamentText.lossesShort}</th>
+                                                  <th>{tournamentText.pointsShort}</th>
+                                                  <th>{tournamentText.scoreForShort}</th>
+                                                  <th>{tournamentText.scoreAgainstShort}</th>
+                                                  <th>{tournamentText.scoreDiffShort}</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {group.rows.map((row) => (
+                                                  <tr key={`row-${group.groupId}-${row.teamName}`}>
+                                                    <td>{row.teamName}</td>
+                                                    <td align="center">{row.played}</td>
+                                                    <td align="center">{row.wins}</td>
+                                                    <td align="center">{row.draws}</td>
+                                                    <td align="center">{row.losses}</td>
+                                                    <td align="center">{row.points}</td>
+                                                    <td align="center">{row.scoreFor}</td>
+                                                    <td align="center">{row.scoreAgainst}</td>
+                                                    <td align="center">{row.scoreDiff}</td>
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div style={{ color: "#888", fontSize: 13 }}>
+                                      {tournamentText.noStandingsYet}
                                     </div>
                                   )}
                                 </div>
