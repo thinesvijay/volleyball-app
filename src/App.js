@@ -711,7 +711,12 @@ export default function App() {
     publicPreviewTitle: "Offentlig forhåndsvisning",
     publicPreviewSubtitle: "Skrivebeskyttet visning av publisert turnering",
     noTeamsInPreview: "Ingen lag publisert ennå.",
-    noPlayersInPreview: "Ingen spillere ennå."
+    noPlayersInPreview: "Ingen spillere ennå.",
+    generateBasicMatches: "Generer enkle kamper",
+    matchesTitle: "Kamper",
+    notEnoughTeamsForMatches: "Minst 2 lag kreves for å generere kamper.",
+    matchesGenerated: "Kamper generert.",
+    noMatchesYet: "Ingen kamper ennå."
   } : {
     tabTitle: "Tournaments",
     loginRequired: "Login required to manage tournaments",
@@ -753,7 +758,12 @@ export default function App() {
     publicPreviewTitle: "Public Preview",
     publicPreviewSubtitle: "Read-only view of published tournament",
     noTeamsInPreview: "No teams published yet.",
-    noPlayersInPreview: "No players yet."
+    noPlayersInPreview: "No players yet.",
+    generateBasicMatches: "Generate Basic Matches",
+    matchesTitle: "Matches",
+    notEnoughTeamsForMatches: "At least 2 teams are required to generate matches.",
+    matchesGenerated: "Matches generated.",
+    noMatchesYet: "No matches yet."
   };
 
   const [newPlayerClubOption, setNewPlayerClubOption] = useState("");
@@ -1204,6 +1214,41 @@ export default function App() {
     return tournament.status || tournamentText.unpublished;
   }
 
+  function generateTournamentMatches() {
+    if (!activeTournament) return;
+    const teams = Array.isArray(activeTournament.teams) ? activeTournament.teams : [];
+    if (teams.length < 2) {
+      setTournamentActionMessage(tournamentText.notEnoughTeamsForMatches);
+      return;
+    }
+
+    const nextMatches = [];
+    for (let i = 0; i < teams.length; i += 1) {
+      for (let j = i + 1; j < teams.length; j += 1) {
+        nextMatches.push({
+          id: `tm-${activeTournament.id}-${i}-${j}-${Date.now()}`,
+          teamA: teams[i].name,
+          teamB: teams[j].name,
+          scoreA: "",
+          scoreB: "",
+          status: "scheduled",
+        });
+      }
+    }
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              matches: nextMatches,
+            }
+      )
+    );
+    setTournamentActionMessage(tournamentText.matchesGenerated);
+  }
+
   const activeTournament = useMemo(() => {
     return tournaments.find((t) => t.id === activeTournamentId) || null;
   }, [tournaments, activeTournamentId]);
@@ -1225,6 +1270,7 @@ export default function App() {
       status: "draft",
       published: false,
       teams: [],
+      matches: [],
     };
 
     setTournaments((prev) => [newTournament, ...prev]);
@@ -3893,6 +3939,36 @@ const savedRound = readStorageWithTtl(
                               <div style={styles.tournamentRulesText}>
                                 {activeTournament.rules || tournamentText.noRules}
                               </div>
+                            </div>
+
+                            <div style={styles.tournamentDetailBlock}>
+                              <button
+                                style={styles.primaryButton}
+                                onClick={generateTournamentMatches}
+                              >
+                                {tournamentText.generateBasicMatches}
+                              </button>
+                            </div>
+
+                            <div style={styles.tournamentDetailBlock}>
+                              <div style={styles.settingsLabel}>{tournamentText.matchesTitle}</div>
+                              {Array.isArray(activeTournament.matches) &&
+                              activeTournament.matches.length > 0 ? (
+                                <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                                  {activeTournament.matches.map((match) => (
+                                    <li
+                                      key={match.id}
+                                      style={{ fontSize: 14, marginBottom: 6 }}
+                                    >
+                                      {match.teamA} vs {match.teamB} - {match.status}
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <div style={{ color: "#888", fontSize: 13 }}>
+                                  {tournamentText.noMatchesYet}
+                                </div>
+                              )}
                             </div>
 
                             {/* BEGIN: Tournament Team Registration */}
