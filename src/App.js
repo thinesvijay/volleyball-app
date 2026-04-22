@@ -690,7 +690,15 @@ export default function App() {
     rulesLabel: "Regler:",
     createdLabel: "Opprettet:",
     noRules: "Ingen regler spesifisert.",
-    draft: "Utkast"
+    draft: "Utkast",
+    editTeam: "Rediger",
+    deleteTeam: "Slett",
+    saveTeam: "Lagre",
+    cancelEdit: "Avbryt",
+    teamNameRequired: "Skriv inn lagnavn.",
+    teamUpdated: "Lag oppdatert.",
+    teamDeleted: "Lag slettet.",
+    confirmDeleteTeam: "Slette dette laget?"
   } : {
     tabTitle: "Tournaments",
     loginRequired: "Login required to manage tournaments",
@@ -711,7 +719,15 @@ export default function App() {
     rulesLabel: "Rules:",
     createdLabel: "Created:",
     noRules: "No rules specified.",
-    draft: "Draft"
+    draft: "Draft",
+    editTeam: "Edit",
+    deleteTeam: "Delete",
+    saveTeam: "Save",
+    cancelEdit: "Cancel",
+    teamNameRequired: "Enter team name.",
+    teamUpdated: "Team updated.",
+    teamDeleted: "Team deleted.",
+    confirmDeleteTeam: "Delete this team?"
   };
 
   const [newPlayerClubOption, setNewPlayerClubOption] = useState("");
@@ -730,6 +746,8 @@ export default function App() {
   const [newTournamentTeamName, setNewTournamentTeamName] = useState("");
   const [newTournamentTeamClub, setNewTournamentTeamClub] = useState("");
   const [newTournamentPlayerNames, setNewTournamentPlayerNames] = useState({});
+  const [editingTournamentTeamId, setEditingTournamentTeamId] = useState("");
+  const [editingTournamentTeamName, setEditingTournamentTeamName] = useState("");
 
   const removablePlayersFromTeams = useMemo(() => {
     return teams.flatMap((team, teamIndex) =>
@@ -1005,6 +1023,72 @@ export default function App() {
     setTournamentActionMessage(
       language === "no" ? "Spiller lagt til." : "Player added."
     );
+  }
+
+  function startEditTournamentTeam(team) {
+    if (!team?.id) return;
+    setEditingTournamentTeamId(team.id);
+    setEditingTournamentTeamName(team.name || "");
+    setTournamentActionMessage("");
+  }
+
+  function saveTournamentTeamName(teamId) {
+    if (!activeTournament) return;
+
+    const trimmedName = editingTournamentTeamName.trim();
+    if (!trimmedName) {
+      setTournamentActionMessage(tournamentText.teamNameRequired);
+      return;
+    }
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              teams: (tournament.teams || []).map((team) =>
+                team.id !== teamId
+                  ? team
+                  : {
+                      ...team,
+                      name: trimmedName,
+                    }
+              ),
+            }
+      )
+    );
+
+    setEditingTournamentTeamId("");
+    setEditingTournamentTeamName("");
+    setTournamentActionMessage(tournamentText.teamUpdated);
+  }
+
+  function deleteTournamentTeam(teamId) {
+    if (!activeTournament) return;
+    if (!window.confirm(tournamentText.confirmDeleteTeam)) return;
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              teams: (tournament.teams || []).filter((team) => team.id !== teamId),
+            }
+      )
+    );
+
+    setNewTournamentPlayerNames((prev) => {
+      const next = { ...prev };
+      delete next[teamId];
+      return next;
+    });
+    if (editingTournamentTeamId === teamId) {
+      setEditingTournamentTeamId("");
+      setEditingTournamentTeamName("");
+    }
+    setTournamentActionMessage(tournamentText.teamDeleted);
   }
 
   const activeTournament = useMemo(() => {
@@ -3704,18 +3788,65 @@ const savedRound = readStorageWithTtl(
                                   <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                                     {activeTournament.teams.map(team => (
                                       <li key={team.id} style={{ marginBottom: 16, borderBottom: "1px solid #eee", paddingBottom: 8 }}>
-                                        <div>
-                                          <span style={{ fontWeight: 500 }}>{team.name}</span>
-                                          {team.club && (
-                                            <span style={{ fontSize: 12, color: "#888", marginLeft: 8 }}>
-                                              {team.club}
+                                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+                                          <div>
+                                            {editingTournamentTeamId === team.id ? (
+                                              <input
+                                                style={styles.input}
+                                                value={editingTournamentTeamName}
+                                                onChange={(e) => setEditingTournamentTeamName(e.target.value)}
+                                                placeholder={language === "no" ? "Lagnavn" : "Team name"}
+                                              />
+                                            ) : (
+                                              <span style={{ fontWeight: 500 }}>{team.name}</span>
+                                            )}
+                                            {team.club && (
+                                              <span style={{ fontSize: 12, color: "#888", marginLeft: 8 }}>
+                                                {team.club}
+                                              </span>
+                                            )}
+                                            <span style={{ fontSize: 12, color: "#888", marginLeft: 12 }}>
+                                              {team.locked
+                                                ? (language === "no" ? "Låst" : "Locked")
+                                                : (language === "no" ? "Åpen" : "Open")}
                                             </span>
-                                          )}
-                                          <span style={{ fontSize: 12, color: "#888", marginLeft: 12 }}>
-                                            {team.locked
-                                              ? (language === "no" ? "Låst" : "Locked")
-                                              : (language === "no" ? "Åpen" : "Open")}
-                                          </span>
+                                          </div>
+                                          <div style={{ display: "flex", gap: 6 }}>
+                                            {editingTournamentTeamId === team.id ? (
+                                              <>
+                                                <button
+                                                  style={styles.smallPrimaryButton}
+                                                  onClick={() => saveTournamentTeamName(team.id)}
+                                                >
+                                                  {tournamentText.saveTeam}
+                                                </button>
+                                                <button
+                                                  style={styles.secondaryButton}
+                                                  onClick={() => {
+                                                    setEditingTournamentTeamId("");
+                                                    setEditingTournamentTeamName("");
+                                                  }}
+                                                >
+                                                  {tournamentText.cancelEdit}
+                                                </button>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <button
+                                                  style={styles.secondaryButton}
+                                                  onClick={() => startEditTournamentTeam(team)}
+                                                >
+                                                  {tournamentText.editTeam}
+                                                </button>
+                                                <button
+                                                  style={styles.secondaryButton}
+                                                  onClick={() => deleteTournamentTeam(team.id)}
+                                                >
+                                                  {tournamentText.deleteTeam}
+                                                </button>
+                                              </>
+                                            )}
+                                          </div>
                                         </div>
                                         <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                                           <input
