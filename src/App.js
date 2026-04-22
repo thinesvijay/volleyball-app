@@ -701,7 +701,17 @@ export default function App() {
     confirmDeleteTeam: "Slette dette laget?",
     lockTeam: "Lås",
     unlockTeam: "Lås opp",
-    teamEditLocked: "Laget er låst."
+    teamEditLocked: "Laget er låst.",
+    publish: "Publiser",
+    unpublish: "Avpubliser",
+    published: "Publisert",
+    unpublished: "Upublisert",
+    publishedOk: "Turnering publisert.",
+    unpublishedOk: "Turnering avpublisert.",
+    publicPreviewTitle: "Offentlig forhåndsvisning",
+    publicPreviewSubtitle: "Skrivebeskyttet visning av publisert turnering",
+    noTeamsInPreview: "Ingen lag publisert ennå.",
+    noPlayersInPreview: "Ingen spillere ennå."
   } : {
     tabTitle: "Tournaments",
     loginRequired: "Login required to manage tournaments",
@@ -733,7 +743,17 @@ export default function App() {
     confirmDeleteTeam: "Delete this team?",
     lockTeam: "Lock",
     unlockTeam: "Unlock",
-    teamEditLocked: "Team is locked."
+    teamEditLocked: "Team is locked.",
+    publish: "Publish",
+    unpublish: "Unpublish",
+    published: "Published",
+    unpublished: "Unpublished",
+    publishedOk: "Tournament published.",
+    unpublishedOk: "Tournament unpublished.",
+    publicPreviewTitle: "Public Preview",
+    publicPreviewSubtitle: "Read-only view of published tournament",
+    noTeamsInPreview: "No teams published yet.",
+    noPlayersInPreview: "No players yet."
   };
 
   const [newPlayerClubOption, setNewPlayerClubOption] = useState("");
@@ -1142,6 +1162,48 @@ export default function App() {
     setTournamentActionMessage(tournamentText.teamDeleted);
   }
 
+  function publishTournament() {
+    if (!activeTournament) return;
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              published: true,
+              status: "published",
+            }
+      )
+    );
+    setTournamentActionMessage(tournamentText.publishedOk);
+  }
+
+  function unpublishTournament() {
+    if (!activeTournament) return;
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              published: false,
+              status: "unpublished",
+            }
+      )
+    );
+    setTournamentActionMessage(tournamentText.unpublishedOk);
+  }
+
+  function getTournamentStatusLabel(tournament) {
+    if (!tournament) return "";
+    if (tournament.published || tournament.status === "published") {
+      return tournamentText.published;
+    }
+    if (tournament.status === "draft") return tournamentText.draft;
+    if (tournament.status === "unpublished") return tournamentText.unpublished;
+    return tournament.status || tournamentText.unpublished;
+  }
+
   const activeTournament = useMemo(() => {
     return tournaments.find((t) => t.id === activeTournamentId) || null;
   }, [tournaments, activeTournamentId]);
@@ -1161,6 +1223,7 @@ export default function App() {
       rules,
       createdAt: new Date().toISOString(),
       status: "draft",
+      published: false,
       teams: [],
     };
 
@@ -3778,7 +3841,7 @@ const savedRound = readStorageWithTtl(
                                 {item.name}
                               </div>
                               <div style={styles.tournamentListItemMeta}>
-                                {item.status === "draft" ? tournamentText.draft : item.status}
+                                {getTournamentStatusLabel(item)}
                               </div>
                             </button>
                           );
@@ -3803,8 +3866,25 @@ const savedRound = readStorageWithTtl(
 
                             <div style={styles.tournamentDetailBlock}>
                               <div style={styles.settingsLabel}>{tournamentText.statusLabel}</div>
-                              <div style={styles.tournamentStatusBadge}>
-                                {activeTournament.status === "draft" ? tournamentText.draft : activeTournament.status}
+                              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                <div style={styles.tournamentStatusBadge}>
+                                  {getTournamentStatusLabel(activeTournament)}
+                                </div>
+                                {activeTournament.published || activeTournament.status === "published" ? (
+                                  <button
+                                    style={styles.secondaryButton}
+                                    onClick={unpublishTournament}
+                                  >
+                                    {tournamentText.unpublish}
+                                  </button>
+                                ) : (
+                                  <button
+                                    style={styles.primaryButton}
+                                    onClick={publishTournament}
+                                  >
+                                    {tournamentText.publish}
+                                  </button>
+                                )}
                               </div>
                             </div>
 
@@ -3958,6 +4038,50 @@ const savedRound = readStorageWithTtl(
                               </div>
                             </div>
                             {/* END: Tournament Team Registration */}
+
+                            {(activeTournament.published || activeTournament.status === "published") && (
+                              <div style={{ marginTop: 16, borderTop: "1px solid #eee", paddingTop: 16 }}>
+                                <div style={styles.authTitle}>{tournamentText.publicPreviewTitle}</div>
+                                <div style={styles.authSubtitle}>{tournamentText.publicPreviewSubtitle}</div>
+                                <div style={{ marginTop: 8 }}>
+                                  <div style={{ fontWeight: 600 }}>{activeTournament.name}</div>
+                                  <div style={{ color: "#555", marginTop: 4 }}>
+                                    {activeTournament.rules || tournamentText.noRules}
+                                  </div>
+                                </div>
+                                <div style={{ marginTop: 10 }}>
+                                  {Array.isArray(activeTournament.teams) && activeTournament.teams.length > 0 ? (
+                                    <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                                      {activeTournament.teams.map((team) => (
+                                        <li key={`preview-${team.id}`} style={{ marginBottom: 10 }}>
+                                          <div style={{ fontWeight: 500 }}>
+                                            {team.name}
+                                            {team.club ? ` (${team.club})` : ""}
+                                          </div>
+                                          {Array.isArray(team.players) && team.players.length > 0 ? (
+                                            <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
+                                              {team.players.map((player) => (
+                                                <li key={`preview-${team.id}-${player.id || player.name}`}>
+                                                  {player.name}
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          ) : (
+                                            <div style={{ color: "#888", fontSize: 13 }}>
+                                              {tournamentText.noPlayersInPreview}
+                                            </div>
+                                          )}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <div style={{ color: "#888", fontSize: 14 }}>
+                                      {tournamentText.noTeamsInPreview}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </div>
                         )}
                       </>
