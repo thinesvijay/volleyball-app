@@ -580,9 +580,17 @@ function getDefaultAuth() {
 function getDefaultTournamentConfig() {
   return {
     format: "group-stage",
+    totalTeams: 10,
     groupCount: 2,
+    teamsPerGroup: 5,
+    qualifiersPerGroup: 2,
     bracketSize: 4,
     thirdPlaceMatch: false,
+    startTime: "09:00",
+    courtCount: 3,
+    groupMatchMinutes: 12,
+    playoffMatchMinutes: 15,
+    breakMinutes: 3,
     displaySettings: {
       showScores: true,
       showDates: false,
@@ -591,6 +599,7 @@ function getDefaultTournamentConfig() {
     },
     groups: [],
     knockout: {
+      quarterFinals: [],
       semiFinals: [],
       final: null,
       thirdPlace: null,
@@ -614,12 +623,23 @@ function applyTournamentDefaults(tournament) {
     knockout: {
       ...defaults.knockout,
       ...(tournament.knockout || {}),
+      quarterFinals: Array.isArray(tournament?.knockout?.quarterFinals)
+        ? tournament.knockout.quarterFinals
+        : [],
       semiFinals: Array.isArray(tournament?.knockout?.semiFinals)
         ? tournament.knockout.semiFinals
         : [],
     },
     matches: Array.isArray(tournament.matches) ? tournament.matches : [],
   };
+}
+
+function getTournamentGroupCode(index) {
+  return String.fromCharCode(65 + index);
+}
+
+function buildGroupPositionSource(groupCode, position) {
+  return `${groupCode}${position}`;
 }
 
 function displayPlayerName(player) {
@@ -923,6 +943,7 @@ export default function App() {
   const [newTournamentPlayerNames, setNewTournamentPlayerNames] = useState({});
   const [editingTournamentTeamId, setEditingTournamentTeamId] = useState("");
   const [editingTournamentTeamName, setEditingTournamentTeamName] = useState("");
+  const [activeTournamentView, setActiveTournamentView] = useState("overview");
 
   const removablePlayersFromTeams = useMemo(() => {
     return teams.flatMap((team, teamIndex) =>
@@ -1385,86 +1406,242 @@ export default function App() {
     );
   }
 
-  function generateTournamentGroups() {
+  function buildManualGroups(tournament) {
+    const safeGroupCount = Math.max(1, Number(tournament?.groupCount || 2));
+    const safeTeamsPerGroup = Math.max(1, Number(tournament?.teamsPerGroup || 5));
+    const existingGroups = Array.isArray(tournament?.groups)
+      ? tournament.groups
+      : [];
+
+    return Array.from({ length: safeGroupCount }, (_, groupIndex) => {
+      const code = getTournamentGroupCode(groupIndex);
+      const existingGroup =
+        existingGroups.find((group) => group.code === code) ||
+        existingGroups[groupIndex] ||
+        {};
+      const existingTeams = Array.isArray(existingGroup.teams)
+        ? existingGroup.teams
+        : [];
+
+      return {
+        id: `g-${code}`,
+        code,
+        name: `${language === "no" ? "Gruppe" : "Group"} ${code}`,
+        teams: Array.from({ length: safeTeamsPerGroup }, (_, slotIndex) => {
+          const slot = `${code}${slotIndex + 1}`;
+          const existingTeam =
+            existingTeams.find((team) => team.slot === slot) ||
+            existingTeams[slotIndex] ||
+            {};
+
+          return {
+            id: existingTeam.id || `slot-${slot}`,
+            slot,
+            name: existingTeam.name || "",
+            club: existingTeam.club || "",
+          };
+        }),
+      };
+    });
+  }
+
+  function updateManualGroupSlot(groupId, slotId, name) {
     if (!activeTournament) return;
-    const teams = Array.isArray(activeTournament.teams) ? activeTournament.teams : [];
-    const safeGroupCount = Math.max(1, Number(activeTournament.groupCount || 2));
-    if (teams.length < 2) {
-      setTournamentActionMessage(tournamentText.notEnoughTeamsForMatches);
-      return;
-    }
 
-    const groups = Array.from({ length: safeGroupCount }, (_, idx) => ({
-      id: `g-${idx + 1}`,
-      name: `${language === "no" ? "Gruppe" : "Group"} ${idx + 1}`,
-      teams: [],
-    }));
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              groups: (tournament.groups || []).map((group) =>
+                group.id !== groupId
+                  ? group
+                  : {
+                      ...group,
+                      teams: (group.teams || []).map((team) =>
+                        team.id !== slotId
+                          ? team
+                          : {
+                              ...team,
+                              name,
+                            }
+                      ),
+                    }
+              ),
+            }
+      )
+    );
+  }
 
-    teams.forEach((team, index) => {
-      groups[index % safeGroupCount].teams.push({
-        id: team.id,
-        name: team.name,
-        club: team.club || "",
-      });
+  function getFilledGroupTeams(tournament) {
+    return (tournament?.groups || []).flatMap((group) =>
+      (group.teams || [])
+        .filter((team) => String(team.name || "").trim())
+        .map((team) => ({
+          ...team,
+          groupId: group.id,
+          groupName: group.name,
+          groupCode: group.code,
+        }))
+    );
+  }
+
+  function buildManualKnockout(tournament) {
+    const safeGroupCount = Math.max(1, Number(tournament?.groupCount || 2));
+    const groupCodes = Array.from({ length: safeGroupCount }, (_, index) =>
+      getTournamentGroupCode(index)
+    );
+    const makeMatch = (id, label, teamA, teamB) => ({
+      id,
+      label,
+      sourceA: teamA,
+      sourceB: teamB,
+      teamA,
+      teamB,
+      winnerSource: "",
+      loserSource: "",
+      status: "scheduled",
     });
 
-    updateActiveTournament({ groups });
+    const firstRound = [];
+    for (let index = 0; index < groupCodes.length; index += 2) {
+      const groupA = groupCodes[index];
+      const groupB = groupCodes[index + 1];
+      if (!groupA || !groupB) continue;
+
+      firstRound.push(
+        makeMatch(
+          `ko-${groupA}${groupB}-1`,
+          `KO${firstRound.length + 1}`,
+          buildGroupPositionSource(groupA, 1),
+          buildGroupPositionSource(groupB, 2)
+        ),
+        makeMatch(
+          `ko-${groupA}${groupB}-2`,
+          `KO${firstRound.length + 2}`,
+          buildGroupPositionSource(groupB, 1),
+          buildGroupPositionSource(groupA, 2)
+        )
+      );
+    }
+
+    if (firstRound.length <= 2) {
+      const semiFinals = firstRound.map((match, index) => ({
+        ...match,
+        id: `sf-${index + 1}`,
+        label: `SF${index + 1}`,
+      }));
+
+      return {
+        quarterFinals: [],
+        semiFinals,
+        final: makeMatch("final-1", "Final", "Winner SF1", "Winner SF2"),
+        thirdPlace: tournament?.thirdPlaceMatch
+          ? makeMatch("third-place-1", "Third", "Loser SF1", "Loser SF2")
+          : null,
+      };
+    }
+
+    const quarterFinals = firstRound.map((match, index) => ({
+      ...match,
+      id: `qf-${index + 1}`,
+      label: `QF${index + 1}`,
+    }));
+
+    return {
+      quarterFinals,
+      semiFinals: [
+        makeMatch("sf-1", "SF1", "Winner QF1", "Winner QF2"),
+        makeMatch("sf-2", "SF2", "Winner QF3", "Winner QF4"),
+      ],
+      final: makeMatch("final-1", "Final", "Winner SF1", "Winner SF2"),
+      thirdPlace: tournament?.thirdPlaceMatch
+        ? makeMatch("third-place-1", "Third", "Loser SF1", "Loser SF2")
+        : null,
+    };
+  }
+
+  function generateTournamentGroups() {
+    if (!activeTournament) return;
+    const groups = buildManualGroups(activeTournament);
+    const groupCount = Math.max(1, Number(activeTournament.groupCount || 2));
+
+    updateActiveTournament({
+      totalTeams:
+        Number(activeTournament.totalTeams) ||
+        groupCount * Math.max(1, Number(activeTournament.teamsPerGroup || 5)),
+      groups,
+      bracketSize: groupCount * 2,
+      knockout: buildManualKnockout({
+        ...activeTournament,
+        groups,
+        bracketSize: groupCount * 2,
+      }),
+    });
     setTournamentActionMessage(tournamentText.regenerateStructure);
   }
 
   function generateTournamentKnockout() {
     if (!activeTournament) return;
-    const size = Math.max(2, Number(activeTournament.bracketSize || 4));
-    const semiCount = Math.max(1, Math.floor(size / 2 / 2));
-    const semiFinals = Array.from({ length: semiCount }, (_, idx) => ({
-      id: `sf-${idx + 1}`,
-      teamA: `${language === "no" ? "Vinner" : "Winner"} G${idx * 2 + 1}`,
-      teamB: `${language === "no" ? "Toer" : "Runner-up"} G${idx * 2 + 2}`,
-      status: "scheduled",
-    }));
-
     updateActiveTournament({
-      knockout: {
-        semiFinals,
-        final: {
-          id: "final-1",
-          teamA: language === "no" ? "Vinner SF1" : "Winner SF1",
-          teamB: language === "no" ? "Vinner SF2" : "Winner SF2",
-          status: "scheduled",
-        },
-        thirdPlace: activeTournament.thirdPlaceMatch
-          ? {
-              id: "third-place-1",
-              teamA: language === "no" ? "Taper SF1" : "Loser SF1",
-              teamB: language === "no" ? "Taper SF2" : "Loser SF2",
-              status: "scheduled",
-            }
-          : null,
-      },
+      bracketSize: Math.max(2, Number(activeTournament.groupCount || 2) * 2),
+      knockout: buildManualKnockout(activeTournament),
     });
     setTournamentActionMessage(tournamentText.regenerateStructure);
   }
 
   function generateTournamentMatches() {
     if (!activeTournament) return;
-    const teams = Array.isArray(activeTournament.teams) ? activeTournament.teams : [];
-    if (teams.length < 2) {
-      setTournamentActionMessage(tournamentText.notEnoughTeamsForMatches);
-      return;
+    const groups = Array.isArray(activeTournament.groups)
+      ? activeTournament.groups
+      : [];
+    const nextMatches = [];
+
+    groups.forEach((group) => {
+      const groupTeams = (group.teams || []).filter((team) =>
+        String(team.name || "").trim()
+      );
+
+      for (let i = 0; i < groupTeams.length; i += 1) {
+        for (let j = i + 1; j < groupTeams.length; j += 1) {
+          nextMatches.push({
+            id: `gm-${activeTournament.id}-${group.id}-${i}-${j}-${Date.now()}`,
+            stage: "group",
+            groupId: group.id,
+            groupName: group.name,
+            teamA: groupTeams[i].name,
+            teamB: groupTeams[j].name,
+            scoreA: "",
+            scoreB: "",
+            status: "scheduled",
+          });
+        }
+      }
+    });
+
+    if (!nextMatches.length) {
+      const teams = Array.isArray(activeTournament.teams)
+        ? activeTournament.teams
+        : [];
+      for (let i = 0; i < teams.length; i += 1) {
+        for (let j = i + 1; j < teams.length; j += 1) {
+          nextMatches.push({
+            id: `tm-${activeTournament.id}-${i}-${j}-${Date.now()}`,
+            stage: "group",
+            teamA: teams[i].name,
+            teamB: teams[j].name,
+            scoreA: "",
+            scoreB: "",
+            status: "scheduled",
+          });
+        }
+      }
     }
 
-    const nextMatches = [];
-    for (let i = 0; i < teams.length; i += 1) {
-      for (let j = i + 1; j < teams.length; j += 1) {
-        nextMatches.push({
-          id: `tm-${activeTournament.id}-${i}-${j}-${Date.now()}`,
-          teamA: teams[i].name,
-          teamB: teams[j].name,
-          scoreA: "",
-          scoreB: "",
-          status: "scheduled",
-        });
-      }
+    if (!nextMatches.length) {
+      setTournamentActionMessage(tournamentText.notEnoughTeamsForMatches);
+      return;
     }
 
     setTournaments((prev) =>
@@ -1508,6 +1685,42 @@ export default function App() {
     );
   }
 
+  function updateKnockoutMatchWinner(stageKey, matchId, winnerSource, loserSource) {
+    if (!activeTournament) return;
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              knockout: {
+                ...(tournament.knockout || {}),
+                [stageKey]: Array.isArray(tournament.knockout?.[stageKey])
+                  ? tournament.knockout[stageKey].map((match) =>
+                      match.id !== matchId
+                        ? match
+                        : {
+                            ...match,
+                            winnerSource,
+                            loserSource,
+                            status: "completed",
+                          }
+                    )
+                  : tournament.knockout?.[stageKey]?.id === matchId
+                    ? {
+                        ...tournament.knockout[stageKey],
+                        winnerSource,
+                        loserSource,
+                        status: "completed",
+                      }
+                    : tournament.knockout?.[stageKey],
+              },
+            }
+      )
+    );
+  }
+
   function computeTournamentStandings(tournament) {
     if (!tournament || tournament.format !== "group-stage") return [];
 
@@ -1517,7 +1730,9 @@ export default function App() {
 
     const standings = groups.map((group) => {
       const rowsByTeam = {};
-      const teamNames = (group.teams || []).map((team) => team.name);
+      const teamNames = (group.teams || [])
+        .map((team) => String(team.name || "").trim())
+        .filter(Boolean);
 
       teamNames.forEach((teamName) => {
         rowsByTeam[teamName] = {
@@ -1534,6 +1749,7 @@ export default function App() {
       });
 
       matches.forEach((match) => {
+        if (match.groupId && match.groupId !== group.id) return;
         if (!teamNames.includes(match.teamA) || !teamNames.includes(match.teamB)) return;
 
         const scoreA = Number(match.scoreA);
@@ -1580,7 +1796,7 @@ export default function App() {
         if (b.points !== a.points) return b.points - a.points;
         if (b.scoreDiff !== a.scoreDiff) return b.scoreDiff - a.scoreDiff;
         if (b.scoreFor !== a.scoreFor) return b.scoreFor - a.scoreFor;
-        return a.teamName.localeCompare(b.teamName);
+        return teamNames.indexOf(a.teamName) - teamNames.indexOf(b.teamName);
       });
 
       return {
@@ -1604,13 +1820,20 @@ export default function App() {
 
   const advancingTeamsByGroup = useMemo(() => {
     if (!activeTournament || activeTournament.format !== "group-stage") return [];
-    return tournamentStandings.map((group) => ({
+    return tournamentStandings.map((group, index) => {
+      const sourceGroup =
+        (activeTournament.groups || []).find((item) => item.id === group.groupId) ||
+        {};
+
+      return {
       groupId: group.groupId,
       groupName: group.groupName,
+      groupCode: sourceGroup.code || getTournamentGroupCode(index),
       winner: group.rows?.[0]?.teamName || `${group.groupName} ${tournamentText.winnerLabel}`,
       runnerUp:
         group.rows?.[1]?.teamName || `${group.groupName} ${tournamentText.runnerUpLabel}`,
-    }));
+      };
+    });
   }, [activeTournament, tournamentStandings, tournamentText.winnerLabel, tournamentText.runnerUpLabel]);
 
   function createTournament() {
@@ -2883,6 +3106,2131 @@ const savedRound = readStorageWithTtl(
   }, [activeScheduleRounds, matchRoundIndex]);
 
   const totalPlayers = sortedPlayers.length;
+
+  function renderTournamentDashboard() {
+    const dashboardTabs = [
+      { id: "overview", label: "Overview" },
+      { id: "groups", label: "Groups" },
+      { id: "bracket", label: "Bracket" },
+      { id: "matches", label: "Matches" },
+      { id: "table", label: "Table" },
+      { id: "sharing", label: "Sharing" },
+    ];
+
+    const tournamentTeams = Array.isArray(activeTournament?.teams)
+      ? activeTournament.teams
+      : [];
+    const tournamentGroups = Array.isArray(activeTournament?.groups)
+      ? activeTournament.groups
+      : [];
+    const groupSlotTeams = getFilledGroupTeams(activeTournament);
+    const dashboardTeams = groupSlotTeams.length ? groupSlotTeams : tournamentTeams;
+    const tournamentMatches = Array.isArray(activeTournament?.matches)
+      ? activeTournament.matches
+      : [];
+    const tournamentPlayersCount = dashboardTeams.reduce(
+      (sum, team) => sum + (Array.isArray(team.players) ? team.players.length : 0),
+      0
+    );
+    const completedMatchesCount = tournamentMatches.filter(
+      (match) => match.status === "completed"
+    ).length;
+    const scheduledMatchesCount = Math.max(
+      tournamentMatches.length - completedMatchesCount,
+      0
+    );
+    const nextMatch =
+      tournamentMatches.find((match) => match.status !== "completed") ||
+      tournamentMatches[0] ||
+      null;
+    const isPublished = Boolean(
+      activeTournament?.published || activeTournament?.status === "published"
+    );
+    const formatLabel =
+      {
+        "group-stage": tournamentText.formatGroupStage,
+        "round-robin": tournamentText.formatRoundRobin,
+        "single-elimination": tournamentText.formatSingleElimination,
+      }[activeTournament?.format] ||
+      activeTournament?.format ||
+      "-";
+    const configuredTotalTeams = Math.max(
+      2,
+      Number(activeTournament?.totalTeams || 10)
+    );
+    const configuredGroupCount = Math.max(
+      1,
+      Number(activeTournament?.groupCount || 2)
+    );
+    const configuredTeamsPerGroup = Math.max(
+      1,
+      Number(activeTournament?.teamsPerGroup || 5)
+    );
+    const configuredQualifiersPerGroup = Math.max(
+      2,
+      Number(activeTournament?.qualifiersPerGroup || 2)
+    );
+    const scheduleCourtCount = Math.max(
+      1,
+      Math.floor(Number(activeTournament?.courtCount || 3))
+    );
+    const scheduleGroupMinutes = Math.max(
+      1,
+      Number(activeTournament?.groupMatchMinutes || 12)
+    );
+    const schedulePlayoffMinutes = Math.max(
+      1,
+      Number(activeTournament?.playoffMatchMinutes || 15)
+    );
+    const scheduleBreakMinutes = Math.max(
+      0,
+      Number(activeTournament?.breakMinutes || 0)
+    );
+    const manualPreviewGroups = activeTournament
+      ? buildManualGroups(activeTournament)
+      : [];
+    const storedKnockout = activeTournament?.knockout || {};
+    const hasStoredKnockout = Boolean(
+      (storedKnockout.quarterFinals || []).length ||
+        (storedKnockout.semiFinals || []).length ||
+        storedKnockout.final ||
+        storedKnockout.thirdPlace
+    );
+    const knockoutPreview = activeTournament
+      ? buildManualKnockout({
+          ...activeTournament,
+          groups: manualPreviewGroups,
+        })
+      : {};
+    const displayKnockout = hasStoredKnockout
+      ? storedKnockout
+      : knockoutPreview;
+    const filledSlotCount = manualPreviewGroups.reduce(
+      (sum, group) =>
+        sum +
+        (group.teams || []).filter((team) => String(team.name || "").trim())
+          .length,
+      0
+    );
+    const previewFirstRound =
+      (knockoutPreview.quarterFinals || []).length > 0
+        ? knockoutPreview.quarterFinals
+        : knockoutPreview.semiFinals || [];
+
+    const statCards = [
+      {
+        label: language === "no" ? "Sloter" : "Slots",
+        value: `${filledSlotCount}/${configuredTotalTeams}`,
+        note: language === "no" ? "Manuell trekning" : "Manual draw",
+        accent: "#2563eb",
+      },
+      {
+        label: language === "no" ? "Grupper" : "Groups",
+        value: manualPreviewGroups.length,
+        note: `${configuredTeamsPerGroup} ${language === "no" ? "lag per gruppe" : "teams per group"}`,
+        accent: "#0f766e",
+      },
+      {
+        label: language === "no" ? "Baner" : "Courts",
+        value: scheduleCourtCount,
+        note: `${activeTournament?.startTime || "09:00"} start`,
+        accent: "#7c3aed",
+      },
+      {
+        label: tournamentText.matchesTitle,
+        value: `${completedMatchesCount}/${tournamentMatches.length}`,
+        note: tournamentText.matchStatusCompleted,
+        accent: "#ea580c",
+      },
+    ];
+
+    const findKnockoutMatch = (label) => {
+      const knockout = activeTournament?.knockout || {};
+      return [
+        ...(knockout.quarterFinals || []),
+        ...(knockout.semiFinals || []),
+        knockout.final,
+        knockout.thirdPlace,
+      ].find((match) => match?.label === label || match?.id === label);
+    };
+
+    const resolveKnockoutSource = (source) => {
+      const raw = String(source || "").trim();
+      const groupPosition = raw.match(/^([A-Z])([12])$/);
+      if (groupPosition) {
+        const [, groupCode, position] = groupPosition;
+        const group = advancingTeamsByGroup.find(
+          (item) => item.groupCode === groupCode
+        );
+        if (!group) return raw;
+        const hasCompletedGroupMatch = tournamentMatches.some(
+          (match) =>
+            match.groupId === group.groupId && match.status === "completed"
+        );
+        if (!hasCompletedGroupMatch) return raw;
+        return position === "1" ? group.winner : group.runnerUp;
+      }
+
+      const winnerMatch = raw.match(/^Winner (QF\d+|SF\d+)$/);
+      if (winnerMatch) {
+        const match = findKnockoutMatch(winnerMatch[1]);
+        return match?.winnerSource
+          ? resolveKnockoutSource(match.winnerSource)
+          : raw;
+      }
+
+      const loserMatch = raw.match(/^Loser (QF\d+|SF\d+)$/);
+      if (loserMatch) {
+        const match = findKnockoutMatch(loserMatch[1]);
+        return match?.loserSource
+          ? resolveKnockoutSource(match.loserSource)
+          : raw;
+      }
+
+      return raw;
+    };
+
+    const renderBracketMatch = (match, stageKey, isFinal = false) => {
+      if (!match) return null;
+      const teamA = resolveKnockoutSource(match.sourceA || match.teamA);
+      const teamB = resolveKnockoutSource(match.sourceB || match.teamB);
+      const winner = match.winnerSource
+        ? resolveKnockoutSource(match.winnerSource)
+        : "";
+
+      return (
+        <div
+          key={match.id}
+          style={
+            isFinal
+              ? styles.tournamentBracketMatchFinal
+              : styles.tournamentBracketMatch
+          }
+        >
+          <div
+            style={{
+              ...styles.tournamentMiniTitle,
+              ...(isFinal ? { color: "#fff" } : {}),
+            }}
+          >
+            {match.label || match.id}
+          </div>
+          {[
+            [match.sourceA || match.teamA, teamA],
+            [match.sourceB || match.teamB, teamB],
+          ].map(([source, label]) => {
+            const isWinner = winner && winner === label;
+
+            return (
+              <button
+                key={`${match.id}-${source}`}
+                style={{
+                  ...styles.tournamentBracketLine,
+                  ...(isWinner ? styles.tournamentBracketLineWinner : {}),
+                }}
+                onClick={() =>
+                  updateKnockoutMatchWinner(
+                    stageKey,
+                    match.id,
+                    source,
+                    source === (match.sourceA || match.teamA)
+                      ? match.sourceB || match.teamB
+                      : match.sourceA || match.teamA
+                  )
+                }
+              >
+                <span>{source}</span>
+                <strong>{label}</strong>
+              </button>
+            );
+          })}
+        </div>
+      );
+    };
+
+    const renderBracketPreviewMatch = (match, isFinal = false) => {
+      if (!match) return null;
+      const teamA = resolveKnockoutSource(match.sourceA || match.teamA);
+      const teamB = resolveKnockoutSource(match.sourceB || match.teamB);
+
+      return (
+        <div
+          key={`preview-${match.id}`}
+          style={
+            isFinal
+              ? styles.tournamentBracketMatchFinal
+              : styles.tournamentBracketMatch
+          }
+        >
+          <div
+            style={{
+              ...styles.tournamentMiniTitle,
+              ...(isFinal ? { color: "#fff" } : {}),
+            }}
+          >
+            {match.label || match.id}
+          </div>
+          {[
+            [match.sourceA || match.teamA, teamA],
+            [match.sourceB || match.teamB, teamB],
+          ].map(([source, label]) => (
+            <div
+              key={`preview-${match.id}-${source}`}
+              style={{
+                ...styles.tournamentBracketLine,
+                cursor: "default",
+                ...(isFinal
+                  ? {
+                      background: "rgba(255,255,255,0.08)",
+                      borderColor: "rgba(255,255,255,0.16)",
+                      color: "#fff",
+                    }
+                  : {}),
+              }}
+            >
+              <span>{source}</span>
+              <strong>{label || source}</strong>
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    const getPreviewTeamName = (team) =>
+      String(team?.name || "").trim() || team?.slot || "-";
+    const parseScheduleStart = (value) => {
+      const [hours, minutes] = String(value || "09:00")
+        .split(":")
+        .map((part) => Number(part));
+      if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 9 * 60;
+      return hours * 60 + minutes;
+    };
+    const formatScheduleTime = (totalMinutes) => {
+      const normalized = ((totalMinutes % 1440) + 1440) % 1440;
+      const hours = Math.floor(normalized / 60);
+      const minutes = normalized % 60;
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
+        2,
+        "0"
+      )}`;
+    };
+    const scheduleGroupMatches = manualPreviewGroups.flatMap((group) => {
+      const groupTeams = (group.teams || []).map((team) => ({
+        slot: team.slot,
+        label: getPreviewTeamName(team),
+      }));
+      const matches = [];
+
+      for (let i = 0; i < groupTeams.length; i += 1) {
+        for (let j = i + 1; j < groupTeams.length; j += 1) {
+          matches.push({
+            id: `schedule-${group.id}-${i}-${j}`,
+            stage: "group",
+            round: group.name,
+            teamA: groupTeams[i].label,
+            teamB: groupTeams[j].label,
+          });
+        }
+      }
+
+      return matches;
+    });
+    const scheduleKnockoutMatches = [
+      ...(knockoutPreview.quarterFinals || []).map((match) => ({
+        ...match,
+        stage: "knockout",
+        round: language === "no" ? "Forste utslag" : "First Knockout",
+      })),
+      ...(knockoutPreview.semiFinals || []).map((match) => ({
+        ...match,
+        stage: "knockout",
+        round: tournamentText.semiFinals,
+      })),
+      knockoutPreview.final
+        ? {
+            ...knockoutPreview.final,
+            stage: "knockout",
+            round: tournamentText.final,
+          }
+        : null,
+      activeTournament?.thirdPlaceMatch && knockoutPreview.thirdPlace
+        ? {
+            ...knockoutPreview.thirdPlace,
+            stage: "knockout",
+            round: tournamentText.thirdPlace,
+          }
+        : null,
+    ].filter(Boolean);
+    const scheduleItems = [
+      ...scheduleGroupMatches,
+      ...scheduleKnockoutMatches.map((match) => ({
+        id: `schedule-${match.id}`,
+        stage: "knockout",
+        round: match.round,
+        teamA: match.sourceA || match.teamA,
+        teamB: match.sourceB || match.teamB,
+      })),
+    ];
+    const hallScheduleBatches = [];
+    let scheduleCursor = parseScheduleStart(activeTournament?.startTime);
+
+    for (
+      let index = 0, batchNumber = 1;
+      index < scheduleItems.length;
+      index += scheduleCourtCount, batchNumber += 1
+    ) {
+      const batchItems = scheduleItems.slice(index, index + scheduleCourtCount);
+      const isPlayoffBatch = batchItems.some(
+        (item) => item.stage === "knockout"
+      );
+      const duration = isPlayoffBatch
+        ? schedulePlayoffMinutes
+        : scheduleGroupMinutes;
+
+      hallScheduleBatches.push({
+        id: `schedule-batch-${batchNumber}`,
+        number: batchNumber,
+        time: formatScheduleTime(scheduleCursor),
+        duration,
+        items: Array.from(
+          { length: scheduleCourtCount },
+          (_, courtIndex) => batchItems[courtIndex] || null
+        ),
+      });
+
+      scheduleCursor += duration + scheduleBreakMinutes;
+    }
+
+    const renderHallSchedulePreview = (limit = 12) => {
+      const visibleBatches = hallScheduleBatches.slice(0, limit);
+      const hiddenCount = Math.max(hallScheduleBatches.length - limit, 0);
+
+      return (
+        <div style={styles.tournamentScheduleWrap}>
+          <div
+            style={{
+              ...styles.tournamentScheduleGrid,
+              minWidth: `${Math.max(620, scheduleCourtCount * 180 + 140)}px`,
+            }}
+          >
+            {visibleBatches.map((batch) => (
+              <div key={batch.id} style={styles.tournamentScheduleRow}>
+                <div style={styles.tournamentScheduleTimeCell}>
+                  <span>
+                    {language === "no" ? "Runde" : "Batch"} {batch.number}
+                  </span>
+                  <strong>{batch.time}</strong>
+                  <small>{batch.duration} min</small>
+                </div>
+                <div
+                  style={{
+                    ...styles.tournamentScheduleCourts,
+                    gridTemplateColumns: `repeat(${scheduleCourtCount}, minmax(150px, 1fr))`,
+                  }}
+                >
+                  {batch.items.map((item, courtIndex) => (
+                    <div
+                      key={`${batch.id}-court-${courtIndex}`}
+                      style={styles.tournamentScheduleCourt}
+                    >
+                      <span>
+                        {language === "no" ? "Bane" : "Court"} {courtIndex + 1}
+                      </span>
+                      <strong>
+                        {item
+                          ? `${item.teamA} vs ${item.teamB}`
+                          : language === "no"
+                            ? "Ledig bane"
+                            : "Open court"}
+                      </strong>
+                      <small>
+                        {item
+                          ? item.round
+                          : language === "no"
+                            ? "Pause"
+                            : "Break"}
+                      </small>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          {hiddenCount > 0 && (
+            <div style={styles.tournamentScheduleMore}>
+              +{hiddenCount} {language === "no" ? "flere runder" : "more batches"}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    return (
+      <div style={styles.tournamentDashboardSection}>
+        {!auth.loggedIn ? (
+          <div style={styles.lockedCard}>{tournamentText.loginRequired}</div>
+        ) : (
+          <div
+            style={{
+              ...styles.tournamentDashboardShell,
+              ...(isMobile ? styles.tournamentDashboardShellMobile : {}),
+            }}
+          >
+            <aside style={styles.tournamentSetupPanel}>
+              <div style={styles.tournamentPanelHeader}>
+                <div>
+                  <div style={styles.tournamentEyebrow}>
+                    {language === "no" ? "Kontrollpanel" : "Control Panel"}
+                  </div>
+                  <div style={styles.tournamentPanelTitle}>
+                    {language === "no" ? "Turneringsoppsett" : "Tournament Setup"}
+                  </div>
+                </div>
+
+                <button
+                  style={styles.secondaryButtonCompact}
+                  onClick={() => setShowCreateTournamentForm((prev) => !prev)}
+                >
+                  {showCreateTournamentForm ? t.close : tournamentText.newTournament}
+                </button>
+              </div>
+
+              {showCreateTournamentForm && (
+                <div style={styles.tournamentSetupBlock}>
+                  <input
+                    style={styles.input}
+                    value={newTournamentName}
+                    onChange={(e) => setNewTournamentName(e.target.value)}
+                    placeholder={tournamentText.namePlaceholder}
+                  />
+
+                  <textarea
+                    style={styles.textarea}
+                    value={newTournamentRules}
+                    onChange={(e) => setNewTournamentRules(e.target.value)}
+                    placeholder={tournamentText.rulesPlaceholder}
+                  />
+
+                  <button style={styles.primaryButton} onClick={createTournament}>
+                    {tournamentText.createButton}
+                  </button>
+                </div>
+              )}
+
+              {tournamentActionMessage && (
+                <div style={styles.tournamentMessage}>
+                  {tournamentActionMessage}
+                </div>
+              )}
+
+              <div style={styles.tournamentSetupBlock}>
+                <div style={styles.tournamentBlockTitle}>
+                  {tournamentText.listTitle}
+                </div>
+
+                <div style={styles.tournamentList}>
+                  {tournaments.length === 0 ? (
+                    <div style={styles.emptyText}>{tournamentText.emptyList}</div>
+                  ) : (
+                    tournaments.map((item) => {
+                      const isActive = item.id === activeTournamentId;
+
+                      return (
+                        <button
+                          key={item.id}
+                          style={{
+                            ...styles.tournamentListItem,
+                            ...(isActive ? styles.tournamentListItemActive : {}),
+                          }}
+                          onClick={() => {
+                            setActiveTournamentId(item.id);
+                            setTournamentActionMessage("");
+                          }}
+                        >
+                          <span style={styles.tournamentListItemTitle}>
+                            {item.name}
+                          </span>
+                          <span style={styles.tournamentListItemMeta}>
+                            {getTournamentStatusLabel(item)}
+                          </span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              {activeTournament && (
+                <>
+                  <div style={styles.tournamentSetupBlock}>
+                    <div style={styles.tournamentBlockTitle}>
+                      {tournamentText.informationSection}
+                    </div>
+
+                    <div style={styles.settingsLabel}>
+                      {tournamentText.nameLabel}
+                    </div>
+                    <input
+                      style={styles.input}
+                      value={activeTournament.name || ""}
+                      onChange={(e) =>
+                        updateActiveTournament({ name: e.target.value })
+                      }
+                    />
+
+                    <div style={styles.settingsLabel}>
+                      {tournamentText.rulesLabel}
+                    </div>
+                    <textarea
+                      style={styles.textarea}
+                      value={activeTournament.rules || ""}
+                      onChange={(e) =>
+                        updateActiveTournament({ rules: e.target.value })
+                      }
+                    />
+
+                    <div style={styles.tournamentInlineActions}>
+                      <div style={styles.tournamentStatusBadge}>
+                        {getTournamentStatusLabel(activeTournament)}
+                      </div>
+
+                      {isPublished ? (
+                        <button
+                          style={styles.secondaryButtonCompact}
+                          onClick={unpublishTournament}
+                        >
+                          {tournamentText.unpublish}
+                        </button>
+                      ) : (
+                        <button
+                          style={styles.primaryButtonSmall}
+                          onClick={publishTournament}
+                        >
+                          {tournamentText.publish}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={styles.tournamentSetupBlock}>
+                    <div style={styles.tournamentBlockTitle}>
+                      {tournamentText.formatSection}
+                    </div>
+
+                    <div style={styles.settingsLabel}>
+                      {tournamentText.formatLabel}
+                    </div>
+                    <select
+                      style={styles.select}
+                      value={activeTournament.format}
+                      onChange={(e) =>
+                        updateActiveTournament({ format: e.target.value })
+                      }
+                    >
+                      <option value="group-stage">
+                        {tournamentText.formatGroupStage}
+                      </option>
+                      <option value="round-robin">
+                        {tournamentText.formatRoundRobin}
+                      </option>
+                      <option value="single-elimination">
+                        {tournamentText.formatSingleElimination}
+                      </option>
+                    </select>
+
+                    <div
+                      style={{
+                        ...styles.tournamentFieldGrid,
+                        ...(isMobile ? styles.tournamentFieldGridMobile : {}),
+                      }}
+                    >
+                      <div>
+                        <div style={styles.settingsLabel}>
+                          {language === "no" ? "Totalt antall lag" : "Total Teams"}
+                        </div>
+                        <input
+                          style={styles.input}
+                          type="number"
+                          min={2}
+                          value={activeTournament.totalTeams}
+                          onChange={(e) => {
+                            const nextTotalTeams = Math.max(
+                              2,
+                              Number(e.target.value) || 2
+                            );
+                            const nextGroupCount = Math.max(
+                              1,
+                              Number(activeTournament.groupCount || 2)
+                            );
+
+                            updateActiveTournament({
+                              totalTeams: nextTotalTeams,
+                              teamsPerGroup: Math.max(
+                                1,
+                                Math.ceil(nextTotalTeams / nextGroupCount)
+                              ),
+                            });
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <div style={styles.settingsLabel}>
+                          {tournamentText.groupCountLabel}
+                        </div>
+                        <input
+                          style={styles.input}
+                          type="number"
+                          min={1}
+                          value={activeTournament.groupCount}
+                          onChange={(e) => {
+                            const nextGroupCount = Math.max(
+                              1,
+                              Number(e.target.value) || 1
+                            );
+                            const nextTotalTeams = Math.max(
+                              2,
+                              Number(activeTournament.totalTeams || 10)
+                            );
+
+                            updateActiveTournament({
+                              groupCount: nextGroupCount,
+                              teamsPerGroup: Math.max(
+                                1,
+                                Math.ceil(nextTotalTeams / nextGroupCount)
+                              ),
+                              bracketSize: nextGroupCount * 2,
+                            });
+                          }}
+                        />
+                      </div>
+
+                      <div>
+                        <div style={styles.settingsLabel}>
+                          {language === "no" ? "Lag per gruppe" : "Teams per Group"}
+                        </div>
+                        <input
+                          style={styles.input}
+                          type="number"
+                          min={1}
+                          value={activeTournament.teamsPerGroup}
+                          onChange={(e) =>
+                            updateActiveTournament({
+                              teamsPerGroup: Math.max(
+                                1,
+                                Number(e.target.value) || 1
+                              ),
+                            })
+                          }
+                        />
+                      </div>
+
+                      <div>
+                        <div style={styles.settingsLabel}>
+                          {language === "no" ? "Kvalifiserte" : "Qualifiers"}
+                        </div>
+                        <input
+                          style={styles.input}
+                          type="number"
+                          min={2}
+                          max={2}
+                          value={configuredQualifiersPerGroup}
+                          readOnly
+                        />
+                      </div>
+                    </div>
+
+                    <label style={styles.tournamentCheckRow}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(activeTournament.thirdPlaceMatch)}
+                        onChange={(e) =>
+                          updateActiveTournament({
+                            thirdPlaceMatch: e.target.checked,
+                          })
+                        }
+                      />
+                      <span>{tournamentText.thirdPlaceLabel}</span>
+                    </label>
+
+                    <div style={styles.tournamentSetupDivider} />
+
+                    <div
+                      style={{
+                        ...styles.tournamentFieldGrid,
+                        ...(isMobile ? styles.tournamentFieldGridMobile : {}),
+                      }}
+                    >
+                      <div>
+                        <div style={styles.settingsLabel}>
+                          {language === "no" ? "Starttid" : "Start Time"}
+                        </div>
+                        <input
+                          style={styles.input}
+                          type="time"
+                          value={activeTournament.startTime || "09:00"}
+                          onChange={(e) =>
+                            updateActiveTournament({ startTime: e.target.value })
+                          }
+                        />
+                      </div>
+
+                      <div>
+                        <div style={styles.settingsLabel}>
+                          {language === "no" ? "Antall baner" : "Courts"}
+                        </div>
+                        <input
+                          style={styles.input}
+                          type="number"
+                          min={1}
+                          value={scheduleCourtCount}
+                          onChange={(e) =>
+                            updateActiveTournament({
+                              courtCount: Math.max(
+                                1,
+                                Number(e.target.value) || 1
+                              ),
+                            })
+                          }
+                        />
+                      </div>
+
+                      <div>
+                        <div style={styles.settingsLabel}>
+                          {language === "no" ? "Gruppe min" : "Group Min"}
+                        </div>
+                        <input
+                          style={styles.input}
+                          type="number"
+                          min={1}
+                          value={scheduleGroupMinutes}
+                          onChange={(e) =>
+                            updateActiveTournament({
+                              groupMatchMinutes: Math.max(
+                                1,
+                                Number(e.target.value) || 1
+                              ),
+                            })
+                          }
+                        />
+                      </div>
+
+                      <div>
+                        <div style={styles.settingsLabel}>
+                          {language === "no" ? "Sluttspill min" : "Playoff Min"}
+                        </div>
+                        <input
+                          style={styles.input}
+                          type="number"
+                          min={1}
+                          value={schedulePlayoffMinutes}
+                          onChange={(e) =>
+                            updateActiveTournament({
+                              playoffMatchMinutes: Math.max(
+                                1,
+                                Number(e.target.value) || 1
+                              ),
+                            })
+                          }
+                        />
+                      </div>
+
+                      <div>
+                        <div style={styles.settingsLabel}>
+                          {language === "no" ? "Pause min" : "Break Min"}
+                        </div>
+                        <input
+                          style={styles.input}
+                          type="number"
+                          min={0}
+                          value={scheduleBreakMinutes}
+                          onChange={(e) =>
+                            updateActiveTournament({
+                              breakMinutes: Math.max(
+                                0,
+                                Number(e.target.value) || 0
+                              ),
+                            })
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <div style={styles.tournamentInlineActions}>
+                      <button
+                        style={styles.secondaryButtonCompact}
+                        onClick={generateTournamentGroups}
+                      >
+                        {language === "no" ? "Bygg gruppesloter" : "Build Group Slots"}
+                      </button>
+                      <button
+                        style={styles.secondaryButtonCompact}
+                        onClick={generateTournamentKnockout}
+                      >
+                        {tournamentText.generateKnockout}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={styles.tournamentSetupBlock}>
+                    <div style={styles.tournamentSectionHeader}>
+                      <div>
+                        <div style={styles.tournamentBlockTitle}>
+                          {language === "no" ? "Manuell gruppeinndata" : "Manual Group Entry"}
+                        </div>
+                        <div style={styles.tournamentSidebarNote}>
+                          {language === "no"
+                            ? "Fyll slotene i samme rekkefolge som papirtrekket."
+                            : "Fill slots in the exact paper-draw order."}
+                        </div>
+                      </div>
+                      <div style={styles.tournamentStatusBadge}>
+                        {filledSlotCount}/{configuredTotalTeams}
+                      </div>
+                    </div>
+
+                    <div style={styles.tournamentSidebarSlotList}>
+                      {manualPreviewGroups.map((group) => {
+                        const isEditableGroup = tournamentGroups.some(
+                          (item) => item.id === group.id
+                        );
+
+                        return (
+                          <div
+                            key={`sidebar-${group.id}`}
+                            style={styles.tournamentSidebarGroup}
+                          >
+                            <div style={styles.tournamentSidebarGroupHeader}>
+                              <strong>{group.name}</strong>
+                              <span>
+                                {(group.teams || []).length}{" "}
+                                {language === "no" ? "sloter" : "slots"}
+                              </span>
+                            </div>
+                            {(group.teams || []).map((team, index) => (
+                              <div
+                                key={`sidebar-${group.id}-${team.id}`}
+                                style={styles.tournamentSidebarSlotRow}
+                              >
+                                <span style={styles.tournamentTeamSeed}>
+                                  {team.slot || `${group.code}${index + 1}`}
+                                </span>
+                                <input
+                                  style={styles.tournamentSlotInput}
+                                  value={team.name || ""}
+                                  disabled={!isEditableGroup}
+                                  onChange={(e) =>
+                                    updateManualGroupSlot(
+                                      group.id,
+                                      team.id,
+                                      e.target.value
+                                    )
+                                  }
+                                  placeholder={
+                                    isEditableGroup
+                                      ? language === "no"
+                                        ? "Lagnavn"
+                                        : "Team name"
+                                      : language === "no"
+                                        ? "Bygg sloter"
+                                        : "Build slots"
+                                  }
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <button
+                      style={styles.primaryButtonSmall}
+                      onClick={generateTournamentGroups}
+                    >
+                      {language === "no" ? "Bygg / oppdater sloter" : "Build / Update Slots"}
+                    </button>
+                  </div>
+
+                  <div style={styles.tournamentSetupBlock}>
+                    <div style={styles.tournamentBlockTitle}>
+                      {tournamentText.settingsSection}
+                    </div>
+
+                    <div style={styles.tournamentCheckboxGrid}>
+                      {[
+                        ["showScores", tournamentText.showScores],
+                        ["showDates", tournamentText.showDates],
+                        ["showLocations", tournamentText.showLocations],
+                        ["showRoundTitles", tournamentText.showRoundTitles],
+                      ].map(([key, label]) => (
+                        <label key={key} style={styles.tournamentCheckRow}>
+                          <input
+                            type="checkbox"
+                            checked={Boolean(
+                              activeTournament.displaySettings?.[key]
+                            )}
+                            onChange={(e) =>
+                              updateActiveTournamentDisplaySetting(
+                                key,
+                                e.target.checked
+                              )
+                            }
+                          />
+                          <span>{label}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div style={styles.tournamentSetupBlock}>
+                    <div style={styles.tournamentBlockTitle}>
+                      {language === "no" ? "Registrering" : "Registration"}
+                    </div>
+
+                    <div
+                      style={{
+                        ...styles.tournamentRegistrationGrid,
+                        ...(isMobile ? styles.tournamentFieldGridMobile : {}),
+                      }}
+                    >
+                      <input
+                        style={styles.input}
+                        value={newTournamentTeamName}
+                        onChange={(e) =>
+                          setNewTournamentTeamName(e.target.value)
+                        }
+                        placeholder={language === "no" ? "Lagnavn" : "Team name"}
+                      />
+                      <input
+                        style={styles.input}
+                        value={newTournamentTeamClub}
+                        onChange={(e) =>
+                          setNewTournamentTeamClub(e.target.value)
+                        }
+                        placeholder={language === "no" ? "Klubb" : "Club"}
+                      />
+                      <button
+                        style={styles.primaryButtonSmall}
+                        onClick={addTournamentTeam}
+                      >
+                        {tournamentText.addTeamButton}
+                      </button>
+                    </div>
+
+                    <div style={styles.tournamentTeamList}>
+                      {tournamentTeams.length > 0 ? (
+                        tournamentTeams.map((team) => (
+                          <div key={team.id} style={styles.tournamentTeamRow}>
+                            <div style={styles.tournamentTeamRowTop}>
+                              <div style={styles.tournamentTeamIdentity}>
+                                {editingTournamentTeamId === team.id ? (
+                                  <input
+                                    style={styles.input}
+                                    value={editingTournamentTeamName}
+                                    onChange={(e) =>
+                                      setEditingTournamentTeamName(
+                                        e.target.value
+                                      )
+                                    }
+                                    placeholder={
+                                      language === "no" ? "Lagnavn" : "Team name"
+                                    }
+                                  />
+                                ) : (
+                                  <div style={styles.tournamentTeamName}>
+                                    {team.name}
+                                  </div>
+                                )}
+                                <div style={styles.tournamentTeamMeta}>
+                                  {team.club ? `${team.club} - ` : ""}
+                                  {team.locked
+                                    ? language === "no"
+                                      ? "Last"
+                                      : "Locked"
+                                    : language === "no"
+                                      ? "Apen"
+                                      : "Open"}
+                                </div>
+                              </div>
+
+                              <div style={styles.tournamentTeamActions}>
+                                {editingTournamentTeamId === team.id ? (
+                                  <>
+                                    <button
+                                      style={styles.smallPrimaryButton}
+                                      onClick={() =>
+                                        saveTournamentTeamName(team.id)
+                                      }
+                                    >
+                                      {tournamentText.saveTeam}
+                                    </button>
+                                    <button
+                                      style={styles.secondaryButtonCompact}
+                                      onClick={() => {
+                                        setEditingTournamentTeamId("");
+                                        setEditingTournamentTeamName("");
+                                      }}
+                                    >
+                                      {tournamentText.cancelEdit}
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button
+                                      style={styles.secondaryButtonCompact}
+                                      onClick={() =>
+                                        toggleTournamentTeamLock(team.id)
+                                      }
+                                    >
+                                      {team.locked
+                                        ? tournamentText.unlockTeam
+                                        : tournamentText.lockTeam}
+                                    </button>
+                                    <button
+                                      style={styles.secondaryButtonCompact}
+                                      onClick={() =>
+                                        startEditTournamentTeam(team)
+                                      }
+                                    >
+                                      {tournamentText.editTeam}
+                                    </button>
+                                    <button
+                                      style={styles.secondaryButtonCompact}
+                                      onClick={() =>
+                                        deleteTournamentTeam(team.id)
+                                      }
+                                    >
+                                      {tournamentText.deleteTeam}
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            <div
+                              style={{
+                                ...styles.tournamentPlayerRegister,
+                                ...(isMobile
+                                  ? styles.tournamentFieldGridMobile
+                                  : {}),
+                              }}
+                            >
+                              <input
+                                style={styles.input}
+                                value={newTournamentPlayerNames[team.id] || ""}
+                                onChange={(e) =>
+                                  setNewTournamentPlayerNames((prev) => ({
+                                    ...prev,
+                                    [team.id]: e.target.value,
+                                  }))
+                                }
+                                placeholder={
+                                  language === "no" ? "Spillernavn" : "Player name"
+                                }
+                              />
+                              <button
+                                style={styles.primaryButtonSmall}
+                                onClick={() => addTournamentPlayer(team.id)}
+                              >
+                                {tournamentText.addPlayerButton}
+                              </button>
+                            </div>
+
+                            <div style={styles.tournamentPlayerList}>
+                              {Array.isArray(team.players) &&
+                              team.players.length > 0 ? (
+                                team.players.map((player) => (
+                                  <div
+                                    key={player.id || player.name}
+                                    style={styles.tournamentPlayerPill}
+                                  >
+                                    <span>{player.name}</span>
+                                    <span style={styles.tournamentPlayerMeta}>
+                                      {player.registeredBy}
+                                    </span>
+                                  </div>
+                                ))
+                              ) : (
+                                <div style={styles.tournamentMutedText}>
+                                  {tournamentText.noPlayersYet}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div style={styles.tournamentMutedText}>
+                          {tournamentText.noTeamsYet}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </aside>
+
+            <main style={styles.tournamentMainPanel}>
+              {activeTournament ? (
+                <>
+                  <div style={styles.tournamentHero}>
+                    <div style={styles.tournamentHeroText}>
+                      <div style={styles.tournamentEyebrow}>
+                        {language === "no" ? "Turneringsdashboard" : "Tournament Dashboard"}
+                      </div>
+                      <h2 style={styles.tournamentHeroTitle}>
+                        {activeTournament.name}
+                      </h2>
+                      <div style={styles.tournamentHeroMeta}>
+                        {formatLabel} - {getTournamentStatusLabel(activeTournament)}
+                      </div>
+                      <p style={styles.tournamentHeroRules}>
+                        {activeTournament.rules || tournamentText.noRules}
+                      </p>
+                    </div>
+
+                    <div style={styles.tournamentHeroActions}>
+                      <div style={styles.tournamentHeroBadge}>
+                        {isPublished
+                          ? tournamentText.published
+                          : tournamentText.unpublished}
+                      </div>
+                      {isPublished ? (
+                        <button
+                          style={styles.tournamentLightButton}
+                          onClick={unpublishTournament}
+                        >
+                          {tournamentText.unpublish}
+                        </button>
+                      ) : (
+                        <button
+                          style={styles.tournamentLightButton}
+                          onClick={publishTournament}
+                        >
+                          {tournamentText.publish}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      ...styles.tournamentStatsGrid,
+                      ...(isMobile ? styles.tournamentStatsGridMobile : {}),
+                    }}
+                  >
+                    {statCards.map((card) => (
+                      <div
+                        key={card.label}
+                        style={{
+                          ...styles.tournamentStatCard,
+                          borderTop: `4px solid ${card.accent}`,
+                        }}
+                      >
+                        <div style={styles.tournamentStatValue}>{card.value}</div>
+                        <div style={styles.tournamentStatLabel}>{card.label}</div>
+                        <div style={styles.tournamentStatNote}>{card.note}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={styles.tournamentSubTabs}>
+                    {dashboardTabs.map((tab) => (
+                      <button
+                        key={tab.id}
+                        style={{
+                          ...styles.tournamentSubTab,
+                          ...(activeTournamentView === tab.id
+                            ? styles.tournamentSubTabActive
+                            : {}),
+                        }}
+                        onClick={() => setActiveTournamentView(tab.id)}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div style={styles.tournamentWorkspace}>
+                    {activeTournamentView === "overview" && (
+                      <div
+                        style={{
+                          ...styles.tournamentOverviewGrid,
+                          ...(isMobile ? styles.tournamentTwoColumnMobile : {}),
+                        }}
+                      >
+                        <div style={styles.tournamentOverviewHero}>
+                          <div style={styles.tournamentEyebrow}>
+                            {language === "no" ? "Oversikt" : "Overview"}
+                          </div>
+                          <div style={styles.tournamentOverviewTitle}>
+                            {activeTournament.name}
+                          </div>
+                          <div style={styles.tournamentOverviewCopy}>
+                            {activeTournament.rules || tournamentText.noRules}
+                          </div>
+
+                          <div
+                            style={{
+                              ...styles.tournamentOverviewStats,
+                              ...(isMobile ? styles.tournamentStatsGridMobile : {}),
+                            }}
+                          >
+                            {statCards.map((card) => (
+                              <div
+                                key={`overview-${card.label}`}
+                                style={styles.tournamentOverviewStat}
+                              >
+                                <span>{card.label}</span>
+                                <strong>{card.value}</strong>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            ...styles.tournamentSurface,
+                            gridColumn: "1 / -1",
+                          }}
+                        >
+                          <div style={styles.tournamentSectionHeader}>
+                            <div>
+                              <div style={styles.tournamentEyebrow}>
+                                {language === "no" ? "Halloppsett" : "Hall Setup"}
+                              </div>
+                              <div style={styles.tournamentSectionTitle}>
+                                {language === "no"
+                                  ? "Manuell trekning og sluttspillforhandsvisning"
+                                  : "Manual Draw and Playoff Preview"}
+                              </div>
+                              <div style={styles.tournamentMutedText}>
+                                {language === "no"
+                                  ? "Gruppene viser papirrekkefolgen for slotene. Sluttspill er forhåndsvisning basert på A1/B2-logikken."
+                                  : "Groups show the paper-draw slot order. Knockout preview follows the A1/B2 advancement logic."}
+                              </div>
+                            </div>
+                            <div style={styles.tournamentStatusBadge}>
+                              {configuredGroupCount} x {configuredTeamsPerGroup}
+                            </div>
+                          </div>
+
+                          <div
+                            style={{
+                              ...styles.tournamentPreviewLayout,
+                              ...(isMobile ? styles.tournamentTwoColumnMobile : {}),
+                            }}
+                          >
+                            <div style={styles.tournamentPreviewGroups}>
+                              {manualPreviewGroups.map((group) => (
+                                <div
+                                  key={`overview-preview-${group.id}`}
+                                  style={styles.tournamentPreviewGroupCard}
+                                >
+                                  <div style={styles.tournamentGroupHeader}>
+                                    <div style={styles.tournamentMiniTitle}>
+                                      {group.name}
+                                    </div>
+                                    <div style={styles.tournamentGroupCount}>
+                                      {group.code}
+                                    </div>
+                                  </div>
+                                  <div style={styles.tournamentSnapshotList}>
+                                    {(group.teams || []).map((team, index) => (
+                                      <div
+                                        key={`overview-preview-${group.id}-${team.id}`}
+                                        style={styles.tournamentPreviewSlotRow}
+                                      >
+                                        <span style={styles.tournamentTeamSeed}>
+                                          {team.slot || `${group.code}${index + 1}`}
+                                        </span>
+                                        <strong>
+                                          {String(team.name || "").trim() ||
+                                            (language === "no"
+                                              ? "Tom slot"
+                                              : "Empty slot")}
+                                        </strong>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div style={styles.tournamentPreviewBracketCard}>
+                              <div style={styles.tournamentSectionHeader}>
+                                <div>
+                                  <div style={styles.tournamentEyebrow}>
+                                    {language === "no" ? "Sluttspill" : "Playoff"}
+                                  </div>
+                                  <div
+                                    style={{
+                                      ...styles.tournamentMiniTitle,
+                                      color: "#fff",
+                                    }}
+                                  >
+                                    {language === "no"
+                                      ? "Automatisk kampoppsett"
+                                      : "Automatic matchup map"}
+                                  </div>
+                                </div>
+                                <div style={styles.tournamentStatusBadge}>
+                                  Top 2
+                                </div>
+                              </div>
+
+                              <div style={styles.tournamentPreviewMatchList}>
+                                {previewFirstRound.map((match) => (
+                                  <div
+                                    key={`overview-ko-${match.id}`}
+                                    style={styles.tournamentPreviewMatchRow}
+                                  >
+                                    <span>{match.label}</span>
+                                    <strong>
+                                      {match.sourceA || match.teamA} vs{" "}
+                                      {match.sourceB || match.teamB}
+                                    </strong>
+                                  </div>
+                                ))}
+                                {(knockoutPreview.semiFinals || []).length > 0 && (
+                                  <div style={styles.tournamentPreviewMatchRow}>
+                                    <span>{tournamentText.semiFinals}</span>
+                                    <strong>
+                                      {(knockoutPreview.semiFinals || [])
+                                        .map(
+                                          (match) =>
+                                            `${match.sourceA || match.teamA} vs ${
+                                              match.sourceB || match.teamB
+                                            }`
+                                        )
+                                        .join(" / ")}
+                                    </strong>
+                                  </div>
+                                )}
+                                {knockoutPreview.final && (
+                                  <div style={styles.tournamentPreviewMatchRow}>
+                                    <span>{tournamentText.final}</span>
+                                    <strong>
+                                      {knockoutPreview.final.sourceA ||
+                                        knockoutPreview.final.teamA}{" "}
+                                      vs{" "}
+                                      {knockoutPreview.final.sourceB ||
+                                        knockoutPreview.final.teamB}
+                                    </strong>
+                                  </div>
+                                )}
+                                {activeTournament.thirdPlaceMatch &&
+                                  knockoutPreview.thirdPlace && (
+                                    <div style={styles.tournamentPreviewMatchRow}>
+                                      <span>{tournamentText.thirdPlace}</span>
+                                      <strong>
+                                        {knockoutPreview.thirdPlace.sourceA ||
+                                          knockoutPreview.thirdPlace.teamA}{" "}
+                                        vs{" "}
+                                        {knockoutPreview.thirdPlace.sourceB ||
+                                          knockoutPreview.thirdPlace.teamB}
+                                      </strong>
+                                    </div>
+                                  )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            ...styles.tournamentSurface,
+                            gridColumn: "1 / -1",
+                          }}
+                        >
+                          <div style={styles.tournamentSectionHeader}>
+                            <div>
+                              <div style={styles.tournamentEyebrow}>
+                                {language === "no" ? "Hallplan" : "Hall Schedule"}
+                              </div>
+                              <div style={styles.tournamentSectionTitle}>
+                                {language === "no"
+                                  ? "Runder, baner og tidspunkter"
+                                  : "Batches, Courts and Times"}
+                              </div>
+                            </div>
+                            <div style={styles.tournamentStatusBadge}>
+                              {scheduleCourtCount}{" "}
+                              {language === "no" ? "baner" : "courts"}
+                            </div>
+                          </div>
+                          {renderHallSchedulePreview(12)}
+                        </div>
+
+                        <div style={styles.tournamentSurface}>
+                          <div style={styles.tournamentSectionHeader}>
+                            <div>
+                              <div style={styles.tournamentEyebrow}>
+                                {language === "no" ? "Format" : "Format"}
+                              </div>
+                              <div style={styles.tournamentSectionTitle}>
+                                {tournamentText.formatSection}
+                              </div>
+                            </div>
+                            <div style={styles.tournamentStatusBadge}>
+                              {formatLabel}
+                            </div>
+                          </div>
+
+                          <div style={styles.tournamentInfoGrid}>
+                            {[
+                              [tournamentText.formatLabel, formatLabel],
+                              [tournamentText.groupCountLabel, activeTournament.groupCount],
+                              [tournamentText.bracketSizeLabel, activeTournament.bracketSize],
+                              [
+                                tournamentText.thirdPlaceLabel,
+                                activeTournament.thirdPlaceMatch ? "Yes" : "No",
+                              ],
+                            ].map(([label, value]) => (
+                              <div key={label} style={styles.tournamentInfoTile}>
+                                <span>{label}</span>
+                                <strong>{value}</strong>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div style={styles.tournamentSurface}>
+                          <div style={styles.tournamentSectionHeader}>
+                            <div>
+                              <div style={styles.tournamentEyebrow}>
+                                {language === "no" ? "Deltakere" : "Participants"}
+                              </div>
+                              <div style={styles.tournamentSectionTitle}>
+                                {tournamentText.participantsSection}
+                              </div>
+                            </div>
+                            <div style={styles.tournamentStatusBadge}>
+                              {dashboardTeams.length} {language === "no" ? "lag" : "teams"} /{" "}
+                              {tournamentPlayersCount}{" "}
+                              {language === "no" ? "spillere" : "players"}
+                            </div>
+                          </div>
+
+                          {dashboardTeams.length > 0 ? (
+                            <div style={styles.tournamentSnapshotList}>
+                              {dashboardTeams.map((team) => (
+                                <div
+                                  key={`snapshot-${team.id}`}
+                                  style={styles.tournamentSnapshotRow}
+                                >
+                                  <span>{team.name}</span>
+                                  <strong>
+                                    {team.slot
+                                      ? team.slot
+                                      : Array.isArray(team.players)
+                                        ? `${team.players.length} ${
+                                            language === "no" ? "spillere" : "players"
+                                          }`
+                                        : "0"}
+                                  </strong>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div style={styles.tournamentMutedPanel}>
+                              {tournamentText.noTeamsYet}
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={styles.tournamentSurface}>
+                          <div style={styles.tournamentSectionHeader}>
+                            <div>
+                              <div style={styles.tournamentEyebrow}>
+                                {language === "no" ? "Kamper" : "Matches"}
+                              </div>
+                              <div style={styles.tournamentSectionTitle}>
+                                {tournamentText.matchesTitle}
+                              </div>
+                            </div>
+                            <div style={styles.tournamentStatusBadge}>
+                              {scheduledMatchesCount} {tournamentText.matchStatusScheduled}
+                            </div>
+                          </div>
+
+                          <div style={styles.tournamentMatchSummaryGrid}>
+                            <div style={styles.tournamentInfoTile}>
+                              <span>{tournamentText.matchStatusCompleted}</span>
+                              <strong>{completedMatchesCount}</strong>
+                            </div>
+                            <div style={styles.tournamentInfoTile}>
+                              <span>{tournamentText.matchStatusScheduled}</span>
+                              <strong>{scheduledMatchesCount}</strong>
+                            </div>
+                          </div>
+
+                          {nextMatch && (
+                            <div style={styles.tournamentFeatureMatch}>
+                              <span>{language === "no" ? "Neste kamp" : "Next Match"}</span>
+                              <strong>
+                                {nextMatch.teamA} vs {nextMatch.teamB}
+                              </strong>
+                            </div>
+                          )}
+
+                          {tournamentMatches.length > 0 ? (
+                            <div style={styles.tournamentSnapshotList}>
+                              {tournamentMatches.slice(0, 4).map((match) => (
+                                <div
+                                  key={`overview-match-${match.id}`}
+                                  style={styles.tournamentSnapshotRow}
+                                >
+                                  <span>
+                                    {match.teamA} vs {match.teamB}
+                                  </span>
+                                  <strong>
+                                    {match.status === "completed"
+                                      ? tournamentText.matchStatusCompleted
+                                      : tournamentText.matchStatusScheduled}
+                                  </strong>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div style={styles.tournamentMutedPanel}>
+                              {tournamentText.noMatchesYet}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {activeTournamentView === "groups" && (
+                      <div style={styles.tournamentSurface}>
+                        <div style={styles.tournamentSectionHeader}>
+                          <div>
+                            <div style={styles.tournamentEyebrow}>
+                              {language === "no" ? "Grupper" : "Groups"}
+                            </div>
+                            <div style={styles.tournamentSectionTitle}>
+                              {tournamentText.groupStagePreview}
+                            </div>
+                          </div>
+                          <button
+                            style={styles.primaryButtonSmall}
+                            onClick={generateTournamentGroups}
+                          >
+                            {tournamentText.generateGroups}
+                          </button>
+                        </div>
+
+                        {manualPreviewGroups.length > 0 ? (
+                          <div
+                            style={{
+                              ...styles.tournamentGroupGrid,
+                              ...(isMobile ? styles.tournamentGroupGridMobile : {}),
+                            }}
+                          >
+                            {manualPreviewGroups.map((group) => {
+                              const isEditableGroup = tournamentGroups.some(
+                                (item) => item.id === group.id
+                              );
+
+                              return (
+                                <div
+                                  key={group.id}
+                                  style={styles.tournamentGroupCard}
+                                >
+                                  <div style={styles.tournamentGroupHeader}>
+                                    <div>
+                                      <div style={styles.tournamentMiniTitle}>
+                                        {group.name}
+                                      </div>
+                                      <div style={styles.tournamentMutedText}>
+                                        {language === "no"
+                                          ? "Manuell papirrekkefolge"
+                                          : "Manual paper-draw order"}
+                                      </div>
+                                    </div>
+                                    <div style={styles.tournamentGroupCount}>
+                                      {Array.isArray(group.teams)
+                                        ? group.teams.length
+                                        : 0}
+                                    </div>
+                                  </div>
+                                  {Array.isArray(group.teams) &&
+                                  group.teams.length > 0 ? (
+                                    <div style={styles.tournamentSnapshotList}>
+                                      {group.teams.map((team, index) => (
+                                        <div
+                                          key={`${group.id}-${team.id}`}
+                                          style={styles.tournamentGroupTeamRow}
+                                        >
+                                          <span style={styles.tournamentTeamSeed}>
+                                            {team.slot || `${group.code}${index + 1}`}
+                                          </span>
+                                          <input
+                                            style={styles.tournamentSlotInput}
+                                            value={team.name || ""}
+                                            disabled={!isEditableGroup}
+                                            onChange={(e) =>
+                                              updateManualGroupSlot(
+                                                group.id,
+                                                team.id,
+                                                e.target.value
+                                              )
+                                            }
+                                            placeholder={
+                                              isEditableGroup
+                                                ? language === "no"
+                                                  ? "Skriv lagnavn"
+                                                  : "Enter team name"
+                                                : language === "no"
+                                                  ? "Bygg sloter for a redigere"
+                                                  : "Build slots to edit"
+                                            }
+                                          />
+                                          <strong>
+                                            {isEditableGroup
+                                              ? team.club || "-"
+                                              : language === "no"
+                                                ? "Forhandsvisning"
+                                                : "Preview"}
+                                          </strong>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div style={styles.tournamentMutedText}>
+                                      {tournamentText.noTeamsYet}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div style={styles.tournamentMutedPanel}>
+                            {tournamentText.noGroupsYet}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {activeTournamentView === "bracket" && (
+                      <div style={styles.tournamentSurface}>
+                        <div style={styles.tournamentSectionHeader}>
+                          <div>
+                            <div style={styles.tournamentEyebrow}>
+                              {language === "no" ? "Sluttspill" : "Knockout"}
+                            </div>
+                            <div style={styles.tournamentSectionTitle}>
+                              {tournamentText.knockoutPreview}
+                            </div>
+                          </div>
+                          <button
+                            style={styles.primaryButtonSmall}
+                            onClick={generateTournamentKnockout}
+                          >
+                            {tournamentText.generateKnockout}
+                          </button>
+                        </div>
+
+                        {(displayKnockout.quarterFinals || []).length ||
+                        (displayKnockout.semiFinals || []).length ? (
+                          <div
+                            style={{
+                              ...styles.tournamentBracketBoard,
+                              ...(isMobile ? styles.tournamentGroupGridMobile : {}),
+                            }}
+                          >
+                            {(displayKnockout.quarterFinals || []).length > 0 && (
+                              <div style={styles.tournamentBracketStage}>
+                                <div style={styles.tournamentBracketStageTitle}>
+                                  {language === "no" ? "Første utslag" : "First Knockout"}
+                                </div>
+                                {displayKnockout.quarterFinals.map((match) =>
+                                  hasStoredKnockout
+                                    ? renderBracketMatch(match, "quarterFinals")
+                                    : renderBracketPreviewMatch(match)
+                                )}
+                              </div>
+                            )}
+
+                            <div style={styles.tournamentBracketStage}>
+                              <div style={styles.tournamentBracketStageTitle}>
+                                {tournamentText.semiFinals}
+                              </div>
+                              {(displayKnockout.semiFinals || []).map((match) =>
+                                hasStoredKnockout
+                                  ? renderBracketMatch(match, "semiFinals")
+                                  : renderBracketPreviewMatch(match)
+                              )}
+                            </div>
+
+                            <div style={styles.tournamentBracketStage}>
+                              <div style={styles.tournamentBracketStageTitle}>
+                                {tournamentText.final}
+                              </div>
+                              {hasStoredKnockout
+                                ? renderBracketMatch(
+                                    displayKnockout.final,
+                                    "final",
+                                    true
+                                  )
+                                : renderBracketPreviewMatch(
+                                    displayKnockout.final,
+                                    true
+                                  )}
+                            </div>
+
+                            {activeTournament.thirdPlaceMatch &&
+                              displayKnockout.thirdPlace && (
+                                <div style={styles.tournamentBracketStage}>
+                                  <div style={styles.tournamentBracketStageTitle}>
+                                    {tournamentText.thirdPlace}
+                                  </div>
+                                  {hasStoredKnockout
+                                    ? renderBracketMatch(
+                                        displayKnockout.thirdPlace,
+                                        "thirdPlace"
+                                      )
+                                    : renderBracketPreviewMatch(
+                                        displayKnockout.thirdPlace
+                                      )}
+                                </div>
+                              )}
+                          </div>
+                        ) : (
+                          <div style={styles.tournamentMutedPanel}>
+                            {tournamentText.noKnockoutYet}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {activeTournamentView === "matches" && (
+                      <div style={styles.tournamentSurface}>
+                        <div style={styles.tournamentSectionHeader}>
+                          <div>
+                            <div style={styles.tournamentEyebrow}>
+                              {language === "no" ? "Kampstyring" : "Match Management"}
+                            </div>
+                            <div style={styles.tournamentSectionTitle}>
+                              {tournamentText.matchesTitle}
+                            </div>
+                          </div>
+                          <button
+                            style={styles.primaryButtonSmall}
+                            onClick={generateTournamentMatches}
+                          >
+                            {tournamentText.generateBasicMatches}
+                          </button>
+                        </div>
+
+                        <div style={styles.tournamentSchedulePanel}>
+                          <div style={styles.tournamentSectionHeader}>
+                            <div>
+                              <div style={styles.tournamentMiniTitle}>
+                                {language === "no"
+                                  ? "Hallplan for oppsettet"
+                                  : "Hall Schedule Preview"}
+                              </div>
+                              <div style={styles.tournamentMutedText}>
+                                {language === "no"
+                                  ? "Basert pa starttid, baner, kamplengde og pauser."
+                                  : "Based on start time, courts, match duration and breaks."}
+                              </div>
+                            </div>
+                            <div style={styles.tournamentStatusBadge}>
+                              {hallScheduleBatches.length}{" "}
+                              {language === "no" ? "runder" : "batches"}
+                            </div>
+                          </div>
+                          {renderHallSchedulePreview(18)}
+                        </div>
+
+                        {tournamentMatches.length > 0 ? (
+                          <div style={styles.tournamentMatchList}>
+                            {tournamentMatches.map((match, index) => (
+                              <div key={match.id} style={styles.tournamentMatchCard}>
+                                <div style={styles.tournamentMatchHeader}>
+                                  <div>
+                                    <div style={styles.tournamentMatchKicker}>
+                                      {language === "no" ? "Kamp" : "Match"} {index + 1}
+                                    </div>
+                                    <div style={styles.tournamentMatchTitle}>
+                                      {match.teamA} vs {match.teamB}
+                                    </div>
+                                  </div>
+                                  <div
+                                    style={{
+                                      ...styles.tournamentMatchStatus,
+                                      ...(match.status === "completed"
+                                        ? styles.tournamentMatchStatusDone
+                                        : {}),
+                                    }}
+                                  >
+                                    {match.status === "completed"
+                                      ? tournamentText.matchStatusCompleted
+                                      : tournamentText.matchStatusScheduled}
+                                  </div>
+                                </div>
+                                <div style={styles.tournamentScoreRow}>
+                                  <input
+                                    style={styles.tournamentScoreInput}
+                                    value={match.scoreA}
+                                    onChange={(e) =>
+                                      updateTournamentMatchScore(
+                                        match.id,
+                                        e.target.value,
+                                        match.scoreB
+                                      )
+                                    }
+                                    placeholder="0"
+                                  />
+                                  <span style={styles.tournamentScoreDivider}>-</span>
+                                  <input
+                                    style={styles.tournamentScoreInput}
+                                    value={match.scoreB}
+                                    onChange={(e) =>
+                                      updateTournamentMatchScore(
+                                        match.id,
+                                        match.scoreA,
+                                        e.target.value
+                                      )
+                                    }
+                                    placeholder="0"
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={styles.tournamentMutedPanel}>
+                            {tournamentText.noMatchesYet}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {activeTournamentView === "table" && (
+                      <div style={styles.tournamentSurface}>
+                        <div style={styles.tournamentSectionHeader}>
+                          <div>
+                            <div style={styles.tournamentEyebrow}>
+                              {language === "no" ? "Resultater" : "Standings"}
+                            </div>
+                            <div style={styles.tournamentSectionTitle}>
+                              {tournamentText.standingsTitle}
+                            </div>
+                          </div>
+                          <div style={styles.tournamentStatusBadge}>
+                            {tournamentStandings.length} {language === "no" ? "grupper" : "groups"}
+                          </div>
+                        </div>
+
+                        {activeTournament.format === "group-stage" &&
+                        Array.isArray(tournamentStandings) &&
+                        tournamentStandings.length > 0 ? (
+                          <div style={styles.tournamentStandingsList}>
+                            {tournamentStandings.map((group) => (
+                              <div
+                                key={`standings-${group.groupId}`}
+                                style={styles.tournamentStandingsCard}
+                              >
+                                <div style={styles.tournamentMiniTitle}>
+                                  {group.groupName}
+                                </div>
+                                <div style={styles.tournamentTableWrap}>
+                                  <table style={styles.tournamentTable}>
+                                    <thead>
+                                      <tr>
+                                        <th style={styles.tournamentTableHead}>Team</th>
+                                        <th style={styles.tournamentTableHead}>
+                                          {tournamentText.playedShort}
+                                        </th>
+                                        <th style={styles.tournamentTableHead}>
+                                          {tournamentText.winsShort}
+                                        </th>
+                                        <th style={styles.tournamentTableHead}>
+                                          {tournamentText.drawsShort}
+                                        </th>
+                                        <th style={styles.tournamentTableHead}>
+                                          {tournamentText.lossesShort}
+                                        </th>
+                                        <th style={styles.tournamentTableHead}>
+                                          {tournamentText.pointsShort}
+                                        </th>
+                                        <th style={styles.tournamentTableHead}>
+                                          {tournamentText.scoreForShort}
+                                        </th>
+                                        <th style={styles.tournamentTableHead}>
+                                          {tournamentText.scoreAgainstShort}
+                                        </th>
+                                        <th style={styles.tournamentTableHead}>
+                                          {tournamentText.scoreDiffShort}
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {group.rows.map((row) => (
+                                        <tr
+                                          key={`row-${group.groupId}-${row.teamName}`}
+                                        >
+                                          <td style={styles.tournamentTableTeam}>
+                                            {row.teamName}
+                                          </td>
+                                          <td style={styles.tournamentTableCell}>{row.played}</td>
+                                          <td style={styles.tournamentTableCell}>{row.wins}</td>
+                                          <td style={styles.tournamentTableCell}>{row.draws}</td>
+                                          <td style={styles.tournamentTableCell}>{row.losses}</td>
+                                          <td style={styles.tournamentTablePoints}>{row.points}</td>
+                                          <td style={styles.tournamentTableCell}>{row.scoreFor}</td>
+                                          <td style={styles.tournamentTableCell}>{row.scoreAgainst}</td>
+                                          <td style={styles.tournamentTableCell}>{row.scoreDiff}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={styles.tournamentMutedPanel}>
+                            {tournamentText.noStandingsYet}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {activeTournamentView === "sharing" && (
+                      <div style={styles.tournamentSurface}>
+                        <div style={styles.tournamentSectionHeader}>
+                          <div>
+                            <div style={styles.tournamentEyebrow}>
+                              {language === "no" ? "Publisering" : "Publishing"}
+                            </div>
+                            <div style={styles.tournamentSectionTitle}>
+                              {tournamentText.publicPreviewTitle}
+                            </div>
+                            <div style={styles.tournamentMutedText}>
+                              {tournamentText.publicPreviewSubtitle}
+                            </div>
+                          </div>
+                          <div style={styles.tournamentStatusBadge}>
+                            {isPublished
+                              ? tournamentText.published
+                              : tournamentText.unpublished}
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            ...styles.tournamentShareState,
+                            ...(isPublished ? styles.tournamentShareStateLive : {}),
+                          }}
+                        >
+                          <div>
+                            <div style={styles.tournamentShareTitle}>
+                              {isPublished
+                                ? tournamentText.published
+                                : tournamentText.unpublished}
+                            </div>
+                            <div style={styles.tournamentMutedText}>
+                              {isPublished
+                                ? tournamentText.publicPreviewSubtitle
+                                : language === "no"
+                                  ? "Offentlig lagliste vises kun etter publisering."
+                                  : "Public roster appears only after publishing."}
+                            </div>
+                          </div>
+                          {isPublished ? (
+                            <button
+                              style={styles.secondaryButtonCompact}
+                              onClick={unpublishTournament}
+                            >
+                              {tournamentText.unpublish}
+                            </button>
+                          ) : (
+                            <button
+                              style={styles.primaryButtonSmall}
+                              onClick={publishTournament}
+                            >
+                              {tournamentText.publish}
+                            </button>
+                          )}
+                        </div>
+
+                        {isPublished ? (
+                          <div style={styles.tournamentPublicRoster}>
+                            <div style={styles.tournamentPublicHeader}>
+                              <strong>{activeTournament.name}</strong>
+                              <span>
+                                {activeTournament.rules || tournamentText.noRules}
+                              </span>
+                            </div>
+
+                            {dashboardTeams.length > 0 ? (
+                              <div style={styles.tournamentGroupGrid}>
+                                {dashboardTeams.map((team) => (
+                                  <div
+                                    key={`preview-${team.id}`}
+                                    style={styles.tournamentMiniCard}
+                                  >
+                                    <div style={styles.tournamentMiniTitle}>
+                                      {team.name}
+                                      {team.club ? ` (${team.club})` : ""}
+                                    </div>
+                                    {Array.isArray(team.players) &&
+                                    team.players.length > 0 ? (
+                                      <div style={styles.tournamentSnapshotList}>
+                                        {team.players.map((player) => (
+                                          <div
+                                            key={`preview-${team.id}-${
+                                              player.id || player.name
+                                            }`}
+                                            style={styles.tournamentSnapshotRow}
+                                          >
+                                            <span>{player.name}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div style={styles.tournamentMutedText}>
+                                        {tournamentText.noPlayersInPreview}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div style={styles.tournamentMutedText}>
+                                {tournamentText.noTeamsInPreview}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div style={styles.tournamentMutedPanel}>
+                            {tournamentText.unpublished}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div style={styles.tournamentEmptyState}>
+                  <div style={styles.tournamentPanelTitle}>
+                    {tournamentText.noSelection}
+                  </div>
+                  <div style={styles.tournamentMutedText}>
+                    {tournamentText.emptyList}
+                  </div>
+                </div>
+              )}
+            </main>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={styles.app}>
@@ -4157,847 +6505,7 @@ const savedRound = readStorageWithTtl(
           </div>
         )}
 
-        {activeTab === "tournament" && (
-          <div style={styles.section}>
-            {!auth.loggedIn ? (
-              <div style={styles.lockedCard}>
-                {tournamentText.loginRequired}
-              </div>
-            ) : (
-              <>
-                <div style={styles.tournamentCard}>
-                  <div style={styles.tournamentHeader}>
-                    <div>
-                      <div style={styles.authTitle}>{tournamentText.createTitle}</div>
-                      <div style={styles.authSubtitle}>
-                        {tournamentText.createSubtitle}
-                      </div>
-                    </div>
-
-                    <button
-                      style={styles.secondaryButton}
-                      onClick={() =>
-                        setShowCreateTournamentForm((prev) => !prev)
-                      }
-                    >
-                      {showCreateTournamentForm
-                        ? t.close
-                        : tournamentText.newTournament}
-                    </button>
-                  </div>
-
-                  {showCreateTournamentForm && (
-                    <div style={styles.formCard}>
-                      <input
-                        style={styles.input}
-                        value={newTournamentName}
-                        onChange={(e) => setNewTournamentName(e.target.value)}
-                        placeholder={tournamentText.namePlaceholder}
-                      />
-
-                      <textarea
-                        style={styles.textarea}
-                        value={newTournamentRules}
-                        onChange={(e) => setNewTournamentRules(e.target.value)}
-                        placeholder={tournamentText.rulesPlaceholder}
-                      />
-
-                      <button
-                        style={styles.primaryButton}
-                        onClick={createTournament}
-                      >
-                        {tournamentText.createButton}
-                      </button>
-                    </div>
-                  )}
-
-                  {tournamentActionMessage && (
-                    <div style={styles.loginMessage}>{tournamentActionMessage}</div>
-                  )}
-                </div>
-
-                <div style={styles.tournamentGrid}>
-                  <div style={styles.tournamentCard}>
-                    <div style={styles.authTitle}>{tournamentText.listTitle}</div>
-
-                    <div style={styles.tournamentList}>
-                      {tournaments.length === 0 ? (
-                        <div style={styles.emptyText}>
-                          {tournamentText.emptyList}
-                        </div>
-                      ) : (
-                        tournaments.map((item) => {
-                          const isActive = item.id === activeTournamentId;
-
-                          return (
-                            <button
-                              key={item.id}
-                              style={{
-                                ...styles.tournamentListItem,
-                                ...(isActive
-                                  ? styles.tournamentListItemActive
-                                  : {}),
-                              }}
-                              onClick={() => {
-                                setActiveTournamentId(item.id);
-                                setTournamentActionMessage("");
-                              }}
-                            >
-                              <div style={styles.tournamentListItemTitle}>
-                                {item.name}
-                              </div>
-                              <div style={styles.tournamentListItemMeta}>
-                                {getTournamentStatusLabel(item)}
-                              </div>
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-
-                  <div style={styles.tournamentCard}>
-                    {activeTournamentId ? (
-                      <>
-                        <div style={styles.authTitle}>{tournamentText.detailsTitle}</div>
-
-                        {activeTournament && (
-                          <div style={styles.tournamentDetails}>
-                            <div
-                              style={{
-                                display: "grid",
-                                gridTemplateColumns: isMobile
-                                  ? "1fr"
-                                  : "minmax(320px, 380px) minmax(0, 1fr)",
-                                gap: 16,
-                              }}
-                            >
-                              <div style={{ display: "grid", gap: 12, alignContent: "start" }}>
-                                <div style={styles.formCard}>
-                                  <div style={styles.authTitle}>{tournamentText.informationSection}</div>
-                                  <div style={styles.settingsLabel}>{tournamentText.nameLabel}</div>
-                                  <input
-                                    style={styles.input}
-                                    value={activeTournament.name || ""}
-                                    onChange={(e) =>
-                                      updateActiveTournament({ name: e.target.value })
-                                    }
-                                  />
-                                  <div style={styles.settingsLabel}>{tournamentText.rulesLabel}</div>
-                                  <textarea
-                                    style={styles.textarea}
-                                    value={activeTournament.rules || ""}
-                                    onChange={(e) =>
-                                      updateActiveTournament({ rules: e.target.value })
-                                    }
-                                  />
-                                  <div
-                                    style={{
-                                      display: "flex",
-                                      gap: 8,
-                                      alignItems: "center",
-                                      flexWrap: "wrap",
-                                    }}
-                                  >
-                                    <div style={styles.tournamentStatusBadge}>
-                                      {getTournamentStatusLabel(activeTournament)}
-                                    </div>
-                                    {activeTournament.published ||
-                                    activeTournament.status === "published" ? (
-                                      <button
-                                        style={styles.secondaryButton}
-                                        onClick={unpublishTournament}
-                                      >
-                                        {tournamentText.unpublish}
-                                      </button>
-                                    ) : (
-                                      <button
-                                        style={styles.primaryButton}
-                                        onClick={publishTournament}
-                                      >
-                                        {tournamentText.publish}
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-
-                                <div style={styles.formCard}>
-                                  <div style={styles.authTitle}>{tournamentText.formatSection}</div>
-                                  <div style={styles.settingsLabel}>{tournamentText.formatLabel}</div>
-                                  <select
-                                    style={styles.select}
-                                    value={activeTournament.format}
-                                    onChange={(e) =>
-                                      updateActiveTournament({ format: e.target.value })
-                                    }
-                                  >
-                                    <option value="group-stage">
-                                      {tournamentText.formatGroupStage}
-                                    </option>
-                                    <option value="round-robin">
-                                      {tournamentText.formatRoundRobin}
-                                    </option>
-                                    <option value="single-elimination">
-                                      {tournamentText.formatSingleElimination}
-                                    </option>
-                                  </select>
-                                  <div style={styles.settingsLabel}>{tournamentText.groupCountLabel}</div>
-                                  <input
-                                    style={styles.input}
-                                    type="number"
-                                    min={1}
-                                    value={activeTournament.groupCount}
-                                    onChange={(e) =>
-                                      updateActiveTournament({
-                                        groupCount: Math.max(1, Number(e.target.value) || 1),
-                                      })
-                                    }
-                                  />
-                                  <div style={styles.settingsLabel}>{tournamentText.bracketSizeLabel}</div>
-                                  <input
-                                    style={styles.input}
-                                    type="number"
-                                    min={2}
-                                    value={activeTournament.bracketSize}
-                                    onChange={(e) =>
-                                      updateActiveTournament({
-                                        bracketSize: Math.max(2, Number(e.target.value) || 2),
-                                      })
-                                    }
-                                  />
-                                  <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                                    <input
-                                      type="checkbox"
-                                      checked={Boolean(activeTournament.thirdPlaceMatch)}
-                                      onChange={(e) =>
-                                        updateActiveTournament({
-                                          thirdPlaceMatch: e.target.checked,
-                                        })
-                                      }
-                                    />
-                                    <span>{tournamentText.thirdPlaceLabel}</span>
-                                  </label>
-                                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                    <button
-                                      style={styles.secondaryButton}
-                                      onClick={generateTournamentGroups}
-                                    >
-                                      {tournamentText.generateGroups}
-                                    </button>
-                                    <button
-                                      style={styles.secondaryButton}
-                                      onClick={generateTournamentKnockout}
-                                    >
-                                      {tournamentText.generateKnockout}
-                                    </button>
-                                  </div>
-                                </div>
-
-                                <div style={styles.formCard}>
-                                  <div style={styles.authTitle}>{tournamentText.settingsSection}</div>
-                                  {[
-                                    ["showScores", tournamentText.showScores],
-                                    ["showDates", tournamentText.showDates],
-                                    ["showLocations", tournamentText.showLocations],
-                                    ["showRoundTitles", tournamentText.showRoundTitles],
-                                  ].map(([key, label]) => (
-                                    <label
-                                      key={key}
-                                      style={{ display: "flex", gap: 8, alignItems: "center" }}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={Boolean(activeTournament.displaySettings?.[key])}
-                                        onChange={(e) =>
-                                          updateActiveTournamentDisplaySetting(
-                                            key,
-                                            e.target.checked
-                                          )
-                                        }
-                                      />
-                                      <span>{label}</span>
-                                    </label>
-                                  ))}
-                                </div>
-
-                                <div style={styles.formCard}>
-                                  <div style={styles.authTitle}>{tournamentText.participantsSection}</div>
-                                  <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-                                    <input
-                                      style={styles.input}
-                                      value={newTournamentTeamName}
-                                      onChange={(e) => setNewTournamentTeamName(e.target.value)}
-                                      placeholder={language === "no" ? "Lagnavn" : "Team name"}
-                                    />
-                                    <input
-                                      style={styles.input}
-                                      value={newTournamentTeamClub}
-                                      onChange={(e) => setNewTournamentTeamClub(e.target.value)}
-                                      placeholder={language === "no" ? "Klubb" : "Club"}
-                                    />
-                                    <button
-                                      style={styles.primaryButton}
-                                      onClick={addTournamentTeam}
-                                    >
-                                      {tournamentText.addTeamButton}
-                                    </button>
-                                  </div>
-                                  {Array.isArray(activeTournament.teams) &&
-                                  activeTournament.teams.length > 0 ? (
-                                    <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                                      {activeTournament.teams.map((team) => (
-                                        <li
-                                          key={team.id}
-                                          style={{
-                                            marginBottom: 14,
-                                            borderBottom: "1px solid #eee",
-                                            paddingBottom: 8,
-                                          }}
-                                        >
-                                          <div
-                                            style={{
-                                              display: "flex",
-                                              justifyContent: "space-between",
-                                              gap: 8,
-                                              alignItems: "center",
-                                            }}
-                                          >
-                                            <div>
-                                              {editingTournamentTeamId === team.id ? (
-                                                <input
-                                                  style={styles.input}
-                                                  value={editingTournamentTeamName}
-                                                  onChange={(e) =>
-                                                    setEditingTournamentTeamName(
-                                                      e.target.value
-                                                    )
-                                                  }
-                                                  placeholder={
-                                                    language === "no"
-                                                      ? "Lagnavn"
-                                                      : "Team name"
-                                                  }
-                                                />
-                                              ) : (
-                                                <span style={{ fontWeight: 500 }}>{team.name}</span>
-                                              )}
-                                              {team.club && (
-                                                <span
-                                                  style={{
-                                                    fontSize: 12,
-                                                    color: "#888",
-                                                    marginLeft: 8,
-                                                  }}
-                                                >
-                                                  {team.club}
-                                                </span>
-                                              )}
-                                              <span
-                                                style={{
-                                                  fontSize: 12,
-                                                  color: "#888",
-                                                  marginLeft: 12,
-                                                }}
-                                              >
-                                                {team.locked
-                                                  ? language === "no"
-                                                    ? "Låst"
-                                                    : "Locked"
-                                                  : language === "no"
-                                                    ? "Åpen"
-                                                    : "Open"}
-                                              </span>
-                                            </div>
-                                            <div style={{ display: "flex", gap: 6 }}>
-                                              {editingTournamentTeamId === team.id ? (
-                                                <>
-                                                  <button
-                                                    style={styles.smallPrimaryButton}
-                                                    onClick={() =>
-                                                      saveTournamentTeamName(team.id)
-                                                    }
-                                                  >
-                                                    {tournamentText.saveTeam}
-                                                  </button>
-                                                  <button
-                                                    style={styles.secondaryButton}
-                                                    onClick={() => {
-                                                      setEditingTournamentTeamId("");
-                                                      setEditingTournamentTeamName("");
-                                                    }}
-                                                  >
-                                                    {tournamentText.cancelEdit}
-                                                  </button>
-                                                </>
-                                              ) : (
-                                                <>
-                                                  <button
-                                                    style={styles.secondaryButton}
-                                                    onClick={() =>
-                                                      toggleTournamentTeamLock(team.id)
-                                                    }
-                                                  >
-                                                    {team.locked
-                                                      ? tournamentText.unlockTeam
-                                                      : tournamentText.lockTeam}
-                                                  </button>
-                                                  <button
-                                                    style={styles.secondaryButton}
-                                                    onClick={() =>
-                                                      startEditTournamentTeam(team)
-                                                    }
-                                                  >
-                                                    {tournamentText.editTeam}
-                                                  </button>
-                                                  <button
-                                                    style={styles.secondaryButton}
-                                                    onClick={() =>
-                                                      deleteTournamentTeam(team.id)
-                                                    }
-                                                  >
-                                                    {tournamentText.deleteTeam}
-                                                  </button>
-                                                </>
-                                              )}
-                                            </div>
-                                          </div>
-                                          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                                            <input
-                                              style={styles.input}
-                                              value={newTournamentPlayerNames[team.id] || ""}
-                                              onChange={(e) =>
-                                                setNewTournamentPlayerNames((prev) => ({
-                                                  ...prev,
-                                                  [team.id]: e.target.value,
-                                                }))
-                                              }
-                                              placeholder={
-                                                language === "no"
-                                                  ? "Spillernavn"
-                                                  : "Player name"
-                                              }
-                                            />
-                                            <button
-                                              style={styles.primaryButton}
-                                              onClick={() => addTournamentPlayer(team.id)}
-                                            >
-                                              {tournamentText.addPlayerButton}
-                                            </button>
-                                          </div>
-                                          <div style={{ marginTop: 4 }}>
-                                            {Array.isArray(team.players) &&
-                                            team.players.length > 0 ? (
-                                              <ul
-                                                style={{
-                                                  listStyle: "none",
-                                                  padding: 0,
-                                                  margin: 0,
-                                                }}
-                                              >
-                                                {team.players.map((player) => (
-                                                  <li
-                                                    key={player.id}
-                                                    style={{
-                                                      fontSize: 13,
-                                                      marginBottom: 2,
-                                                    }}
-                                                  >
-                                                    <span>{player.name}</span>
-                                                    <span
-                                                      style={{
-                                                        color: "#888",
-                                                        marginLeft: 8,
-                                                      }}
-                                                    >
-                                                      {new Date(
-                                                        player.createdAt
-                                                      ).toLocaleString()}
-                                                    </span>
-                                                    <span
-                                                      style={{
-                                                        color: "#888",
-                                                        marginLeft: 8,
-                                                      }}
-                                                    >
-                                                      {player.registeredBy}
-                                                    </span>
-                                                  </li>
-                                                ))}
-                                              </ul>
-                                            ) : (
-                                              <div style={{ color: "#888", fontSize: 13 }}>
-                                                {tournamentText.noPlayersYet}
-                                              </div>
-                                            )}
-                                          </div>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  ) : (
-                                    <div style={{ color: "#888", fontSize: 14 }}>
-                                      {tournamentText.noTeamsYet}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div style={{ display: "grid", gap: 12, alignContent: "start" }}>
-                                <div style={styles.formCard}>
-                                  <div style={styles.authTitle}>{tournamentText.previewSection}</div>
-                                  <div style={styles.authSubtitle}>
-                                    {tournamentText.builderSubtitle}
-                                  </div>
-                                </div>
-
-                                <div style={styles.formCard}>
-                                  <div style={styles.authTitle}>{tournamentText.groupStagePreview}</div>
-                                  {Array.isArray(activeTournament.groups) &&
-                                  activeTournament.groups.length > 0 ? (
-                                    <div
-                                      style={{
-                                        display: "grid",
-                                        gridTemplateColumns: isMobile
-                                          ? "1fr"
-                                          : "repeat(2, minmax(0, 1fr))",
-                                        gap: 10,
-                                      }}
-                                    >
-                                      {activeTournament.groups.map((group) => (
-                                        <div
-                                          key={group.id}
-                                          style={{
-                                            border: "1px solid #e5e7eb",
-                                            borderRadius: 10,
-                                            padding: 10,
-                                          }}
-                                        >
-                                          <div style={{ fontWeight: 600 }}>{group.name}</div>
-                                          {Array.isArray(group.teams) &&
-                                          group.teams.length > 0 ? (
-                                            <ul style={{ margin: "6px 0 0 16px", padding: 0 }}>
-                                              {group.teams.map((team) => (
-                                                <li key={`${group.id}-${team.id}`}>
-                                                  {team.name}
-                                                </li>
-                                              ))}
-                                            </ul>
-                                          ) : (
-                                            <div style={{ color: "#888", fontSize: 13 }}>
-                                              {tournamentText.noTeamsYet}
-                                            </div>
-                                          )}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <div style={{ color: "#888", fontSize: 13 }}>
-                                      {tournamentText.noGroupsYet}
-                                    </div>
-                                  )}
-                                </div>
-
-                                <div style={styles.formCard}>
-                                  <div style={styles.authTitle}>{tournamentText.knockoutPreview}</div>
-                                  {Array.isArray(activeTournament.knockout?.semiFinals) &&
-                                  activeTournament.knockout.semiFinals.length > 0 ? (
-                                    <div style={{ display: "grid", gap: 10 }}>
-                                      <div style={styles.settingsLabel}>
-                                        {tournamentText.semiFinals}
-                                      </div>
-                                      {activeTournament.knockout.semiFinals.map((match, idx) => {
-                                        const groupA = advancingTeamsByGroup[idx * 2];
-                                        const groupB = advancingTeamsByGroup[idx * 2 + 1];
-                                        const teamA =
-                                          activeTournament.format === "group-stage" && groupA
-                                            ? groupA.winner
-                                            : match.teamA;
-                                        const teamB =
-                                          activeTournament.format === "group-stage" && groupB
-                                            ? groupB.runnerUp
-                                            : match.teamB;
-
-                                        return (
-                                          <div
-                                            key={match.id}
-                                            style={{
-                                              border: "1px solid #e5e7eb",
-                                              borderRadius: 10,
-                                              padding: 10,
-                                            }}
-                                          >
-                                            {teamA} vs {teamB}
-                                          </div>
-                                        );
-                                      })}
-                                      {activeTournament.knockout.final && (
-                                        <>
-                                          <div style={styles.settingsLabel}>
-                                            {tournamentText.final}
-                                          </div>
-                                          <div
-                                            style={{
-                                              border: "1px solid #e5e7eb",
-                                              borderRadius: 10,
-                                              padding: 10,
-                                            }}
-                                          >
-                                            {activeTournament.knockout.final.teamA} vs{" "}
-                                            {activeTournament.knockout.final.teamB}
-                                          </div>
-                                        </>
-                                      )}
-                                      {activeTournament.thirdPlaceMatch &&
-                                        activeTournament.knockout.thirdPlace && (
-                                          <>
-                                            <div style={styles.settingsLabel}>
-                                              {tournamentText.thirdPlace}
-                                            </div>
-                                            <div
-                                              style={{
-                                                border: "1px solid #e5e7eb",
-                                                borderRadius: 10,
-                                                padding: 10,
-                                              }}
-                                            >
-                                              {activeTournament.knockout.thirdPlace.teamA} vs{" "}
-                                              {activeTournament.knockout.thirdPlace.teamB}
-                                            </div>
-                                          </>
-                                        )}
-                                    </div>
-                                  ) : (
-                                    <div style={{ color: "#888", fontSize: 13 }}>
-                                      {tournamentText.noKnockoutYet}
-                                    </div>
-                                  )}
-                                </div>
-
-                                <div style={styles.formCard}>
-                                  <div
-                                    style={{
-                                      display: "flex",
-                                      justifyContent: "space-between",
-                                      alignItems: "center",
-                                      gap: 8,
-                                    }}
-                                  >
-                                    <div style={styles.authTitle}>{tournamentText.matchesTitle}</div>
-                                    <button
-                                      style={styles.primaryButton}
-                                      onClick={generateTournamentMatches}
-                                    >
-                                      {tournamentText.generateBasicMatches}
-                                    </button>
-                                  </div>
-                                  {Array.isArray(activeTournament.matches) &&
-                                  activeTournament.matches.length > 0 ? (
-                                    <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                                      {activeTournament.matches.map((match) => (
-                                        <li
-                                          key={match.id}
-                                          style={{
-                                            fontSize: 14,
-                                            marginBottom: 8,
-                                            border: "1px solid #e5e7eb",
-                                            borderRadius: 8,
-                                            padding: 8,
-                                          }}
-                                        >
-                                          <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                                            {match.teamA} vs {match.teamB}
-                                          </div>
-                                          <div
-                                            style={{
-                                              display: "flex",
-                                              alignItems: "center",
-                                              gap: 8,
-                                              flexWrap: "wrap",
-                                            }}
-                                          >
-                                            <input
-                                              style={{ ...styles.input, width: 72 }}
-                                              value={match.scoreA}
-                                              onChange={(e) =>
-                                                updateTournamentMatchScore(
-                                                  match.id,
-                                                  e.target.value,
-                                                  match.scoreB
-                                                )
-                                              }
-                                              placeholder="0"
-                                            />
-                                            <span>-</span>
-                                            <input
-                                              style={{ ...styles.input, width: 72 }}
-                                              value={match.scoreB}
-                                              onChange={(e) =>
-                                                updateTournamentMatchScore(
-                                                  match.id,
-                                                  match.scoreA,
-                                                  e.target.value
-                                                )
-                                              }
-                                              placeholder="0"
-                                            />
-                                            <span style={styles.tournamentListItemMeta}>
-                                              {match.status === "completed"
-                                                ? tournamentText.matchStatusCompleted
-                                                : tournamentText.matchStatusScheduled}
-                                            </span>
-                                          </div>
-                                        </li>
-                                      ))}
-                                    </ul>
-                                  ) : (
-                                    <div style={{ color: "#888", fontSize: 13 }}>
-                                      {tournamentText.noMatchesYet}
-                                    </div>
-                                  )}
-                                </div>
-
-                                <div style={styles.formCard}>
-                                  <div style={styles.authTitle}>{tournamentText.standingsTitle}</div>
-                                  {activeTournament.format === "group-stage" &&
-                                  Array.isArray(tournamentStandings) &&
-                                  tournamentStandings.length > 0 ? (
-                                    <div style={{ display: "grid", gap: 10 }}>
-                                      {tournamentStandings.map((group) => (
-                                        <div
-                                          key={`standings-${group.groupId}`}
-                                          style={{
-                                            border: "1px solid #e5e7eb",
-                                            borderRadius: 10,
-                                            padding: 10,
-                                          }}
-                                        >
-                                          <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                                            {group.groupName}
-                                          </div>
-                                          <div style={{ overflowX: "auto" }}>
-                                            <table style={{ width: "100%", fontSize: 12 }}>
-                                              <thead>
-                                                <tr>
-                                                  <th align="left">Team</th>
-                                                  <th>{tournamentText.playedShort}</th>
-                                                  <th>{tournamentText.winsShort}</th>
-                                                  <th>{tournamentText.drawsShort}</th>
-                                                  <th>{tournamentText.lossesShort}</th>
-                                                  <th>{tournamentText.pointsShort}</th>
-                                                  <th>{tournamentText.scoreForShort}</th>
-                                                  <th>{tournamentText.scoreAgainstShort}</th>
-                                                  <th>{tournamentText.scoreDiffShort}</th>
-                                                </tr>
-                                              </thead>
-                                              <tbody>
-                                                {group.rows.map((row) => (
-                                                  <tr key={`row-${group.groupId}-${row.teamName}`}>
-                                                    <td>{row.teamName}</td>
-                                                    <td align="center">{row.played}</td>
-                                                    <td align="center">{row.wins}</td>
-                                                    <td align="center">{row.draws}</td>
-                                                    <td align="center">{row.losses}</td>
-                                                    <td align="center">{row.points}</td>
-                                                    <td align="center">{row.scoreFor}</td>
-                                                    <td align="center">{row.scoreAgainst}</td>
-                                                    <td align="center">{row.scoreDiff}</td>
-                                                  </tr>
-                                                ))}
-                                              </tbody>
-                                            </table>
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <div style={{ color: "#888", fontSize: 13 }}>
-                                      {tournamentText.noStandingsYet}
-                                    </div>
-                                  )}
-                                </div>
-
-                                {(activeTournament.published ||
-                                  activeTournament.status === "published") && (
-                                  <div
-                                    style={{
-                                      ...styles.formCard,
-                                      borderTop: "1px solid #eee",
-                                    }}
-                                  >
-                                    <div style={styles.authTitle}>
-                                      {tournamentText.publicPreviewTitle}
-                                    </div>
-                                    <div style={styles.authSubtitle}>
-                                      {tournamentText.publicPreviewSubtitle}
-                                    </div>
-                                    <div style={{ marginTop: 8 }}>
-                                      <div style={{ fontWeight: 600 }}>
-                                        {activeTournament.name}
-                                      </div>
-                                      <div style={{ color: "#555", marginTop: 4 }}>
-                                        {activeTournament.rules || tournamentText.noRules}
-                                      </div>
-                                    </div>
-                                    <div style={{ marginTop: 10 }}>
-                                      {Array.isArray(activeTournament.teams) &&
-                                      activeTournament.teams.length > 0 ? (
-                                        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-                                          {activeTournament.teams.map((team) => (
-                                            <li
-                                              key={`preview-${team.id}`}
-                                              style={{ marginBottom: 10 }}
-                                            >
-                                              <div style={{ fontWeight: 500 }}>
-                                                {team.name}
-                                                {team.club ? ` (${team.club})` : ""}
-                                              </div>
-                                              {Array.isArray(team.players) &&
-                                              team.players.length > 0 ? (
-                                                <ul
-                                                  style={{
-                                                    margin: "4px 0 0 16px",
-                                                    padding: 0,
-                                                  }}
-                                                >
-                                                  {team.players.map((player) => (
-                                                    <li
-                                                      key={`preview-${team.id}-${player.id || player.name}`}
-                                                    >
-                                                      {player.name}
-                                                    </li>
-                                                  ))}
-                                                </ul>
-                                              ) : (
-                                                <div style={{ color: "#888", fontSize: 13 }}>
-                                                  {tournamentText.noPlayersInPreview}
-                                                </div>
-                                              )}
-                                            </li>
-                                          ))}
-                                        </ul>
-                                      ) : (
-                                        <div style={{ color: "#888", fontSize: 14 }}>
-                                          {tournamentText.noTeamsInPreview}
-                                        </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <div style={styles.emptyText}>
-                        {tournamentText.noSelection}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        )}
+        {activeTab === "tournament" && renderTournamentDashboard()}
         
       {editingPlayer && (
         <div style={styles.modalOverlay} onClick={closeEditPlayer}>
@@ -5782,6 +7290,1238 @@ const styles = {
     padding: "12px",
     fontSize: "14px",
     background: "#fff",
+  },
+
+  textarea: {
+    width: "100%",
+    minHeight: "92px",
+    boxSizing: "border-box",
+    borderRadius: "10px",
+    border: "1px solid #d1d5db",
+    padding: "12px",
+    fontSize: "14px",
+    fontFamily: "inherit",
+    resize: "vertical",
+  },
+
+  tournamentDashboardSection: {
+    display: "grid",
+    gap: "20px",
+    padding: "16px",
+    borderRadius: "24px",
+    background: "#dde7f3",
+    border: "1px solid #cdd8e7",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.72)",
+    width: "min(1560px, calc(100vw - 24px))",
+    maxWidth: "1560px",
+    marginLeft: "50%",
+    transform: "translateX(-50%)",
+    boxSizing: "border-box",
+    minWidth: 0,
+    overflow: "visible",
+  },
+
+  tournamentDashboardShell: {
+    display: "grid",
+    gridTemplateColumns: "minmax(378px, 406px) minmax(0, 1fr)",
+    gap: "20px",
+    alignItems: "start",
+    width: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentDashboardShellMobile: {
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: "16px",
+  },
+
+  tournamentSetupPanel: {
+    background: "#111827",
+    border: "1px solid #1f2937",
+    borderRadius: "22px",
+    padding: "21px",
+    display: "grid",
+    gap: "17px",
+    boxShadow: "0 18px 38px rgba(17,24,39,0.24)",
+    minWidth: 0,
+    width: "100%",
+    boxSizing: "border-box",
+    alignSelf: "start",
+  },
+
+  tournamentPanelHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "14px",
+    paddingBottom: "2px",
+  },
+
+  tournamentEyebrow: {
+    fontSize: "11px",
+    color: "#38bdf8",
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+
+  tournamentPanelTitle: {
+    fontSize: "21px",
+    color: "#f8fafc",
+    fontWeight: "900",
+    lineHeight: 1.2,
+  },
+
+  tournamentSetupBlock: {
+    display: "grid",
+    gap: "12px",
+    padding: "15px",
+    background: "#f8fafc",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: "16px",
+    boxShadow: "0 10px 24px rgba(15,23,42,0.16)",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentMessage: {
+    padding: "9px 10px",
+    background: "#eef2ff",
+    border: "1px solid #c7d2fe",
+    borderRadius: "10px",
+    color: "#1e3a8a",
+    fontSize: "12px",
+    fontWeight: "700",
+  },
+
+  tournamentBlockTitle: {
+    fontSize: "13px",
+    color: "#111827",
+    fontWeight: "900",
+  },
+
+  tournamentList: {
+    display: "grid",
+    gap: "8px",
+    maxHeight: "240px",
+    overflowY: "auto",
+    overflowX: "hidden",
+    minWidth: 0,
+  },
+
+  tournamentListItem: {
+    width: "100%",
+    border: "1px solid #e2e8f0",
+    borderRadius: "12px",
+    padding: "12px 13px",
+    background: "#fff",
+    cursor: "pointer",
+    textAlign: "left",
+    display: "grid",
+    gap: "4px",
+  },
+
+  tournamentListItemActive: {
+    borderColor: "#2563eb",
+    background: "#eff6ff",
+    boxShadow: "0 0 0 2px rgba(37,99,235,0.12)",
+  },
+
+  tournamentListItemTitle: {
+    fontSize: "13px",
+    color: "#111827",
+    fontWeight: "800",
+  },
+
+  tournamentListItemMeta: {
+    fontSize: "11px",
+    color: "#6b7280",
+    fontWeight: "700",
+  },
+
+  tournamentStatusBadge: {
+    borderRadius: "999px",
+    padding: "6px 9px",
+    background: "#e0f2fe",
+    color: "#075985",
+    fontSize: "11px",
+    fontWeight: "800",
+    whiteSpace: "nowrap",
+  },
+
+  tournamentInlineActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    flexWrap: "wrap",
+  },
+
+  tournamentFieldGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "10px",
+    minWidth: 0,
+  },
+
+  tournamentFieldGridMobile: {
+    gridTemplateColumns: "1fr",
+  },
+
+  tournamentCheckRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    fontSize: "12px",
+    color: "#111827",
+    fontWeight: "600",
+  },
+
+  tournamentSetupDivider: {
+    height: "1px",
+    background: "#e2e8f0",
+  },
+
+  tournamentSidebarNote: {
+    marginTop: "4px",
+    color: "#64748b",
+    fontSize: "11px",
+    fontWeight: "700",
+    lineHeight: 1.45,
+  },
+
+  tournamentSidebarSlotList: {
+    display: "grid",
+    gap: "10px",
+    maxHeight: "min(500px, 54vh)",
+    overflowY: "auto",
+    overflowX: "hidden",
+    paddingRight: "2px",
+    minWidth: 0,
+    overscrollBehavior: "contain",
+  },
+
+  tournamentSidebarGroup: {
+    display: "grid",
+    gap: "8px",
+    padding: "12px",
+    borderRadius: "13px",
+    background: "#fff",
+    border: "1px solid #e2e8f0",
+    minWidth: 0,
+  },
+
+  tournamentSidebarGroupHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "10px",
+    color: "#111827",
+    fontSize: "12px",
+  },
+
+  tournamentSidebarSlotRow: {
+    display: "grid",
+    gridTemplateColumns: "42px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: "9px",
+    minWidth: 0,
+  },
+
+  tournamentCheckboxGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "8px",
+  },
+
+  tournamentRegistrationGrid: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) auto",
+    gap: "8px",
+    alignItems: "center",
+    minWidth: 0,
+  },
+
+  tournamentTeamList: {
+    display: "grid",
+    gap: "9px",
+  },
+
+  tournamentTeamRow: {
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: "12px",
+    padding: "10px",
+    display: "grid",
+    gap: "8px",
+  },
+
+  tournamentTeamRowTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
+
+  tournamentTeamIdentity: {
+    display: "grid",
+    gap: "2px",
+    minWidth: 0,
+    flex: 1,
+  },
+
+  tournamentTeamName: {
+    fontSize: "13px",
+    color: "#111827",
+    fontWeight: "800",
+  },
+
+  tournamentTeamMeta: {
+    fontSize: "11px",
+    color: "#6b7280",
+    fontWeight: "600",
+  },
+
+  tournamentTeamActions: {
+    display: "flex",
+    gap: "6px",
+    flexWrap: "wrap",
+  },
+
+  tournamentPlayerRegister: {
+    display: "grid",
+    gridTemplateColumns: "1fr auto",
+    gap: "8px",
+    alignItems: "center",
+  },
+
+  tournamentPlayerList: {
+    display: "flex",
+    gap: "6px",
+    flexWrap: "wrap",
+  },
+
+  tournamentPlayerPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    borderRadius: "999px",
+    padding: "5px 8px",
+    background: "#eef2ff",
+    color: "#111827",
+    fontSize: "11px",
+    fontWeight: "700",
+  },
+
+  tournamentPlayerMeta: {
+    color: "#64748b",
+    fontWeight: "600",
+  },
+
+  tournamentMutedText: {
+    color: "#6b7280",
+    fontSize: "12px",
+    fontWeight: "600",
+  },
+
+  tournamentMainPanel: {
+    display: "grid",
+    gap: "21px",
+    minWidth: 0,
+    width: "100%",
+    padding: "20px",
+    borderRadius: "22px",
+    background: "#eef4fb",
+    border: "1px solid #cfdbea",
+    boxShadow: "0 20px 40px rgba(15,23,42,0.11)",
+    boxSizing: "border-box",
+    alignContent: "start",
+    overflow: "visible",
+  },
+
+  tournamentHero: {
+    background: "#141a2a",
+    color: "#fff",
+    borderRadius: "20px",
+    padding: "24px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "22px",
+    flexWrap: "wrap",
+    boxShadow: "0 18px 36px rgba(17,24,39,0.24)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentHeroText: {
+    minWidth: 0,
+    flex: 1,
+  },
+
+  tournamentHeroTitle: {
+    margin: "6px 0 0",
+    fontSize: "32px",
+    lineHeight: 1.1,
+    fontWeight: "900",
+    color: "#fff",
+  },
+
+  tournamentHeroMeta: {
+    marginTop: "6px",
+    fontSize: "12px",
+    color: "#cbd5e1",
+    fontWeight: "700",
+  },
+
+  tournamentHeroRules: {
+    margin: "12px 0 0",
+    color: "#e5e7eb",
+    fontSize: "14px",
+    lineHeight: 1.6,
+    maxWidth: "720px",
+  },
+
+  tournamentHeroActions: {
+    display: "grid",
+    gap: "8px",
+    justifyItems: "end",
+    flexShrink: 0,
+  },
+
+  tournamentHeroBadge: {
+    borderRadius: "999px",
+    padding: "8px 12px",
+    background: "rgba(255,255,255,0.12)",
+    color: "#fff",
+    fontSize: "11px",
+    fontWeight: "800",
+  },
+
+  tournamentLightButton: {
+    border: "1px solid rgba(255,255,255,0.32)",
+    borderRadius: "12px",
+    padding: "10px 13px",
+    background: "#fff",
+    color: "#111827",
+    fontSize: "12px",
+    fontWeight: "800",
+    cursor: "pointer",
+  },
+
+  tournamentStatsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(185px, 1fr))",
+    gap: "14px",
+    minWidth: 0,
+  },
+
+  tournamentStatsGridMobile: {
+    gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))",
+  },
+
+  tournamentStatCard: {
+    background: "#f8fafc",
+    border: "1px solid #dbe3ef",
+    borderRadius: "16px",
+    padding: "16px",
+    boxShadow: "0 10px 22px rgba(17,24,39,0.07)",
+    minWidth: 0,
+    minHeight: "108px",
+    display: "grid",
+    alignContent: "space-between",
+    gap: "8px",
+  },
+
+  tournamentStatValue: {
+    fontSize: "30px",
+    color: "#111827",
+    fontWeight: "900",
+    lineHeight: 1,
+  },
+
+  tournamentStatLabel: {
+    marginTop: "8px",
+    fontSize: "13px",
+    color: "#111827",
+    fontWeight: "800",
+  },
+
+  tournamentStatNote: {
+    marginTop: "3px",
+    fontSize: "11px",
+    color: "#6b7280",
+    fontWeight: "600",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+
+  tournamentSubTabs: {
+    display: "flex",
+    gap: "8px",
+    background: "#111827",
+    borderRadius: "18px",
+    padding: "8px",
+    overflowX: "auto",
+    overflowY: "hidden",
+    boxShadow: "0 14px 30px rgba(15,23,42,0.16)",
+    border: "1px solid rgba(255,255,255,0.08)",
+    minWidth: 0,
+  },
+
+  tournamentSubTab: {
+    border: "none",
+    borderRadius: "12px",
+    padding: "11px 15px",
+    background: "transparent",
+    color: "#cbd5e1",
+    fontSize: "12px",
+    fontWeight: "800",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    flex: "0 0 auto",
+    minWidth: "98px",
+    textAlign: "center",
+  },
+
+  tournamentSubTabActive: {
+    background: "#fff",
+    color: "#111827",
+    boxShadow: "0 6px 16px rgba(17,24,39,0.18)",
+  },
+
+  tournamentWorkspace: {
+    minWidth: 0,
+    width: "100%",
+    display: "grid",
+    gap: "22px",
+    alignContent: "start",
+  },
+
+  tournamentTwoColumn: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
+    gap: "14px",
+    minWidth: 0,
+  },
+
+  tournamentTwoColumnMobile: {
+    gridTemplateColumns: "1fr",
+  },
+
+  tournamentOverviewGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 390px), 1fr))",
+    gap: "20px",
+    alignItems: "stretch",
+    minWidth: 0,
+  },
+
+  tournamentOverviewHero: {
+    gridColumn: "1 / -1",
+    borderRadius: "20px",
+    padding: "26px",
+    background: "#0f172a",
+    color: "#fff",
+    display: "grid",
+    gap: "16px",
+    boxShadow: "0 20px 38px rgba(15,23,42,0.24)",
+    border: "1px solid rgba(255,255,255,0.10)",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentOverviewTitle: {
+    fontSize: "30px",
+    lineHeight: 1.1,
+    fontWeight: "900",
+    color: "#fff",
+  },
+
+  tournamentOverviewCopy: {
+    maxWidth: "720px",
+    color: "#cbd5e1",
+    fontSize: "14px",
+    lineHeight: 1.6,
+  },
+
+  tournamentOverviewStats: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: "12px",
+    minWidth: 0,
+  },
+
+  tournamentOverviewStat: {
+    borderRadius: "16px",
+    padding: "14px",
+    background: "rgba(255,255,255,0.10)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    display: "grid",
+    gap: "8px",
+    minHeight: "78px",
+  },
+
+  tournamentSurface: {
+    background: "#f8fafc",
+    border: "1px solid #dbe3ef",
+    borderRadius: "20px",
+    padding: "20px",
+    display: "grid",
+    gap: "18px",
+    boxShadow: "0 12px 26px rgba(17,24,39,0.065)",
+    minWidth: 0,
+    width: "100%",
+    boxSizing: "border-box",
+    alignContent: "start",
+    overflow: "visible",
+  },
+
+  tournamentSectionTitle: {
+    fontSize: "18px",
+    color: "#111827",
+    fontWeight: "900",
+  },
+
+  tournamentInfoGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: "10px",
+    minWidth: 0,
+  },
+
+  tournamentInfoTile: {
+    display: "grid",
+    gap: "6px",
+    minHeight: "70px",
+    borderRadius: "14px",
+    padding: "13px",
+    background: "#f5f8fc",
+    border: "1px solid #e2e8f0",
+    color: "#111827",
+    fontSize: "12px",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentMatchSummaryGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: "10px",
+    minWidth: 0,
+  },
+
+  tournamentFeatureMatch: {
+    display: "grid",
+    gap: "7px",
+    borderRadius: "18px",
+    padding: "16px",
+    background: "#111827",
+    color: "#fff",
+    border: "1px solid #1f2937",
+    minWidth: 0,
+  },
+
+  tournamentSnapshotList: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+
+  tournamentSnapshotRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+    padding: "11px 12px",
+    background: "#f7f9fc",
+    border: "1px solid #e2e8f0",
+    borderRadius: "12px",
+    fontSize: "12px",
+    color: "#111827",
+    fontWeight: "700",
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
+
+  tournamentSectionHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "12px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+
+  tournamentPreviewLayout: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
+    gap: "16px",
+    alignItems: "start",
+    minWidth: 0,
+  },
+
+  tournamentPreviewGroups: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+    gap: "12px",
+    minWidth: 0,
+  },
+
+  tournamentPreviewGroupCard: {
+    display: "grid",
+    gap: "11px",
+    borderRadius: "16px",
+    padding: "15px",
+    background: "#fff",
+    border: "1px solid #dbe3ef",
+    boxShadow: "0 10px 22px rgba(15,23,42,0.05)",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentPreviewSlotRow: {
+    display: "grid",
+    gridTemplateColumns: "44px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: "9px",
+    padding: "9px 10px",
+    borderRadius: "12px",
+    background: "#f1f5f9",
+    border: "1px solid #e2e8f0",
+    color: "#111827",
+    fontSize: "12px",
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
+
+  tournamentPreviewBracketCard: {
+    display: "grid",
+    gap: "13px",
+    borderRadius: "18px",
+    padding: "17px",
+    background: "#111827",
+    color: "#fff",
+    border: "1px solid #1f2937",
+    boxShadow: "0 16px 32px rgba(15,23,42,0.18)",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentPreviewMatchList: {
+    display: "grid",
+    gap: "10px",
+    minWidth: 0,
+  },
+
+  tournamentPreviewMatchRow: {
+    display: "grid",
+    gap: "5px",
+    padding: "12px",
+    borderRadius: "14px",
+    background: "rgba(255,255,255,0.08)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    color: "#fff",
+    fontSize: "12px",
+    fontWeight: "800",
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
+
+  tournamentSchedulePanel: {
+    display: "grid",
+    gap: "14px",
+    padding: "20px",
+    borderRadius: "18px",
+    background: "#edf4fb",
+    border: "1px solid #d5e2f1",
+    minWidth: 0,
+    width: "100%",
+    boxSizing: "border-box",
+    overflow: "visible",
+  },
+
+  tournamentScheduleWrap: {
+    overflowX: "auto",
+    overflowY: "visible",
+    borderRadius: "16px",
+    border: "1px solid #dbe3ef",
+    background: "#fff",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+    WebkitOverflowScrolling: "touch",
+  },
+
+  tournamentScheduleGrid: {
+    display: "grid",
+    gap: "0",
+    width: "100%",
+    minWidth: 0,
+  },
+
+  tournamentScheduleRow: {
+    display: "grid",
+    gridTemplateColumns: "124px minmax(0, 1fr)",
+    borderBottom: "1px solid #e2e8f0",
+    minWidth: 0,
+  },
+
+  tournamentScheduleTimeCell: {
+    display: "grid",
+    gap: "4px",
+    alignContent: "center",
+    padding: "13px 12px",
+    background: "#0f172a",
+    color: "#fff",
+    fontSize: "11px",
+    fontWeight: "800",
+    minWidth: 0,
+  },
+
+  tournamentScheduleCourts: {
+    display: "grid",
+    gap: "1px",
+    background: "#dbe3ef",
+    minWidth: 0,
+  },
+
+  tournamentScheduleCourt: {
+    display: "grid",
+    gap: "6px",
+    minHeight: "82px",
+    padding: "13px",
+    background: "#f8fafc",
+    color: "#111827",
+    fontSize: "12px",
+    fontWeight: "800",
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
+
+  tournamentScheduleMore: {
+    padding: "12px",
+    background: "#f1f5f9",
+    color: "#475569",
+    fontSize: "12px",
+    fontWeight: "800",
+    textAlign: "center",
+  },
+
+  tournamentGroupGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))",
+    gap: "14px",
+    minWidth: 0,
+  },
+
+  tournamentGroupGridMobile: {
+    gridTemplateColumns: "1fr",
+  },
+
+  tournamentMiniCard: {
+    border: "1px solid #e2e8f0",
+    borderRadius: "16px",
+    padding: "15px",
+    background: "#f7f9fc",
+    display: "grid",
+    gap: "12px",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentGroupCard: {
+    border: "1px solid #dbe3ef",
+    borderRadius: "18px",
+    padding: "16px",
+    background: "#f7f9fc",
+    display: "grid",
+    gap: "13px",
+    boxShadow: "0 9px 20px rgba(15,23,42,0.055)",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentGroupHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    minWidth: 0,
+    flexWrap: "wrap",
+  },
+
+  tournamentGroupCount: {
+    width: "30px",
+    height: "30px",
+    borderRadius: "999px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#111827",
+    color: "#fff",
+    fontSize: "12px",
+    fontWeight: "900",
+  },
+
+  tournamentGroupTeamRow: {
+    display: "grid",
+    gridTemplateColumns: "46px minmax(0, 1fr) minmax(64px, auto)",
+    alignItems: "center",
+    gap: "9px",
+    padding: "11px",
+    borderRadius: "12px",
+    background: "#fff",
+    border: "1px solid #e2e8f0",
+    color: "#111827",
+    fontSize: "12px",
+    fontWeight: "800",
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
+
+  tournamentTeamSeed: {
+    minWidth: "34px",
+    height: "26px",
+    borderRadius: "9px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontSize: "11px",
+    fontWeight: "900",
+    flexShrink: 0,
+  },
+
+  tournamentSlotInput: {
+    width: "100%",
+    minWidth: 0,
+    border: "1px solid #dbe3ef",
+    borderRadius: "10px",
+    padding: "9px 10px",
+    background: "#fff",
+    color: "#111827",
+    fontSize: "13px",
+    fontWeight: "800",
+    boxSizing: "border-box",
+  },
+
+  tournamentMiniTitle: {
+    fontSize: "13px",
+    color: "#111827",
+    fontWeight: "900",
+  },
+
+  tournamentBracket: {
+    display: "grid",
+    gap: "10px",
+  },
+
+  tournamentBracketBoard: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 250px), 1fr))",
+    gap: "16px",
+    alignItems: "start",
+    padding: "16px",
+    borderRadius: "18px",
+    background: "#f1f5f9",
+    border: "1px solid #dbe3ef",
+    minWidth: 0,
+    boxSizing: "border-box",
+    overflow: "visible",
+  },
+
+  tournamentBracketStage: {
+    display: "grid",
+    gap: "12px",
+    alignContent: "start",
+    minHeight: 0,
+    minWidth: 0,
+  },
+
+  tournamentBracketStageTitle: {
+    color: "#475569",
+    fontSize: "11px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+
+  tournamentBracketMatch: {
+    borderRadius: "16px",
+    padding: "14px",
+    background: "#fff",
+    border: "1px solid #dbe3ef",
+    display: "grid",
+    gap: "9px",
+    boxShadow: "0 9px 20px rgba(15,23,42,0.075)",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentBracketMatchFinal: {
+    borderRadius: "18px",
+    padding: "16px",
+    background: "#111827",
+    border: "1px solid #1f2937",
+    display: "grid",
+    gap: "9px",
+    boxShadow: "0 14px 28px rgba(15,23,42,0.20)",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentBracketLine: {
+    borderRadius: "12px",
+    border: "1px solid #dbeafe",
+    background: "#eff6ff",
+    padding: "11px 12px",
+    color: "#111827",
+    fontSize: "12px",
+    fontWeight: "800",
+    display: "grid",
+    gap: "4px",
+    textAlign: "left",
+    cursor: "pointer",
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
+
+  tournamentBracketLineWinner: {
+    borderColor: "#22c55e",
+    background: "#dcfce7",
+    color: "#14532d",
+    boxShadow: "0 0 0 2px rgba(34,197,94,0.12)",
+  },
+
+  tournamentBracketVs: {
+    color: "#64748b",
+    fontSize: "11px",
+    fontWeight: "900",
+    textAlign: "center",
+  },
+
+  tournamentMatchList: {
+    display: "grid",
+    gap: "12px",
+    minWidth: 0,
+  },
+
+  tournamentMatchCard: {
+    border: "1px solid #dbe3ef",
+    borderRadius: "16px",
+    padding: "15px",
+    background: "#f7f9fc",
+    display: "grid",
+    gap: "13px",
+    boxShadow: "0 8px 16px rgba(15,23,42,0.045)",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentMatchHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "12px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+
+  tournamentMatchKicker: {
+    color: "#64748b",
+    fontSize: "11px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+
+  tournamentMatchTitle: {
+    color: "#111827",
+    fontSize: "15px",
+    fontWeight: "900",
+    marginTop: "3px",
+    overflowWrap: "anywhere",
+  },
+
+  tournamentMatchStatus: {
+    borderRadius: "999px",
+    padding: "7px 10px",
+    background: "#fff7ed",
+    color: "#9a3412",
+    fontSize: "11px",
+    fontWeight: "900",
+  },
+
+  tournamentMatchStatusDone: {
+    background: "#dcfce7",
+    color: "#166534",
+  },
+
+  tournamentScoreRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
+
+  tournamentScoreInput: {
+    width: "72px",
+    boxSizing: "border-box",
+    borderRadius: "12px",
+    border: "1px solid #d1d5db",
+    padding: "10px",
+    fontSize: "13px",
+    fontWeight: "800",
+    textAlign: "center",
+    background: "#fff",
+  },
+
+  tournamentScoreDivider: {
+    color: "#64748b",
+    fontSize: "16px",
+    fontWeight: "900",
+  },
+
+  tournamentStandingsList: {
+    display: "grid",
+    gap: "14px",
+    minWidth: 0,
+  },
+
+  tournamentStandingsCard: {
+    border: "1px solid #dbe3ef",
+    borderRadius: "18px",
+    padding: "15px",
+    background: "#f7f9fc",
+    display: "grid",
+    gap: "13px",
+    boxShadow: "0 9px 20px rgba(15,23,42,0.055)",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentTableWrap: {
+    overflowX: "auto",
+    overflowY: "visible",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    WebkitOverflowScrolling: "touch",
+  },
+
+  tournamentTable: {
+    width: "100%",
+    minWidth: "680px",
+    borderCollapse: "collapse",
+    fontSize: "12px",
+    color: "#111827",
+    textAlign: "center",
+  },
+
+  tournamentTableHead: {
+    padding: "9px 8px",
+    color: "#64748b",
+    fontSize: "11px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+    borderBottom: "1px solid #dbe3ef",
+  },
+
+  tournamentTableTeam: {
+    padding: "10px 8px",
+    textAlign: "left",
+    fontWeight: "900",
+    borderBottom: "1px solid #e5e7eb",
+  },
+
+  tournamentTableCell: {
+    padding: "10px 8px",
+    borderBottom: "1px solid #e5e7eb",
+    fontWeight: "700",
+  },
+
+  tournamentTablePoints: {
+    padding: "10px 8px",
+    borderBottom: "1px solid #e5e7eb",
+    fontWeight: "900",
+    color: "#1d4ed8",
+  },
+
+  tournamentPublicRoster: {
+    display: "grid",
+    gap: "16px",
+    minWidth: 0,
+  },
+
+  tournamentPublicHeader: {
+    display: "grid",
+    gap: "7px",
+    color: "#111827",
+    fontSize: "13px",
+    padding: "15px",
+    borderRadius: "16px",
+    background: "#f7f9fc",
+    border: "1px solid #e2e8f0",
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
+
+  tournamentShareState: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "14px",
+    flexWrap: "wrap",
+    padding: "17px",
+    borderRadius: "18px",
+    background: "#fff7ed",
+    border: "1px solid #fed7aa",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentShareStateLive: {
+    background: "#ecfdf5",
+    border: "1px solid #a7f3d0",
+  },
+
+  tournamentShareTitle: {
+    color: "#111827",
+    fontSize: "18px",
+    fontWeight: "900",
+  },
+
+  tournamentMutedPanel: {
+    padding: "22px",
+    borderRadius: "16px",
+    background: "#f7f9fc",
+    border: "1px dashed #cbd5e1",
+    color: "#64748b",
+    fontSize: "13px",
+    fontWeight: "800",
+    textAlign: "center",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentEmptyState: {
+    minHeight: "320px",
+    borderRadius: "22px",
+    border: "1px dashed #cbd5e1",
+    background: "#fbfdff",
+    display: "grid",
+    alignContent: "center",
+    justifyItems: "center",
+    gap: "10px",
+    padding: "32px",
+    textAlign: "center",
   },
 
   smallSelect: {
