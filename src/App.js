@@ -941,10 +941,13 @@ function getDefaultTournamentConfig() {
   return {
     format: "group-stage",
     publicTheme: getDefaultPublicTheme(),
+    publicLiveTheme: getDefaultPublicLiveTheme(),
     courtBlocks: [],
     publicListingEnabled: false,
+    seriesScheduleMode: "fourFirst",
     publicTitle: "",
     publicSummary: "",
+    organizerName: "",
     description: "",
     country: "",
     city: "",
@@ -966,6 +969,13 @@ function getDefaultTournamentConfig() {
     publicLogoUrl: "",
     publicCardImageUrl: "",
     publicCardBackgroundUrl: "",
+    publicLiveLogoUrl: "",
+    publicLiveBackgroundUrl: "",
+    publicLivePrimaryColor: "",
+    publicLiveAccentColor: "",
+    publicLiveTextColor: "",
+    publicLiveCardColor: "",
+    publicLivePageBackground: "",
     themeColor: "#0f766e",
     accentColor: "#22c55e",
     maxTeams: "",
@@ -1008,6 +1018,14 @@ function getDefaultPublicTheme() {
   };
 }
 
+function getDefaultPublicLiveTheme() {
+  return {
+    ...PUBLIC_THEME_PRESETS["clean-white"],
+    preset: "clean-white",
+    mode: "preset",
+  };
+}
+
 function isValidHexColor(value) {
   return /^#[0-9a-f]{6}$/i.test(String(value || "").trim());
 }
@@ -1023,6 +1041,46 @@ function normalizePublicTheme(theme) {
   };
   const presetKey = String(themeWithAliases?.preset || defaultTheme.preset).trim();
   const preset = PUBLIC_THEME_PRESETS[presetKey] || PUBLIC_THEME_PRESETS["classic-green"];
+  const merged = {
+    ...defaultTheme,
+    ...preset,
+    ...themeWithAliases,
+    preset: PUBLIC_THEME_PRESETS[presetKey] ? presetKey : defaultTheme.preset,
+  };
+
+  [
+    "background",
+    "surface",
+    "panel",
+    "primary",
+    "accent",
+    "text",
+    "mutedText",
+    "border",
+  ].forEach((field) => {
+    if (!isValidHexColor(merged[field])) {
+      merged[field] = defaultTheme[field];
+    }
+  });
+
+  return {
+    ...merged,
+    pageBg: merged.background,
+    cardBg: merged.panel,
+  };
+}
+
+function normalizePublicLiveTheme(theme) {
+  const defaultTheme = getDefaultPublicLiveTheme();
+  const incomingTheme = theme || {};
+  const themeWithAliases = {
+    ...incomingTheme,
+    background: incomingTheme.background || incomingTheme.pageBg,
+    surface: incomingTheme.surface || incomingTheme.cardBg,
+    panel: incomingTheme.panel || incomingTheme.cardBg,
+  };
+  const presetKey = String(themeWithAliases?.preset || defaultTheme.preset).trim();
+  const preset = PUBLIC_THEME_PRESETS[presetKey] || PUBLIC_THEME_PRESETS["clean-white"];
   const merged = {
     ...defaultTheme,
     ...preset,
@@ -1101,6 +1159,38 @@ function getTournamentPublicCardImageUrl(tournament) {
   ).trim();
 }
 
+function getTournamentPublicOrganizerName(tournament) {
+  return String(
+    tournament?.organizerName || tournament?.publicOrganizerName || ""
+  ).trim();
+}
+
+function getTournamentPublicLiveTheme(tournament) {
+  const storedTheme = tournament?.publicLiveTheme || {};
+  const cardColor = tournament?.publicLiveCardColor || storedTheme.panel;
+
+  return normalizePublicLiveTheme({
+    ...storedTheme,
+    background:
+      tournament?.publicLivePageBackground ||
+      storedTheme.background ||
+      storedTheme.pageBg,
+    surface: cardColor || storedTheme.surface || storedTheme.cardBg,
+    panel: cardColor || storedTheme.panel || storedTheme.cardBg,
+    primary: tournament?.publicLivePrimaryColor || storedTheme.primary,
+    accent: tournament?.publicLiveAccentColor || storedTheme.accent,
+    text: tournament?.publicLiveTextColor || storedTheme.text,
+  });
+}
+
+function getTournamentPublicLiveLogoUrl(tournament) {
+  return String(tournament?.publicLiveLogoUrl || "").trim();
+}
+
+function getTournamentPublicLiveBackgroundUrl(tournament) {
+  return String(tournament?.publicLiveBackgroundUrl || "").trim();
+}
+
 function getPublicCardThemeStyle(theme, imageUrl = "") {
   const safeTheme = normalizePublicTheme(theme);
   const backgroundLayer = imageUrl
@@ -1161,6 +1251,7 @@ function applyTournamentDefaults(tournament) {
       accent: tournament.accentColor,
       ...(tournament.publicTheme || {}),
     }),
+    publicLiveTheme: getTournamentPublicLiveTheme(tournament),
     courtBlocks: Array.isArray(tournament.courtBlocks)
       ? tournament.courtBlocks
       : [],
@@ -1374,6 +1465,287 @@ function getTournamentSeries(tournament) {
   return [];
 }
 
+const DEFAULT_TOURNAMENT_SERIES_ID = "series-default";
+const SERIES_PUBLIC_STATUSES = ["hidden", "live", "completed"];
+
+function slugifySeriesId(value, fallback = "series") {
+  const slug = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return slug || fallback;
+}
+
+function getSeriesPlayersPerTeam(series) {
+  const parsed = Number(series?.playersPerTeam || series?.teamSize || 0);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : "";
+}
+
+function getSeriesDisplayName(series, language = "en") {
+  const name = String(series?.name || "").trim();
+  if (name) return name;
+
+  const playersPerTeam = getSeriesPlayersPerTeam(series);
+  if (playersPerTeam) return `${playersPerTeam}-${language === "no" ? "manns" : "side"}`;
+
+  return language === "no" ? "Klasse" : "Class";
+}
+
+function hasExplicitTournamentSeries(tournament) {
+  return Array.isArray(tournament?.series) && tournament.series.length > 0;
+}
+
+function normalizeSeriesPublicStatus(series, tournament) {
+  const rawStatus = String(series?.publicStatus || "").trim().toLowerCase();
+  if (SERIES_PUBLIC_STATUSES.includes(rawStatus)) return rawStatus;
+  return hasExplicitTournamentSeries(tournament) ? "hidden" : "live";
+}
+
+function normalizeTournamentSeriesItem(series, index, tournament, language = "en") {
+  const explicitId = String(series?.id || "").trim();
+  const name = String(series?.name || "").trim();
+  const playersPerTeam =
+    getSeriesPlayersPerTeam(series) || Number(tournament?.teamSize || 0) || "";
+  const fallbackName =
+    name ||
+    (playersPerTeam
+      ? `${playersPerTeam}-${language === "no" ? "manns" : "side"}`
+      : language === "no"
+        ? `Klasse ${index + 1}`
+        : `Class ${index + 1}`);
+  const id =
+    explicitId ||
+    `series-${slugifySeriesId(fallbackName, String(index + 1))}`;
+  const totalTeams = Math.max(
+    2,
+    Number(series?.totalTeams || series?.maxTeams || tournament?.totalTeams || 10)
+  );
+  const groupCount = Math.max(
+    1,
+    Number(series?.groupCount || tournament?.groupCount || 2)
+  );
+  const teamsPerGroup = Math.max(
+    1,
+    Number(
+      series?.teamsPerGroup ||
+        tournament?.teamsPerGroup ||
+        Math.ceil(totalTeams / groupCount)
+    )
+  );
+
+  return {
+    id,
+    name: fallbackName,
+    playersPerTeam,
+    teamSize: playersPerTeam,
+    format: series?.format || tournament?.format || "group-stage",
+    totalTeams,
+    maxTeams: series?.maxTeams || totalTeams,
+    minimumTeams: series?.minimumTeams || "",
+    groupCount,
+    teamsPerGroup,
+    qualifiersPerGroup: Math.max(
+      1,
+      Number(series?.qualifiersPerGroup || tournament?.qualifiersPerGroup || 2)
+    ),
+    groupMatchMinutes: Math.max(
+      1,
+      Number(series?.groupMatchMinutes || tournament?.groupMatchMinutes || 12)
+    ),
+    playoffMatchMinutes: Math.max(
+      1,
+      Number(series?.playoffMatchMinutes || tournament?.playoffMatchMinutes || 15)
+    ),
+    scheduleMode: series?.scheduleMode || "afterPrevious",
+    manualOrder: Number.isFinite(Number(series?.manualOrder))
+      ? Number(series.manualOrder)
+      : index,
+    groups: Array.isArray(series?.groups) ? series.groups : [],
+    matches: Array.isArray(series?.matches) ? series.matches : [],
+    standings: Array.isArray(series?.standings) ? series.standings : [],
+    knockout: series?.knockout || {},
+    publicStatus: normalizeSeriesPublicStatus(series, tournament),
+    prizeText: series?.prizeText || "",
+    feeText: series?.feeText || "",
+    startTime: series?.startTime || tournament?.startTime || "",
+    notes: series?.notes || "",
+  };
+}
+
+function getTournamentSeriesClasses(tournament, language = "en") {
+  const explicitSeries = Array.isArray(tournament?.series)
+    ? tournament.series
+    : [];
+
+  if (explicitSeries.length > 0) {
+    return explicitSeries.map((series, index) =>
+      normalizeTournamentSeriesItem(series, index, tournament, language)
+    );
+  }
+
+  const fallbackSeries = normalizeTournamentSeriesItem(
+    {
+      id: DEFAULT_TOURNAMENT_SERIES_ID,
+      name:
+        String(tournament?.className || "").trim() ||
+        String(tournament?.seriesName || "").trim() ||
+        "",
+      playersPerTeam: tournament?.playersPerTeam || tournament?.teamSize || "",
+      totalTeams: tournament?.totalTeams,
+      groupCount: tournament?.groupCount,
+      teamsPerGroup: tournament?.teamsPerGroup,
+      qualifiersPerGroup: tournament?.qualifiersPerGroup,
+      groupMatchMinutes: tournament?.groupMatchMinutes,
+      playoffMatchMinutes: tournament?.playoffMatchMinutes,
+      groups: Array.isArray(tournament?.groups) ? tournament.groups : [],
+      matches: Array.isArray(tournament?.matches) ? tournament.matches : [],
+      knockout: tournament?.knockout || {},
+      publicStatus: tournament?.publicStatus,
+    },
+    0,
+    tournament,
+    language
+  );
+
+  return [
+    {
+      ...fallbackSeries,
+      name:
+        fallbackSeries.name === (language === "no" ? "Klasse 1" : "Class 1")
+          ? language === "no"
+            ? "Hovedklasse"
+            : "Main class"
+          : fallbackSeries.name,
+      isDefaultSeries: true,
+    },
+  ];
+}
+
+function getOrderedTournamentSeriesClasses(tournament, language = "en") {
+  const classes = getTournamentSeriesClasses(tournament, language);
+  const mode = String(tournament?.seriesScheduleMode || "fourFirst");
+  const withIndex = classes.map((series, index) => ({ series, index }));
+
+  if (mode === "fourFirst" || mode === "fiveFirst") {
+    const preferred = mode === "fourFirst" ? 4 : 5;
+    const secondary = mode === "fourFirst" ? 5 : 4;
+    return withIndex
+      .sort((a, b) => {
+        const aSize = Number(a.series.playersPerTeam || 0);
+        const bSize = Number(b.series.playersPerTeam || 0);
+        const aRank = aSize === preferred ? 0 : aSize === secondary ? 1 : 2;
+        const bRank = bSize === preferred ? 0 : bSize === secondary ? 1 : 2;
+        if (aRank !== bRank) return aRank - bRank;
+        return a.index - b.index;
+      })
+      .map((item) => item.series);
+  }
+
+  if (mode === "manual") {
+    return withIndex
+      .sort((a, b) => {
+        const orderDelta =
+          Number(a.series.manualOrder || 0) - Number(b.series.manualOrder || 0);
+        return orderDelta || a.index - b.index;
+      })
+      .map((item) => item.series);
+  }
+
+  return classes;
+}
+
+function getTournamentSeriesById(tournament, seriesId, language = "en") {
+  const classes = getTournamentSeriesClasses(tournament, language);
+  return (
+    classes.find((series) => String(series.id) === String(seriesId)) ||
+    classes[0] ||
+    null
+  );
+}
+
+function getSeriesMatchesFromTournament(tournament, series) {
+  const rootMatches = Array.isArray(tournament?.matches) ? tournament.matches : [];
+  if (!hasExplicitTournamentSeries(tournament) || series?.isDefaultSeries) {
+    return rootMatches;
+  }
+
+  const filteredRootMatches = rootMatches.filter((match) => {
+    const matchSeriesId = String(match.seriesId || "");
+    if (matchSeriesId) return matchSeriesId === String(series?.id || "");
+    return String(series?.id || "") === DEFAULT_TOURNAMENT_SERIES_ID;
+  });
+  return filteredRootMatches.length
+    ? filteredRootMatches
+    : Array.isArray(series?.matches)
+      ? series.matches
+      : [];
+}
+
+function getTournamentForSeries(tournament, series, language = "en") {
+  const safeSeries = series || getTournamentSeriesById(tournament, "", language);
+  if (!safeSeries) return tournament || {};
+  const isDefault = safeSeries.isDefaultSeries || !hasExplicitTournamentSeries(tournament);
+
+  return {
+    ...(tournament || {}),
+    format: safeSeries.format || tournament?.format || "group-stage",
+    totalTeams: safeSeries.totalTeams || tournament?.totalTeams || 10,
+    groupCount: safeSeries.groupCount || tournament?.groupCount || 2,
+    teamsPerGroup: safeSeries.teamsPerGroup || tournament?.teamsPerGroup || 5,
+    qualifiersPerGroup:
+      safeSeries.qualifiersPerGroup || tournament?.qualifiersPerGroup || 2,
+    groupMatchMinutes:
+      safeSeries.groupMatchMinutes || tournament?.groupMatchMinutes || 12,
+    playoffMatchMinutes:
+      safeSeries.playoffMatchMinutes || tournament?.playoffMatchMinutes || 15,
+    groups: Array.isArray(safeSeries.groups) && safeSeries.groups.length
+      ? safeSeries.groups
+      : isDefault
+        ? Array.isArray(tournament?.groups)
+          ? tournament.groups
+          : []
+        : [],
+    matches: getSeriesMatchesFromTournament(tournament, safeSeries),
+    knockout:
+      safeSeries.knockout && Object.keys(safeSeries.knockout).length
+        ? safeSeries.knockout
+        : isDefault
+          ? tournament?.knockout || {}
+          : {},
+    activeSeriesId: safeSeries.id,
+    activeSeriesName: safeSeries.name,
+    activeSeries: safeSeries,
+  };
+}
+
+function syncTournamentSeriesFromRoot(tournament, language = "en") {
+  if (!hasExplicitTournamentSeries(tournament)) return tournament;
+  const classes = getTournamentSeriesClasses(tournament, language);
+  const rootMatches = Array.isArray(tournament?.matches) ? tournament.matches : [];
+
+  return {
+    ...tournament,
+    series: classes.map((series) => {
+      const seriesMatches = rootMatches.filter((match) => {
+        const matchSeriesId = String(match.seriesId || "");
+        if (matchSeriesId) return matchSeriesId === String(series.id);
+        return String(series.id) === DEFAULT_TOURNAMENT_SERIES_ID;
+      });
+
+      return {
+        ...series,
+        matches: seriesMatches.length
+          ? seriesMatches
+          : Array.isArray(series.matches)
+            ? series.matches
+            : [],
+      };
+    }),
+  };
+}
+
 function parseTournamentDateValue(value) {
   const raw = String(value || "").trim();
   if (!raw) return null;
@@ -1515,11 +1887,13 @@ function isTournamentPubliclyListed(tournament) {
 
 function prepareTournamentForBackend(tournament, overrides = {}) {
   const now = new Date().toISOString();
-  const prepared = applyTournamentDefaults({
-    ...tournament,
-    ...overrides,
-    updatedAt: overrides.updatedAt || now,
-  });
+  const prepared = syncTournamentSeriesFromRoot(
+    applyTournamentDefaults({
+      ...tournament,
+      ...overrides,
+      updatedAt: overrides.updatedAt || now,
+    })
+  );
 
   const tournamentId = getTournamentIdentity(prepared);
   if (!tournamentId) return prepared;
@@ -1836,6 +2210,29 @@ export default function App() {
     selectAnotherMatchToSwap: "Velg en annen kamp å bytte med",
     cancelSwap: "Avbryt",
     structureLabel: "Struktur",
+    classesLabel: "Klasser",
+    classNameLabel: "Klassenavn",
+    playersPerTeamLabel: "Spillere per lag",
+    allClassesLabel: "Alle klasser",
+    addClass: "Legg til klasse",
+    addFourManns: "Legg til 4-manns",
+    addFiveManns: "Legg til 5-manns",
+    scheduleOrderLabel: "Kampoppsett-rekkefølge",
+    scheduleFourFirst: "4-manns først, så 5-manns",
+    scheduleFiveFirst: "5-manns først, så 4-manns",
+    scheduleManualOrder: "Manuell rekkefølge",
+    scheduleAllowOverlap: "Tillat overlapp på ledige baner",
+    classVisibilityTitle: "Klassevisning",
+    classVisibilityHint: "Velg hvilke klasser publikum skal se i live-visningen.",
+    classStatusHidden: "Skjult",
+    classStatusLive: "Live",
+    classStatusCompleted: "Ferdig",
+    startClassLive: "Start live",
+    markClassFinished: "Marker ferdig",
+    classFinishedSuffix: "ferdig",
+    classLiveSuffix: "live",
+    classLiveNowSuffix: "er live nå",
+    noClassLiveYet: "Ingen klasse er live ennå.",
     timingLabel: "Tid",
     walkover: "Walkover",
     noShow: "Ikke møtt",
@@ -1844,13 +2241,17 @@ export default function App() {
     reasonNote: "Årsak / notat",
     clearResult: "Fjern resultat",
     publicDesign: "Offentlig design",
+    liveViewDesign: "Design for live-visning",
     resetTheme: "Tilbakestill tema",
     usePreset: "Bruk tema",
+    themePresetLabel: "Tema",
     pageBackground: "Sidebakgrunn",
     cardPanel: "Kort/panel",
     primaryColor: "Hovedfarge",
     accentColor: "Aksentfarge",
     textColor: "Tekstfarge",
+    liveLogoUrlLabel: "Logo bilde-URL",
+    liveBackgroundUrlLabel: "Bakgrunnsbilde-URL",
     invalidColor: "Ugyldig farge",
     preview: "Forhåndsvisning",
     publish: "Publiser",
@@ -1952,10 +2353,11 @@ export default function App() {
     playoffMinutesLabel: "Sluttspill min",
     breakMinutesLabel: "Pause min",
     buildGroupSlots: "Bygg gruppesloter",
-    buildUpdateSlots: "Bygg / oppdater sloter",
+    buildUpdateSlots: "Bygg klasseplasser",
     manualGroupEntryTitle: "Manuell gruppeinndata",
     manualGroupEntryHint: "Fyll slotene i samme rekkefølge som papirtrekket.",
     groupDrawTitle: "Gruppetrekning",
+    teamsGroupsTitle: "Lag / grupper",
     manualPaperOrderLabel: "Manuell papirrekkefølge",
     teamNamePlaceholder: "Lagnavn",
     playerNamePlaceholder: "Spillernavn",
@@ -2067,6 +2469,8 @@ export default function App() {
     promotionPreviewTitle: "Forhåndsvisning",
     publicTitleLabel: "Offentlig tittel",
     publicSummaryLabel: "Kort beskrivelse",
+    organizerDisplayNameLabel: "Arrang\u00f8rnavn som vises offentlig",
+    optionalPlaceholder: "Valgfritt",
     countryLabel: "Land",
     cityLabel: "By",
     venueLabel: "Hall / sted",
@@ -2196,6 +2600,29 @@ export default function App() {
     selectAnotherMatchToSwap: "Select another match to swap",
     cancelSwap: "Cancel",
     structureLabel: "Structure",
+    classesLabel: "Classes",
+    classNameLabel: "Class name",
+    playersPerTeamLabel: "Players per team",
+    allClassesLabel: "All classes",
+    addClass: "Add class",
+    addFourManns: "Add 4-manns",
+    addFiveManns: "Add 5-manns",
+    scheduleOrderLabel: "Schedule order",
+    scheduleFourFirst: "4-manns first, then 5-manns",
+    scheduleFiveFirst: "5-manns first, then 4-manns",
+    scheduleManualOrder: "Manual order",
+    scheduleAllowOverlap: "Allow overlap on free courts",
+    classVisibilityTitle: "Class visibility",
+    classVisibilityHint: "Choose which classes spectators can see on the live page.",
+    classStatusHidden: "Hidden",
+    classStatusLive: "Live",
+    classStatusCompleted: "Completed",
+    startClassLive: "Start live",
+    markClassFinished: "Mark finished",
+    classFinishedSuffix: "finished",
+    classLiveSuffix: "live",
+    classLiveNowSuffix: "live now",
+    noClassLiveYet: "No class is live yet.",
     timingLabel: "Timing",
     walkover: "Walkover",
     noShow: "No-show",
@@ -2204,13 +2631,17 @@ export default function App() {
     reasonNote: "Reason / note",
     clearResult: "Clear result",
     publicDesign: "Public design",
+    liveViewDesign: "Live view design",
     resetTheme: "Reset theme",
     usePreset: "Use preset",
+    themePresetLabel: "Theme preset",
     pageBackground: "Page background",
     cardPanel: "Card/panel",
     primaryColor: "Primary",
     accentColor: "Accent",
     textColor: "Text",
+    liveLogoUrlLabel: "Logo image URL",
+    liveBackgroundUrlLabel: "Background image URL",
     invalidColor: "Invalid color",
     preview: "Preview",
     publish: "Publish",
@@ -2284,7 +2715,7 @@ export default function App() {
     winsShort: "W",
     drawsShort: "D",
     lossesShort: "L",
-    pointsShort: "Pts",
+    pointsShort: "PTS",
     scoreForShort: "SF",
     scoreAgainstShort: "SA",
     scoreDiffShort: "GD",
@@ -2312,10 +2743,11 @@ export default function App() {
     playoffMinutesLabel: "Playoff Min",
     breakMinutesLabel: "Break Min",
     buildGroupSlots: "Build Group Slots",
-    buildUpdateSlots: "Build / Update Slots",
+    buildUpdateSlots: "Build class slots",
     manualGroupEntryTitle: "Manual Group Entry",
     manualGroupEntryHint: "Fill slots in the exact paper-draw order.",
     groupDrawTitle: "Group draw",
+    teamsGroupsTitle: "Teams / groups",
     manualPaperOrderLabel: "Manual paper-draw order",
     teamNamePlaceholder: "Team name",
     playerNamePlaceholder: "Player name",
@@ -2426,6 +2858,8 @@ export default function App() {
     promotionPreviewTitle: "Preview",
     publicTitleLabel: "Public title",
     publicSummaryLabel: "Short description",
+    organizerDisplayNameLabel: "Organizer display name",
+    optionalPlaceholder: "Optional",
     countryLabel: "Country",
     cityLabel: "City",
     venueLabel: "Venue / hall",
@@ -2518,6 +2952,10 @@ export default function App() {
   const [editingTournamentTeamId, setEditingTournamentTeamId] = useState("");
   const [editingTournamentTeamName, setEditingTournamentTeamName] = useState("");
   const [activeTournamentView, setActiveTournamentView] = useState("overview");
+  const [activeTournamentSeriesFilter, setActiveTournamentSeriesFilter] =
+    useState("all");
+  const [activeTournamentSetupSeriesId, setActiveTournamentSetupSeriesId] =
+    useState("");
   const [matchFinishWarnings, setMatchFinishWarnings] = useState({});
   const tournamentAutosaveTimerRef = useRef(null);
   const manualGroupEditingRef = useRef(false);
@@ -2541,6 +2979,8 @@ export default function App() {
     mode: "delay",
   });
   const [publicThemeColorErrors, setPublicThemeColorErrors] = useState({});
+  const [publicLiveThemeColorErrors, setPublicLiveThemeColorErrors] =
+    useState({});
   const [promotionVisibilityAction, setPromotionVisibilityAction] =
     useState("idle");
   const [promotionVisibilityError, setPromotionVisibilityError] = useState("");
@@ -3821,12 +4261,21 @@ export default function App() {
     );
   }
 
-  const buildManualGroups = useCallback((tournament) => {
-    const safeGroupCount = Math.max(1, Number(tournament?.groupCount || 2));
-    const safeTeamsPerGroup = Math.max(1, Number(tournament?.teamsPerGroup || 5));
-    const existingGroups = Array.isArray(tournament?.groups)
-      ? tournament.groups
-      : [];
+  const buildManualGroups = useCallback((tournament, series = null) => {
+    const safeGroupCount = Math.max(
+      1,
+      Number(series?.groupCount || tournament?.groupCount || 2)
+    );
+    const safeTeamsPerGroup = Math.max(
+      1,
+      Number(series?.teamsPerGroup || tournament?.teamsPerGroup || 5)
+    );
+    const existingGroups = Array.isArray(series?.groups)
+      ? series.groups
+      : Array.isArray(tournament?.groups)
+        ? tournament.groups
+        : [];
+    const shouldPrefixGroupIds = Boolean(series?.id && !series?.isDefaultSeries);
 
     return Array.from({ length: safeGroupCount }, (_, groupIndex) => {
       const code = getTournamentGroupCode(groupIndex);
@@ -3837,9 +4286,15 @@ export default function App() {
       const existingTeams = Array.isArray(existingGroup.teams)
         ? existingGroup.teams
         : [];
+      const groupId =
+        existingGroup.id ||
+        (shouldPrefixGroupIds ? `${series.id}-g-${code}` : `g-${code}`);
 
       return {
-        id: `g-${code}`,
+        ...existingGroup,
+        id: groupId,
+        seriesId: series?.id || existingGroup.seriesId || "",
+        seriesName: series?.name || existingGroup.seriesName || "",
         code,
         name: `${language === "no" ? "Gruppe" : "Group"} ${code}`,
         teams: Array.from({ length: safeTeamsPerGroup }, (_, slotIndex) => {
@@ -3850,8 +4305,11 @@ export default function App() {
             {};
 
           return {
-            id: existingTeam.id || `slot-${slot}`,
+            ...existingTeam,
+            id: existingTeam.id || `${groupId}-slot-${slot}`,
             slot,
+            seriesId: series?.id || existingTeam.seriesId || "",
+            seriesName: series?.name || existingTeam.seriesName || "",
             name: existingTeam.name || "",
             club: existingTeam.club || "",
           };
@@ -3870,7 +4328,10 @@ export default function App() {
     }
   }
 
-  function getTournamentGroupsForDisplay(tournament) {
+  function getTournamentGroupsForDisplay(tournament, series = null) {
+    if (series) {
+      return Array.isArray(series.groups) ? series.groups : [];
+    }
     return Array.isArray(tournament?.groups) ? tournament.groups : [];
   }
 
@@ -3881,8 +4342,35 @@ export default function App() {
       prev.map((tournament) => {
         if (tournament.id !== activeTournament.id) return tournament;
 
-        const groups = buildManualGroups(tournament);
-        const groupCount = Math.max(1, Number(tournament.groupCount || 2));
+        const selectedSeries = getTournamentSeriesById(
+          tournament,
+          activeTournamentSetupSeriesId,
+          language
+        );
+
+        if (hasExplicitTournamentSeries(tournament) && selectedSeries) {
+          const groups = buildManualGroups(tournament, selectedSeries);
+          const groupCount = Math.max(1, Number(selectedSeries.groupCount || 2));
+
+          return {
+            ...tournament,
+            series: (tournament.series || []).map((series) =>
+              String(series.id) !== String(selectedSeries.id)
+                ? series
+                : {
+                    ...series,
+                    groups,
+                    bracketSize: Math.max(2, groupCount * 2),
+                  }
+            ),
+          };
+        }
+
+        const groups = buildManualGroups(tournament, selectedSeries);
+        const groupCount = Math.max(
+          1,
+          Number(selectedSeries?.groupCount || tournament.groupCount || 2)
+        );
 
         return {
           ...tournament,
@@ -3904,8 +4392,17 @@ export default function App() {
         tournament.id !== activeTournament.id
           ? tournament
           : (() => {
-              const existingGroups = Array.isArray(tournament.groups)
-                ? tournament.groups
+              const selectedSeries = getTournamentSeriesById(
+                tournament,
+                activeTournamentSetupSeriesId,
+                language
+              );
+              const sourceGroups =
+                hasExplicitTournamentSeries(tournament) && selectedSeries
+                  ? selectedSeries.groups
+                  : tournament.groups;
+              const existingGroups = Array.isArray(sourceGroups)
+                ? sourceGroups
                 : [];
               if (!existingGroups[groupIndex]) return tournament;
 
@@ -3930,6 +4427,20 @@ export default function App() {
                 };
               });
 
+              if (hasExplicitTournamentSeries(tournament) && selectedSeries) {
+                return {
+                  ...tournament,
+                  series: (tournament.series || []).map((series) =>
+                    String(series.id) !== String(selectedSeries.id)
+                      ? series
+                      : {
+                          ...series,
+                          groups,
+                        }
+                  ),
+                };
+              }
+
               return {
                 ...tournament,
                 groups,
@@ -3939,31 +4450,155 @@ export default function App() {
     );
   }
 
-  function addTournamentSeries() {
+  function addTournamentSeries(preset = {}) {
     if (!activeTournament) return;
+
+    const presetName = String(preset.name || "").trim();
+    const presetPlayersPerTeam = Number(
+      preset.playersPerTeam || preset.teamSize || 0
+    );
+    const existingPresetSeries =
+      presetName || presetPlayersPerTeam
+        ? getTournamentSeriesClasses(activeTournament, language).find((series) => {
+            const seriesName = String(series.name || "").trim().toLowerCase();
+            const seriesPlayersPerTeam = Number(
+              series.playersPerTeam || series.teamSize || 0
+            );
+
+            return (
+              (presetName &&
+                seriesName === presetName.toLowerCase()) ||
+              (presetPlayersPerTeam > 0 &&
+                seriesPlayersPerTeam === presetPlayersPerTeam)
+            );
+          })
+        : null;
+
+    if (existingPresetSeries) {
+      setActiveTournamentSetupSeriesId(existingPresetSeries.id);
+      setActiveTournamentSeriesFilter((current) =>
+        current === "all" ? current : existingPresetSeries.id
+      );
+      return;
+    }
+
+    const nextSeriesId =
+      preset.id ||
+      `series-${slugifySeriesId(
+        presetName || `${presetPlayersPerTeam || 4}-manns`,
+        Date.now().toString(36)
+      )}`;
+    setActiveTournamentSetupSeriesId(nextSeriesId);
+    setActiveTournamentSeriesFilter((current) =>
+      current === "all" ? current : nextSeriesId
+    );
 
     setTournaments((prev) =>
       prev.map((tournament) =>
         tournament.id !== activeTournament.id
           ? tournament
-          : {
-              ...tournament,
-              series: [
-                ...(Array.isArray(tournament.series) ? tournament.series : []),
+          : (() => {
+              const storedSeries = Array.isArray(tournament.series)
+                ? tournament.series
+                : [];
+              const hasRootClassData =
+                (Array.isArray(tournament.groups) && tournament.groups.length > 0) ||
+                (Array.isArray(tournament.matches) && tournament.matches.length > 0) ||
+                Boolean(
+                  tournament.knockout &&
+                    Object.keys(tournament.knockout || {}).some((key) =>
+                      Array.isArray(tournament.knockout[key])
+                        ? tournament.knockout[key].length > 0
+                        : Boolean(tournament.knockout[key])
+                    )
+                );
+              const existingSeries =
+                storedSeries.length === 0 && hasRootClassData
+                  ? [
+                      normalizeTournamentSeriesItem(
+                        {
+                          id: DEFAULT_TOURNAMENT_SERIES_ID,
+                          name:
+                            tournament.className ||
+                            tournament.seriesName ||
+                            tournamentText.seriesLabel,
+                          playersPerTeam:
+                            tournament.playersPerTeam || tournament.teamSize || "",
+                          totalTeams: tournament.totalTeams,
+                          groupCount: tournament.groupCount,
+                          teamsPerGroup: tournament.teamsPerGroup,
+                          qualifiersPerGroup: tournament.qualifiersPerGroup,
+                          groupMatchMinutes: tournament.groupMatchMinutes,
+                          playoffMatchMinutes: tournament.playoffMatchMinutes,
+                          groups: Array.isArray(tournament.groups)
+                            ? tournament.groups
+                            : [],
+                          matches: Array.isArray(tournament.matches)
+                            ? tournament.matches
+                            : [],
+                          knockout: tournament.knockout || {},
+                        },
+                        0,
+                        tournament,
+                        language
+                      ),
+                    ]
+                  : storedSeries;
+              const normalizedSeries = normalizeTournamentSeriesItem(
                 {
-                  id: `series-${Date.now()}`,
-                  name: "",
-                  teamSize: 4,
+                  id: nextSeriesId,
+                  name: preset.name || "",
+                  playersPerTeam: preset.playersPerTeam || preset.teamSize || 4,
+                  teamSize: preset.playersPerTeam || preset.teamSize || 4,
+                  totalTeams: preset.totalTeams || tournament.totalTeams || 10,
+                  groupCount: preset.groupCount || tournament.groupCount || 2,
+                  teamsPerGroup:
+                    preset.teamsPerGroup || tournament.teamsPerGroup || 5,
+                  qualifiersPerGroup:
+                    preset.qualifiersPerGroup ||
+                    tournament.qualifiersPerGroup ||
+                    2,
+                  groupMatchMinutes:
+                    preset.groupMatchMinutes ||
+                    tournament.groupMatchMinutes ||
+                    12,
+                  playoffMatchMinutes:
+                    preset.playoffMatchMinutes ||
+                    tournament.playoffMatchMinutes ||
+                    15,
                   format: "group-stage",
-                  maxTeams: "",
+                  maxTeams: preset.maxTeams || tournament.totalTeams || "",
                   minimumTeams: "",
                   prizeText: "",
                   feeText: "",
                   startTime: tournament.startTime || "",
                   notes: "",
+                  groups: Array.isArray(preset.groups) ? preset.groups : [],
+                  matches: [],
+                  knockout: {},
+                  scheduleMode: "afterPrevious",
+                  publicStatus: preset.publicStatus || "hidden",
                 },
-              ],
-            }
+                existingSeries.length,
+                tournament,
+                language
+              );
+
+              return {
+                ...tournament,
+                seriesScheduleMode: tournament.seriesScheduleMode || "fourFirst",
+                series: [
+                  ...existingSeries,
+                  {
+                    ...normalizedSeries,
+                    groups:
+                      normalizedSeries.groups.length > 0
+                        ? normalizedSeries.groups
+                        : buildManualGroups(tournament, normalizedSeries),
+                  },
+                ],
+              };
+            })()
       )
     );
   }
@@ -3981,11 +4616,46 @@ export default function App() {
                 ? tournament.series
                 : []
               ).map((series) =>
-                series.id === seriesId ? { ...series, ...patch } : series
+                series.id === seriesId
+                  ? normalizeTournamentSeriesItem(
+                      { ...series, ...patch },
+                      0,
+                      tournament,
+                      language
+                    )
+                  : series
               ),
             }
       )
     );
+  }
+
+  function updateSelectedTournamentClassConfig(patch) {
+    if (!activeTournament) return;
+    const selectedSeries = getTournamentSeriesById(
+      activeTournament,
+      activeTournamentSetupSeriesId,
+      language
+    );
+
+    if (hasExplicitTournamentSeries(activeTournament) && selectedSeries) {
+      updateTournamentSeries(selectedSeries.id, patch);
+      return;
+    }
+
+    const rootPatch = { ...patch };
+    if (Object.prototype.hasOwnProperty.call(rootPatch, "name")) {
+      rootPatch.className = rootPatch.name;
+      delete rootPatch.name;
+    }
+    if (Object.prototype.hasOwnProperty.call(rootPatch, "playersPerTeam")) {
+      rootPatch.teamSize = rootPatch.playersPerTeam;
+    }
+    if (Object.prototype.hasOwnProperty.call(rootPatch, "teamSize")) {
+      rootPatch.playersPerTeam = rootPatch.teamSize;
+    }
+
+    updateActiveTournament(rootPatch);
   }
 
   function removeTournamentSeries(seriesId) {
@@ -4001,9 +4671,27 @@ export default function App() {
                 ? tournament.series
                 : []
               ).filter((series) => series.id !== seriesId),
+              matches: (Array.isArray(tournament.matches)
+                ? tournament.matches
+                : []
+              ).filter((match) => String(match.seriesId || "") !== String(seriesId)),
             }
       )
     );
+  }
+
+  function updateTournamentSeriesPublicStatus(seriesId, publicStatus) {
+    if (!activeTournament) return;
+    const safeStatus = SERIES_PUBLIC_STATUSES.includes(publicStatus)
+      ? publicStatus
+      : "hidden";
+
+    if (!hasExplicitTournamentSeries(activeTournament)) {
+      updateActiveTournament({ publicStatus: safeStatus });
+      return;
+    }
+
+    updateTournamentSeries(seriesId, { publicStatus: safeStatus });
   }
 
   function getTournamentStageOrder(stage) {
@@ -4247,10 +4935,6 @@ export default function App() {
     return parsed === null ? 0 : parsed;
   }
 
-  function getMatchScoreDisplayValue(value) {
-    return hasScoreValue(value) ? String(value) : "0";
-  }
-
   function isMatchCompleted(match) {
     return Boolean(
       String(match?.status || "").toLowerCase() === "completed" ||
@@ -4293,6 +4977,7 @@ export default function App() {
     if (!match) return "";
 
     const stage = String(match.stage || "group").trim().toLowerCase();
+    const seriesKey = String(match.seriesId || "").trim().toLowerCase();
     const groupKey = String(match.groupId || match.groupCode || "")
       .trim()
       .toLowerCase();
@@ -4301,7 +4986,9 @@ export default function App() {
       .filter(Boolean)
       .sort();
 
-    return teams.length === 2 ? `${stage}|${groupKey}|${teams.join("|")}` : "";
+    return teams.length === 2
+      ? `${seriesKey}|${stage}|${groupKey}|${teams.join("|")}`
+      : "";
   }
 
   function getTournamentMatchLookup(tournament) {
@@ -4350,6 +5037,21 @@ export default function App() {
       scheduleCourt: savedMatch.scheduleCourt ?? item.scheduleCourt,
       scheduleOrder: savedMatch.scheduleOrder ?? item.scheduleOrder,
       manualOrder: savedMatch.manualOrder ?? item.manualOrder,
+      order: savedMatch.order ?? savedMatch.scheduleOrder ?? item.order,
+      index: savedMatch.index ?? savedMatch.scheduleOrder ?? item.index,
+      court: savedMatch.court ?? savedMatch.scheduleCourt ?? item.court,
+      startTime:
+        savedMatch.startTime || savedMatch.scheduleTime || item.startTime || "",
+      durationMin:
+        savedMatch.durationMin || savedMatch.duration || item.durationMin || "",
+      seriesId: item.seriesId || savedMatch.seriesId || "",
+      seriesName: item.seriesName || savedMatch.seriesName || "",
+      playersPerTeam: item.playersPerTeam || savedMatch.playersPerTeam || "",
+      phase: item.phase || savedMatch.phase || item.stage || savedMatch.stage,
+      teamAId: item.teamAId || savedMatch.teamAId,
+      teamBId: item.teamBId || savedMatch.teamBId,
+      teamA: String(item.teamA || "").trim() ? item.teamA : savedMatch.teamA,
+      teamB: String(item.teamB || "").trim() ? item.teamB : savedMatch.teamB,
       courtIndex: savedMatch.courtIndex ?? item.courtIndex,
       courtName: savedMatch.courtName || item.courtName,
       round: item.round || savedMatch.round,
@@ -4466,9 +5168,12 @@ export default function App() {
         scheduleBatch: batchIndex + 1,
         batch: batchIndex + 1,
         scheduleCourt: courtIndex + 1,
+        court: courtIndex + 1,
         courtIndex,
         courtName: `Court ${courtIndex + 1}`,
         scheduleOrder,
+        order: scheduleOrder,
+        index: scheduleOrder,
       };
     });
 
@@ -4521,6 +5226,74 @@ export default function App() {
         [field]: value,
       }),
     });
+  }
+
+  function getPublicLiveThemePatch(theme) {
+    const safeTheme = normalizePublicLiveTheme(theme);
+
+    return {
+      publicLiveTheme: safeTheme,
+      publicLivePageBackground: safeTheme.background,
+      publicLiveCardColor: safeTheme.panel,
+      publicLivePrimaryColor: safeTheme.primary,
+      publicLiveAccentColor: safeTheme.accent,
+      publicLiveTextColor: safeTheme.text,
+    };
+  }
+
+  function applyPublicLiveThemePreset(presetKey) {
+    if (!activeTournament) return;
+    const fallbackPresetKey = "clean-white";
+    const preset =
+      PUBLIC_THEME_PRESETS[presetKey] ||
+      PUBLIC_THEME_PRESETS[fallbackPresetKey];
+    const nextTheme = normalizePublicLiveTheme({
+      ...preset,
+      preset: PUBLIC_THEME_PRESETS[presetKey] ? presetKey : fallbackPresetKey,
+      mode: presetKey === "club-custom" ? "custom" : "preset",
+    });
+
+    updateActiveTournament(getPublicLiveThemePatch(nextTheme));
+    setPublicLiveThemeColorErrors({});
+  }
+
+  function updatePublicLiveThemeField(field, value) {
+    if (!activeTournament) return;
+
+    const fieldMap = {
+      background: "publicLivePageBackground",
+      panel: "publicLiveCardColor",
+      primary: "publicLivePrimaryColor",
+      accent: "publicLiveAccentColor",
+      text: "publicLiveTextColor",
+    };
+    const themePatch = {
+      ...getTournamentPublicLiveTheme(activeTournament),
+      preset: "club-custom",
+      mode: "custom",
+      [field]: value,
+      ...(field === "panel" ? { surface: value } : {}),
+    };
+
+    if (!isValidHexColor(value)) {
+      setPublicLiveThemeColorErrors((prev) => ({
+        ...prev,
+        [field]: true,
+      }));
+      updateActiveTournament({
+        publicLiveTheme: themePatch,
+        ...(fieldMap[field] ? { [fieldMap[field]]: value } : {}),
+      });
+      return;
+    }
+
+    setPublicLiveThemeColorErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+    updateActiveTournament(getPublicLiveThemePatch(themePatch));
   }
 
   function getMatchResultTypeLabel(match) {
@@ -4621,18 +5394,20 @@ export default function App() {
       .replace(/^schedule-/, "")
       .toLowerCase();
 
-    if (rawId.startsWith("qf-") || rawId.startsWith("ko-")) {
+    if (rawId.startsWith("qf-") || rawId.includes("-qf-") || rawId.startsWith("ko-")) {
       return "quarterFinals";
     }
-    if (rawId.startsWith("sf-")) return "semiFinals";
-    if (rawId.startsWith("final-")) return "final";
-    if (rawId.startsWith("third-place")) return "thirdPlace";
+    if (rawId.startsWith("sf-") || rawId.includes("-sf-")) return "semiFinals";
+    if (rawId.startsWith("final-") || rawId.includes("-final-")) return "final";
+    if (rawId.startsWith("third-place") || rawId.includes("-third-place")) return "thirdPlace";
 
     return "";
   }
 
   function getKnockoutBaseMatchId(match) {
-    return String(match?.id || match?.matchId || "").replace(/^schedule-/, "");
+    const rawId = String(match?.id || match?.matchId || "").replace(/^schedule-/, "");
+    const knownMatchId = rawId.match(/(third-place-\d+|final-\d+|sf-\d+|qf-\d+|ko-\d+)/i);
+    return knownMatchId ? knownMatchId[1] : rawId;
   }
 
   function applyCompletedKnockoutWinner(knockout, completedMatch) {
@@ -4752,6 +5527,7 @@ export default function App() {
         courtCount: 1,
         groups: [],
         knockoutPreview: {},
+        seriesPlans: [],
       };
     }
 
@@ -4771,51 +5547,13 @@ export default function App() {
       0,
       Number(safeTournament.breakMinutes || 0)
     );
-    const groups =
-      Array.isArray(safeTournament.groups) && safeTournament.groups.length
-        ? safeTournament.groups
-        : buildManualGroups(safeTournament);
-    const knockoutPreview = buildManualKnockout({
-      ...safeTournament,
-      groups,
-    });
+    const hasExplicitSeries = hasExplicitTournamentSeries(safeTournament);
+    const orderedSeries = getOrderedTournamentSeriesClasses(
+      safeTournament,
+      language
+    );
     const matchLookup = getTournamentMatchLookup(safeTournament);
 
-    const groupScheduleQueues = groups
-      .map((group, groupIndex) => {
-        const groupCode = group.code || getTournamentGroupCode(groupIndex);
-        const groupColor = getTournamentGroupColor(groupCode);
-        const queue = buildTournamentRoundRobinRounds({
-          ...group,
-          code: groupCode,
-        }).flatMap((roundMatches, roundIndex) =>
-          roundMatches.map((match, matchIndex) => ({
-            id: `schedule-${group.id}-${roundIndex}-${matchIndex}`,
-            stage: "group",
-            groupId: group.id,
-            groupName: group.name,
-            groupCode,
-            groupColor,
-            roundNumber: roundIndex + 1,
-            teamAId: match.teamAId,
-            teamBId: match.teamBId,
-            teamA: match.teamA,
-            teamB: match.teamB,
-            sourceA: match.sourceA,
-            sourceB: match.sourceB,
-          }))
-        );
-
-        return {
-          groupId: group.id,
-          groupCode,
-          queue,
-        };
-      })
-      .filter((groupQueue) => groupQueue.queue.length > 0);
-
-    const balancedGroupBatches = [];
-    let groupRotationStart = 0;
     const pickNextScheduleMatch = (
       queues,
       rotationStart,
@@ -4834,112 +5572,247 @@ export default function App() {
         const matchIndex = groupQueue.queue.findIndex(
           (match) =>
             allowTeamRepeat ||
-            (!usedTeams.has(match.teamA) && !usedTeams.has(match.teamB))
+            (!usedTeams.has(`${match.seriesId}:${match.teamA}`) &&
+              !usedTeams.has(`${match.seriesId}:${match.teamB}`))
         );
         if (matchIndex === -1) continue;
 
         const [match] = groupQueue.queue.splice(matchIndex, 1);
         batchItems.push(match);
         usedGroups.add(groupQueue.groupId);
-        usedTeams.add(match.teamA);
-        usedTeams.add(match.teamB);
+        usedTeams.add(`${match.seriesId}:${match.teamA}`);
+        usedTeams.add(`${match.seriesId}:${match.teamB}`);
         return true;
       }
 
       return false;
     };
 
-    while (groupScheduleQueues.some((groupQueue) => groupQueue.queue.length)) {
-      const batchItems = [];
-      const usedGroups = new Set();
-      const usedTeams = new Set();
+    const buildSeriesPlan = (series, seriesIndex) => {
+      const seriesTournament = getTournamentForSeries(
+        safeTournament,
+        series,
+        language
+      );
+      const groups =
+        Array.isArray(seriesTournament.groups) &&
+        seriesTournament.groups.length
+          ? seriesTournament.groups
+          : buildManualGroups(safeTournament, series);
+      const knockoutPreview = buildManualKnockout({
+        ...seriesTournament,
+        groups,
+      });
+      const groupDuration = Math.max(
+        1,
+        Number(series.groupMatchMinutes || scheduleGroupMinutes)
+      );
+      const playoffDuration = Math.max(
+        1,
+        Number(series.playoffMatchMinutes || schedulePlayoffMinutes)
+      );
+      const groupScheduleQueues = groups
+        .map((group, groupIndex) => {
+          const groupCode = group.code || getTournamentGroupCode(groupIndex);
+          const groupColor = getTournamentGroupColor(groupCode);
+          const queue = buildTournamentRoundRobinRounds({
+            ...group,
+            code: groupCode,
+          }).flatMap((roundMatches, roundIndex) =>
+            roundMatches.map((match, matchIndex) => {
+              const legacyId = `schedule-${group.id}-${roundIndex}-${matchIndex}`;
+              const explicitId = `schedule-${series.id}-${group.id}-${roundIndex}-${matchIndex}`;
+              return {
+                id: hasExplicitSeries ? explicitId : legacyId,
+                seriesId: hasExplicitSeries ? series.id : "",
+                seriesName: hasExplicitSeries ? series.name : "",
+                playersPerTeam: series.playersPerTeam || "",
+                phase: "group",
+                stage: "group",
+                groupId: group.id,
+                groupName: group.name,
+                groupCode,
+                groupColor,
+                roundNumber: roundIndex + 1,
+                round: hasExplicitSeries
+                  ? `${series.name} - ${group.name} R${roundIndex + 1}`
+                  : `${group.name} R${roundIndex + 1}`,
+                teamAId: match.teamAId,
+                teamBId: match.teamBId,
+                teamA: match.teamA,
+                teamB: match.teamB,
+                sourceA: match.sourceA,
+                sourceB: match.sourceB,
+              };
+            })
+          );
 
-      while (batchItems.length < scheduleCourtCount) {
-        if (
-          pickNextScheduleMatch(
-            groupScheduleQueues,
-            groupRotationStart,
-            usedGroups,
-            usedTeams,
-            batchItems,
-            false,
-            false
-          )
-        ) {
-          continue;
+          return {
+            groupId: `${series.id}:${group.id}`,
+            groupCode,
+            queue,
+          };
+        })
+        .filter((groupQueue) => groupQueue.queue.length > 0);
+
+      const balancedGroupBatches = [];
+      let groupRotationStart = 0;
+      while (groupScheduleQueues.some((groupQueue) => groupQueue.queue.length)) {
+        const batchItems = [];
+        const usedGroups = new Set();
+        const usedTeams = new Set();
+
+        while (batchItems.length < scheduleCourtCount) {
+          if (
+            pickNextScheduleMatch(
+              groupScheduleQueues,
+              groupRotationStart,
+              usedGroups,
+              usedTeams,
+              batchItems,
+              false,
+              false
+            ) ||
+            pickNextScheduleMatch(
+              groupScheduleQueues,
+              groupRotationStart,
+              usedGroups,
+              usedTeams,
+              batchItems,
+              true,
+              false
+            ) ||
+            pickNextScheduleMatch(
+              groupScheduleQueues,
+              groupRotationStart,
+              usedGroups,
+              usedTeams,
+              batchItems,
+              true,
+              true
+            )
+          ) {
+            continue;
+          }
+          break;
         }
-        if (
-          pickNextScheduleMatch(
-            groupScheduleQueues,
-            groupRotationStart,
-            usedGroups,
-            usedTeams,
-            batchItems,
-            true,
-            false
-          )
-        ) {
-          continue;
-        }
-        if (
-          pickNextScheduleMatch(
-            groupScheduleQueues,
-            groupRotationStart,
-            usedGroups,
-            usedTeams,
-            batchItems,
-            true,
-            true
-          )
-        ) {
-          continue;
-        }
-        break;
+
+        if (!batchItems.length) break;
+        balancedGroupBatches.push(batchItems);
+        groupRotationStart =
+          (groupRotationStart + 1) % Math.max(1, groupScheduleQueues.length);
       }
 
-      if (!batchItems.length) break;
-      balancedGroupBatches.push(batchItems);
-      groupRotationStart =
-        (groupRotationStart + 1) % Math.max(1, groupScheduleQueues.length);
-    }
+      const scheduleKnockoutMatches = getOrderedKnockoutScheduleMatches(
+        knockoutPreview,
+        seriesTournament
+      );
+      const knockoutScheduleItems = scheduleKnockoutMatches.map((match) => {
+        const baseId = `schedule-${match.id}`;
+        const explicitId = `schedule-${series.id}-${match.id}`;
+        const phase =
+          match.stage === "third_place"
+            ? "thirdPlace"
+            : match.stage === "semifinal"
+              ? "semifinal"
+              : match.stage === "final"
+                ? "final"
+                : match.stage || "knockout";
+        return {
+          id: hasExplicitSeries ? explicitId : baseId,
+          seriesId: hasExplicitSeries ? series.id : "",
+          seriesName: hasExplicitSeries ? series.name : "",
+          playersPerTeam: series.playersPerTeam || "",
+          phase,
+          stage: match.stage || "knockout",
+          stageOrder: match.stageOrder || getTournamentStageOrder(match.stage),
+          round: hasExplicitSeries ? `${series.name} - ${match.round}` : match.round,
+          teamA: match.sourceA || match.teamA,
+          teamB: match.sourceB || match.teamB,
+          sourceA: match.sourceA,
+          sourceB: match.sourceB,
+        };
+      });
+      const knockoutScheduleBatches = buildKnockoutScheduleBatches(
+        knockoutScheduleItems,
+        scheduleCourtCount
+      );
 
-    const scheduleKnockoutMatches = getOrderedKnockoutScheduleMatches(
-      knockoutPreview,
-      safeTournament
-    );
-    const knockoutScheduleItems = scheduleKnockoutMatches.map((match) => ({
-      id: `schedule-${match.id}`,
-      stage: match.stage || "knockout",
-      stageOrder: match.stageOrder || getTournamentStageOrder(match.stage),
-      round: match.round,
-      teamA: match.sourceA || match.teamA,
-      teamB: match.sourceB || match.teamB,
-      sourceA: match.sourceA,
-      sourceB: match.sourceB,
-    }));
-    const knockoutScheduleBatches = buildKnockoutScheduleBatches(
-      knockoutScheduleItems,
-      scheduleCourtCount
-    );
+      return {
+        series,
+        seriesIndex,
+        groups,
+        knockoutPreview,
+        batches: [
+          ...balancedGroupBatches.map((items) => ({
+            stage: "group",
+            seriesId: series.id,
+            duration: groupDuration,
+            items,
+          })),
+          ...knockoutScheduleBatches.map((items) => ({
+            stage: "knockout",
+            seriesId: series.id,
+            duration: playoffDuration,
+            items,
+          })),
+        ],
+      };
+    };
 
-    const scheduleBatches = [
-      ...balancedGroupBatches.map((items) => ({
-        stage: "group",
-        items,
-      })),
-      ...knockoutScheduleBatches.map((items) => ({
-        stage: "knockout",
-        items,
-      })),
-    ];
+    const seriesPlans = orderedSeries.map(buildSeriesPlan);
+    const mergePlansWithOverlap = (plans) => {
+      const pending = plans.map((plan) => [...plan.batches]);
+      const merged = [];
+      while (pending.some((batches) => batches.length > 0)) {
+        const items = [];
+        let duration = 0;
+        let stage = "group";
+
+        pending.forEach((batches) => {
+          if (!batches.length || items.length >= scheduleCourtCount) return;
+          const nextBatch = batches[0];
+          const available = scheduleCourtCount - items.length;
+          items.push(...nextBatch.items.slice(0, available));
+          duration = Math.max(duration, Number(nextBatch.duration || 0));
+          stage = nextBatch.stage === "knockout" ? "knockout" : stage;
+          if (nextBatch.items.length <= available) {
+            batches.shift();
+          } else {
+            batches[0] = {
+              ...nextBatch,
+              items: nextBatch.items.slice(available),
+            };
+          }
+        });
+
+        if (!items.length) break;
+        merged.push({
+          stage,
+          duration: duration || scheduleGroupMinutes,
+          items,
+        });
+      }
+      return merged;
+    };
+
+    const scheduleBatches =
+      safeTournament.seriesScheduleMode === "overlap"
+        ? mergePlansWithOverlap(seriesPlans)
+        : seriesPlans.flatMap((plan) => plan.batches);
     const batches = [];
     let scheduleCursor = parseTournamentScheduleStart(safeTournament.startTime);
 
     scheduleBatches.forEach((scheduleBatch, index) => {
-      const isPlayoffBatch = scheduleBatch.stage === "knockout";
-      const duration = isPlayoffBatch
-        ? schedulePlayoffMinutes
-        : scheduleGroupMinutes;
+      const duration = Math.max(
+        1,
+        Number(
+          scheduleBatch.duration ||
+            (scheduleBatch.stage === "knockout"
+              ? schedulePlayoffMinutes
+              : scheduleGroupMinutes)
+        )
+      );
 
       const batchNumber = index + 1;
       batches.push({
@@ -4958,7 +5831,12 @@ export default function App() {
                 ...scheduleItem,
                 scheduleBatch: batchNumber,
                 scheduleCourt: courtIndex + 1,
+                court: courtIndex + 1,
                 scheduleOrder: index * scheduleCourtCount + courtIndex,
+                order: index * scheduleCourtCount + courtIndex,
+                index: index * scheduleCourtCount + courtIndex,
+                startTime: formatTournamentScheduleTime(scheduleCursor),
+                durationMin: duration,
                 manualOrder:
                   scheduleItem.manualOrder ??
                   index * scheduleCourtCount + courtIndex,
@@ -4975,13 +5853,53 @@ export default function App() {
     return {
       batches: applyTournamentScheduleOverrides(batches, scheduleCourtCount),
       courtCount: scheduleCourtCount,
-      groups,
-      knockoutPreview,
+      groups: seriesPlans.flatMap((plan) => plan.groups),
+      knockoutPreview: seriesPlans[0]?.knockoutPreview || {},
+      seriesPlans,
     };
   }
 
   function generateTournamentKnockout() {
     if (!activeTournament) return;
+
+    if (hasExplicitTournamentSeries(activeTournament)) {
+      setTournaments((prev) =>
+        prev.map((tournament) => {
+          if (tournament.id !== activeTournament.id) return tournament;
+          const classes = getTournamentSeriesClasses(tournament, language);
+
+          return {
+            ...tournament,
+            series: (tournament.series || []).map((series) => {
+              const normalizedSeries =
+                classes.find((item) => String(item.id) === String(series.id)) ||
+                normalizeTournamentSeriesItem(series, 0, tournament, language);
+              const seriesTournament = getTournamentForSeries(
+                tournament,
+                normalizedSeries,
+                language
+              );
+              const nextKnockout = buildManualKnockout(seriesTournament);
+
+              return {
+                ...series,
+                bracketSize: Math.max(
+                  2,
+                  Number(normalizedSeries.groupCount || 2) * 2
+                ),
+                knockout: mergeKnockoutPreservingResults(
+                  series.knockout || {},
+                  nextKnockout
+                ),
+              };
+            }),
+          };
+        })
+      );
+      setTournamentActionMessage(tournamentText.regenerateStructure);
+      return;
+    }
+
     const nextKnockout = buildManualKnockout(activeTournament);
     updateActiveTournament({
       bracketSize: Math.max(2, Number(activeTournament.groupCount || 2) * 2),
@@ -4995,21 +5913,84 @@ export default function App() {
 
   function generateTournamentMatches() {
     if (!activeTournament) return;
-    const groups = Array.isArray(activeTournament.groups)
-      ? activeTournament.groups
-      : [];
+    const seriesClasses = hasExplicitTournamentSeries(activeTournament)
+      ? getTournamentSeriesClasses(activeTournament, language)
+      : [getTournamentSeriesById(activeTournament, "", language)].filter(Boolean);
     const nextMatches = [];
     let manualOrderIndex = 0;
+    const existingById = new Map(
+      (Array.isArray(activeTournament.matches) ? activeTournament.matches : [])
+        .filter((match) => match?.id)
+        .map((match) => [match.id, match])
+    );
+    const mergeGeneratedMatch = (match) => {
+      const existing = existingById.get(match.id);
+      if (!existing) return match;
+      const hasResult =
+        isMatchCompleted(existing) ||
+        getMatchDisplayStatus(existing).status === "in_progress" ||
+        hasScoreValue(existing.scoreA) ||
+        hasScoreValue(existing.scoreB);
+
+      return hasResult
+        ? {
+            ...match,
+            ...existing,
+            seriesId: match.seriesId,
+            seriesName: match.seriesName,
+            playersPerTeam: match.playersPerTeam,
+            phase: match.phase,
+            stage: match.stage,
+            groupId: match.groupId,
+            groupName: match.groupName,
+            groupCode: match.groupCode,
+            teamA: match.teamA,
+            teamB: match.teamB,
+            teamAId: match.teamAId,
+            teamBId: match.teamBId,
+          }
+        : match;
+    };
+
+    seriesClasses.forEach((series) => {
+      const seriesTournament = getTournamentForSeries(
+        activeTournament,
+        series,
+        language
+      );
+      const groups = Array.isArray(seriesTournament.groups)
+        ? seriesTournament.groups
+        : [];
+      const useSeriesFields = hasExplicitTournamentSeries(activeTournament);
 
     groups.forEach((group) => {
-      const groupTeams = (group.teams || []).filter((team) =>
-        String(team.name || "").trim()
-      );
+      const groupCode = group.code || "";
+      const groupTeams = (group.teams || [])
+        .map((team, teamIndex) => {
+          const slot =
+            team.slot ||
+            (groupCode ? `${groupCode}${teamIndex + 1}` : `T${teamIndex + 1}`);
+          const name = String(team.name || "").trim() || slot;
+
+          return {
+            ...team,
+            id: team.id || `${group.id || groupCode}-slot-${slot}`,
+            slot,
+            name,
+          };
+        })
+        .filter((team) => String(team.name || team.slot || "").trim());
 
       for (let i = 0; i < groupTeams.length; i += 1) {
         for (let j = i + 1; j < groupTeams.length; j += 1) {
-          nextMatches.push({
-            id: `gm-${activeTournament.id}-${group.id}-${i}-${j}`,
+          const match = {
+            id: useSeriesFields
+              ? `gm-${series.id}-${group.id}-${i}-${j}`
+              : `gm-${activeTournament.id}-${group.id}-${i}-${j}`,
+            seriesId: useSeriesFields ? series.id : "",
+            seriesName: useSeriesFields ? series.name : "",
+            playersPerTeam: useSeriesFields ? series.playersPerTeam : "",
+            phase: "group",
             stage: "group",
             groupId: group.id,
             groupName: group.name,
@@ -5017,6 +5998,14 @@ export default function App() {
             sourceRound: "group",
             manualOrder: manualOrderIndex,
             scheduleOrder: manualOrderIndex,
+            order: manualOrderIndex,
+            index: manualOrderIndex,
+            court: "",
+            startTime: "",
+            durationMin: Math.max(
+              1,
+              Number(series.groupMatchMinutes || activeTournament.groupMatchMinutes || 12)
+            ),
             teamAId: groupTeams[i].id || groupTeams[i].slot || "",
             teamBId: groupTeams[j].id || groupTeams[j].slot || "",
             teamA: groupTeams[i].name,
@@ -5024,24 +6013,33 @@ export default function App() {
             scoreA: "",
             scoreB: "",
             status: "scheduled",
-          });
+          };
+          nextMatches.push(mergeGeneratedMatch(match));
           manualOrderIndex += 1;
         }
       }
     });
 
-    if (!nextMatches.length) {
+    if (!nextMatches.length && !useSeriesFields) {
       const teams = Array.isArray(activeTournament.teams)
         ? activeTournament.teams
         : [];
       for (let i = 0; i < teams.length; i += 1) {
         for (let j = i + 1; j < teams.length; j += 1) {
-          nextMatches.push({
+          const match = {
             id: `tm-${activeTournament.id}-${i}-${j}`,
             stage: "group",
+            phase: "group",
             sourceRound: "group",
             manualOrder: manualOrderIndex,
             scheduleOrder: manualOrderIndex,
+            order: manualOrderIndex,
+            index: manualOrderIndex,
+            seriesId: "",
+            seriesName: "",
+            court: "",
+            startTime: "",
+            durationMin: Math.max(1, Number(activeTournament.groupMatchMinutes || 12)),
             teamAId: teams[i].id || "",
             teamBId: teams[j].id || "",
             teamA: teams[i].name,
@@ -5049,11 +6047,13 @@ export default function App() {
             scoreA: "",
             scoreB: "",
             status: "scheduled",
-          });
+          };
+          nextMatches.push(mergeGeneratedMatch(match));
           manualOrderIndex += 1;
         }
       }
     }
+    });
 
     if (!nextMatches.length) {
       setTournamentActionMessage(tournamentText.notEnoughTeamsForMatches);
@@ -5067,6 +6067,14 @@ export default function App() {
           : {
               ...tournament,
               matches: nextMatches,
+              series: hasExplicitTournamentSeries(tournament)
+                ? (tournament.series || []).map((series) => ({
+                    ...series,
+                    matches: nextMatches.filter(
+                      (match) => String(match.seriesId || "") === String(series.id)
+                    ),
+                  }))
+                : tournament.series,
             }
       )
     );
@@ -5089,6 +6097,10 @@ export default function App() {
 
     return {
       id: scheduleItem.id,
+      seriesId: scheduleItem.seriesId || "",
+      seriesName: scheduleItem.seriesName || "",
+      playersPerTeam: scheduleItem.playersPerTeam || "",
+      phase: scheduleItem.phase || scheduleItem.stage || "group",
       stage: scheduleItem.stage || "group",
       groupId: scheduleItem.groupId || "",
       groupName: scheduleItem.groupName || "",
@@ -5098,8 +6110,13 @@ export default function App() {
       sourceB: scheduleItem.sourceB || "",
       manualOrder: scheduleItem.manualOrder ?? scheduleItem.scheduleOrder,
       scheduleOrder: scheduleItem.scheduleOrder,
+      order: scheduleItem.order ?? scheduleItem.scheduleOrder,
+      index: scheduleItem.index ?? scheduleItem.scheduleOrder,
       scheduleBatch: scheduleItem.scheduleBatch,
       scheduleCourt: scheduleItem.scheduleCourt,
+      court: scheduleItem.court || scheduleItem.scheduleCourt,
+      startTime: scheduleItem.startTime || scheduleItem.scheduleTime || "",
+      durationMin: scheduleItem.durationMin || scheduleItem.duration || "",
       stageOrder:
         scheduleItem.stageOrder ?? getTournamentStageOrder(scheduleItem.stage),
       teamAId:
@@ -6244,39 +7261,61 @@ export default function App() {
     );
   }
 
-  function updateKnockoutMatchWinner(stageKey, matchId, winnerSource, loserSource) {
+  function updateKnockoutMatchWinner(
+    stageKey,
+    matchId,
+    winnerSource,
+    loserSource,
+    seriesId = ""
+  ) {
     if (!activeTournament) return;
 
     setTournaments((prev) =>
-      prev.map((tournament) =>
-        tournament.id !== activeTournament.id
-          ? tournament
-          : {
-              ...tournament,
-              knockout: {
-                ...(tournament.knockout || {}),
-                [stageKey]: Array.isArray(tournament.knockout?.[stageKey])
-                  ? tournament.knockout[stageKey].map((match) =>
-                      match.id !== matchId
-                        ? match
-                        : {
-                            ...match,
-                            winnerSource,
-                            loserSource,
-                            status: "completed",
-                          }
-                    )
-                  : tournament.knockout?.[stageKey]?.id === matchId
-                    ? {
-                        ...tournament.knockout[stageKey],
-                        winnerSource,
-                        loserSource,
-                        status: "completed",
-                      }
-                    : tournament.knockout?.[stageKey],
-              },
-            }
-      )
+      prev.map((tournament) => {
+        if (tournament.id !== activeTournament.id) return tournament;
+
+        const applyWinnerToKnockout = (knockout = {}) => ({
+          ...knockout,
+          [stageKey]: Array.isArray(knockout?.[stageKey])
+            ? knockout[stageKey].map((match) =>
+                match.id !== matchId
+                  ? match
+                  : {
+                      ...match,
+                      winnerSource,
+                      loserSource,
+                      status: "completed",
+                    }
+              )
+            : knockout?.[stageKey]?.id === matchId
+              ? {
+                  ...knockout[stageKey],
+                  winnerSource,
+                  loserSource,
+                  status: "completed",
+                }
+              : knockout?.[stageKey],
+        });
+
+        if (seriesId && hasExplicitTournamentSeries(tournament)) {
+          return {
+            ...tournament,
+            series: (tournament.series || []).map((series) =>
+              String(series.id) !== String(seriesId)
+                ? series
+                : {
+                    ...series,
+                    knockout: applyWinnerToKnockout(series.knockout || {}),
+                  }
+            ),
+          };
+        }
+
+        return {
+          ...tournament,
+          knockout: applyWinnerToKnockout(tournament.knockout || {}),
+        };
+      })
     );
   }
 
@@ -6285,6 +7324,9 @@ export default function App() {
 
     const groups = Array.isArray(tournament.groups) ? tournament.groups : [];
     const matches = Array.isArray(tournament.matches) ? tournament.matches : [];
+    const activeSeriesId = String(tournament.activeSeriesId || "");
+    const shouldFilterSeriesMatches =
+      activeSeriesId && hasExplicitTournamentSeries(tournament);
     if (!groups.length) return [];
 
     const standings = groups.map((group) => {
@@ -6309,6 +7351,12 @@ export default function App() {
 
       matches.forEach((match) => {
         if (isKnockoutMatch(match)) return;
+        if (
+          shouldFilterSeriesMatches &&
+          String(match.seriesId || "") !== activeSeriesId
+        ) {
+          return;
+        }
         if (match.groupId && match.groupId !== group.id) return;
         if (!teamNames.includes(match.teamA) || !teamNames.includes(match.teamB)) return;
 
@@ -6385,6 +7433,97 @@ export default function App() {
     return standings;
   }
 
+  function getKnockoutStagesForDisplay(knockout) {
+    return [
+      {
+        key: "quarterFinals",
+        label: tournamentText.firstKnockoutLabel,
+        matches: knockout?.quarterFinals || [],
+      },
+      {
+        key: "semiFinals",
+        label: tournamentText.semiFinals,
+        matches: knockout?.semiFinals || [],
+      },
+      {
+        key: "final",
+        label: tournamentText.final,
+        matches: knockout?.final ? [knockout.final] : [],
+      },
+      {
+        key: "thirdPlace",
+        label: tournamentText.thirdPlace,
+        matches: knockout?.thirdPlace ? [knockout.thirdPlace] : [],
+      },
+    ].filter((stage) => stage.matches.length > 0);
+  }
+
+  function getTournamentSeriesRenderSections(tournament, seriesList = null) {
+    if (!tournament) return [];
+    const classes =
+      Array.isArray(seriesList) && seriesList.length
+        ? seriesList
+        : getTournamentSeriesClasses(tournament, language);
+
+    return classes.map((series) => {
+      const seriesTournament = getTournamentForSeries(tournament, series, language);
+      const storedGroups = Array.isArray(seriesTournament.groups)
+        ? seriesTournament.groups
+        : [];
+      const groups = storedGroups.length
+        ? storedGroups
+        : buildManualGroups(tournament, series);
+      const standingsTournament = {
+        ...seriesTournament,
+        groups,
+      };
+      const standings =
+        standingsTournament.format === "group-stage"
+          ? computeTournamentStandings(standingsTournament)
+          : [];
+      const knockout = seriesTournament.knockout || {};
+      const knockoutStages = getKnockoutStagesForDisplay(knockout);
+
+      return {
+        series,
+        tournament: seriesTournament,
+        groups,
+        standings,
+        knockout,
+        knockoutStages,
+        knockoutMatches: knockoutStages.flatMap((stage) => stage.matches),
+      };
+    });
+  }
+
+  function filterScheduleBatchesBySeries(batches, seriesId) {
+    if (!seriesId || seriesId === "all") return batches;
+
+    return (batches || [])
+      .map((batch) => ({
+        ...batch,
+        items: (batch.items || []).map((item) =>
+          item && String(item.seriesId || "") === String(seriesId) ? item : null
+        ),
+      }))
+      .filter((batch) => batch.items.some(Boolean));
+  }
+
+  function filterScheduleBatchesBySeriesIds(batches, seriesIds, useSeriesFilter) {
+    if (!useSeriesFilter) return batches || [];
+    const allowedSeriesIds = new Set((seriesIds || []).map((id) => String(id)));
+    if (!allowedSeriesIds.size) return [];
+
+    return (batches || [])
+      .map((batch) => ({
+        ...batch,
+        items: (batch.items || []).map((item) =>
+          item && allowedSeriesIds.has(String(item.seriesId || "")) ? item : null
+        ),
+      }))
+      .filter((batch) => batch.items.some(Boolean));
+  }
+
   const activeTournament = useMemo(() => {
     const tournament = tournaments.find((t) => t.id === activeTournamentId) || null;
     if (!tournament || !isTournamentOwnedByUsername(tournament, auth.username)) {
@@ -6410,6 +7549,8 @@ export default function App() {
   useEffect(() => {
     setPromotionVisibilityAction("idle");
     setPromotionVisibilityError("");
+    setActiveTournamentSeriesFilter("all");
+    setActiveTournamentSetupSeriesId("");
   }, [activeTournamentId]);
 
   useEffect(() => {
@@ -6483,6 +7624,7 @@ export default function App() {
 
   useEffect(() => {
     if (!activeTournament || publicTournamentRequestActive) return;
+    if (hasExplicitTournamentSeries(activeTournament)) return;
     if (Array.isArray(activeTournament.groups) && activeTournament.groups.length) {
       return;
     }
@@ -6502,26 +7644,6 @@ export default function App() {
       )
     );
   }, [activeTournament, publicTournamentRequestActive, buildManualGroups]);
-
-  const tournamentStandings = computeTournamentStandings(activeTournament);
-
-  const advancingTeamsByGroup = useMemo(() => {
-    if (!activeTournament || activeTournament.format !== "group-stage") return [];
-    return tournamentStandings.map((group, index) => {
-      const sourceGroup =
-        (activeTournament.groups || []).find((item) => item.id === group.groupId) ||
-        {};
-
-      return {
-      groupId: group.groupId,
-      groupName: group.groupName,
-      groupCode: sourceGroup.code || getTournamentGroupCode(index),
-      winner: group.rows?.[0]?.teamName || `${group.groupName} ${tournamentText.winnerLabel}`,
-      runnerUp:
-        group.rows?.[1]?.teamName || `${group.groupName} ${tournamentText.runnerUpLabel}`,
-      };
-    });
-  }, [activeTournament, tournamentStandings, tournamentText.winnerLabel, tournamentText.runnerUpLabel]);
 
   function createTournament() {
     const name = newTournamentName.trim();
@@ -8316,11 +9438,12 @@ const savedRound = readStorageWithTtl(
                 .map((part) => String(part || "").trim())
                 .filter(Boolean)
                 .join(" / ");
-              const publicTheme = normalizePublicTheme(tournament.publicTheme);
+              const publicTheme = getTournamentPublicCardTheme(tournament);
               const cardSummary = getTournamentPublicSummary(tournament);
-              const posterImageUrl = String(tournament.posterImageUrl || "").trim();
+              const posterImageUrl = getTournamentPublicCardImageUrl(tournament);
               const publicTitle = getTournamentPublicTitle(tournament);
               const actionLabel = getPublicTournamentCardActionLabel(tournament);
+              const organizer = getTournamentPublicOrganizerName(tournament);
 
               return (
                 <article
@@ -8448,7 +9571,7 @@ const savedRound = readStorageWithTtl(
                           <strong>{contact}</strong>
                         </div>
                       )}
-                      {tournament.organizerUsername && (
+                      {organizer && (
                         <div
                           style={{
                             ...styles.publicTournamentPosterMetaItem,
@@ -8458,7 +9581,7 @@ const savedRound = readStorageWithTtl(
                           }}
                         >
                           <span>{tournamentText.organizerLabel}</span>
-                          <strong>{tournament.organizerUsername}</strong>
+                          <strong>{organizer}</strong>
                         </div>
                       )}
                       {tournament.maxTeams && (
@@ -8527,9 +9650,9 @@ const savedRound = readStorageWithTtl(
     }
 
     if (
-      isTournamentPublished(tournament) &&
-      (isTournamentLiveForFilter(tournament) ||
-        hasTournamentPublicLiveContent(tournament))
+      isTournamentPublished(tournament) ||
+      isTournamentLiveForFilter(tournament) ||
+      hasTournamentPublicLiveContent(tournament)
     ) {
       return tournamentText.followLive;
     }
@@ -8570,12 +9693,7 @@ const savedRound = readStorageWithTtl(
     const actionLabel = getPublicTournamentCardActionLabel(tournament);
     const cardImageUrl = getTournamentPublicCardImageUrl(tournament);
     const publicLogoUrl = getTournamentPublicLogoUrl(tournament);
-    const organizer = String(
-      tournament.organizerName ||
-        tournament.organizerUsername ||
-        tournament.OrganizerUsername ||
-        ""
-    ).trim();
+    const organizer = getTournamentPublicOrganizerName(tournament);
     const metaItems = [
       location ? { label: tournamentText.locationLabel, value: location } : null,
       organizer
@@ -9318,6 +10436,22 @@ const savedRound = readStorageWithTtl(
                           {item.round}
                         </small>
                       )}
+                      {item?.seriesName && (
+                        <span
+                          style={{
+                            ...styles.tournamentScheduleSeriesBadge,
+                            ...(publicTheme
+                              ? {
+                                  background: publicTheme.surface,
+                                  borderColor: publicTheme.border,
+                                  color: publicTheme.primary,
+                                }
+                              : {}),
+                          }}
+                        >
+                          {item.seriesName}
+                        </span>
+                      )}
                       {isSelectedMoveSource && (
                         <span style={styles.tournamentScheduleSelectedBadge}>
                           {tournamentText.selectedLabel}
@@ -9578,63 +10712,124 @@ const savedRound = readStorageWithTtl(
   function renderPublicTournamentPage(tournament, loadStatus = "ready") {
     const safeTournament = tournament ? applyTournamentDefaults(tournament) : null;
     const isPublicTournamentLoading = loadStatus === "loading";
-    const groups = Array.isArray(safeTournament?.groups)
-      ? safeTournament.groups
+    const publicSeriesClasses = safeTournament
+      ? getTournamentSeriesClasses(safeTournament, language)
       : [];
+    const hasPublicExplicitSeries = hasExplicitTournamentSeries(safeTournament);
+    const publicVisibleSeriesClasses = publicSeriesClasses
+      .filter((series) =>
+        hasPublicExplicitSeries
+          ? ["live", "completed"].includes(series.publicStatus)
+          : series.publicStatus !== "hidden"
+      )
+      .sort((a, b) => {
+        const statusRank = { live: 0, completed: 1, hidden: 2 };
+        const rankDelta =
+          (statusRank[a.publicStatus] ?? 2) - (statusRank[b.publicStatus] ?? 2);
+        if (rankDelta) return rankDelta;
+        return (
+          publicSeriesClasses.findIndex((series) => series.id === a.id) -
+          publicSeriesClasses.findIndex((series) => series.id === b.id)
+        );
+      });
+    const publicSeriesSections = safeTournament
+      ? getTournamentSeriesRenderSections(
+          safeTournament,
+          publicVisibleSeriesClasses
+        )
+      : [];
+    const groups = publicSeriesSections.flatMap((section) =>
+      section.groups.map((group) => ({
+        ...group,
+        seriesId: section.series.id,
+        seriesName: section.series.name,
+        name: hasPublicExplicitSeries
+          ? `${section.series.name} - ${
+              group.name || `${tournamentText.groupLabel} ${group.code || ""}`
+            }`
+          : group.name,
+      }))
+    );
     const matches = Array.isArray(safeTournament?.matches)
       ? safeTournament.matches
       : [];
-    const completedPublicMatches = matches.filter(isMatchCompleted);
-    const completedMatchesCount = completedPublicMatches.length;
-    const standings =
-      safeTournament?.format === "group-stage" && completedMatchesCount > 0
-        ? computeTournamentStandings(safeTournament)
-        : [];
-    const publicSchedule = safeTournament
+    const standings = publicSeriesSections.flatMap((section) =>
+      section.standings.map((standing) => ({
+        ...standing,
+        seriesId: section.series.id,
+        seriesName: section.series.name,
+        groupName: hasPublicExplicitSeries
+          ? `${section.series.name} - ${standing.groupName}`
+          : standing.groupName,
+      }))
+    ).filter((standing) => (standing.rows || []).length > 0);
+    const publicStandingsCount = standings.length;
+    const builtPublicSchedule = safeTournament
       ? buildTournamentHallSchedule(safeTournament)
       : { batches: [], courtCount: 1 };
-    const publicTheme = normalizePublicTheme(safeTournament?.publicTheme);
-    const knockout = safeTournament?.knockout || {};
-    const knockoutStages = safeTournament
-      ? [
-          {
-            key: "quarterFinals",
-            label: tournamentText.firstKnockoutLabel,
-            matches: knockout.quarterFinals || [],
-          },
-          {
-            key: "semiFinals",
-            label: tournamentText.semiFinals,
-            matches: knockout.semiFinals || [],
-          },
-          {
-            key: "final",
-            label: tournamentText.final,
-            matches: knockout.final ? [knockout.final] : [],
-          },
-          {
-            key: "thirdPlace",
-            label: tournamentText.thirdPlace,
-            matches: knockout.thirdPlace ? [knockout.thirdPlace] : [],
-          },
-        ].filter((stage) => stage.matches.length > 0)
-      : [];
-    const hasGroups = groups.length > 0;
-    const hasKnockout = knockoutStages.length > 0;
+    const publicVisibleSeriesIds = publicVisibleSeriesClasses.map(
+      (series) => series.id
+    );
+    const publicStatusBySeriesId = new Map(
+      publicVisibleSeriesClasses.map((series) => [String(series.id), series.publicStatus])
+    );
+    const getPublicScheduleBatchStatusRank = (batch) => {
+      if (!hasPublicExplicitSeries) return 0;
+      const itemStatuses = (batch.items || [])
+        .filter(Boolean)
+        .map((item) => publicStatusBySeriesId.get(String(item.seriesId || "")));
+      return itemStatuses.includes("live") ? 0 : 1;
+    };
+    const publicSchedule = {
+      ...builtPublicSchedule,
+      batches: filterScheduleBatchesBySeriesIds(
+        builtPublicSchedule.batches,
+        publicVisibleSeriesIds,
+        hasPublicExplicitSeries
+      ).sort(
+        (a, b) =>
+          getPublicScheduleBatchStatusRank(a) -
+            getPublicScheduleBatchStatusRank(b) ||
+          Number(a.number || 0) - Number(b.number || 0)
+      ),
+    };
+    const publicTheme = safeTournament
+      ? getTournamentPublicLiveTheme(safeTournament)
+      : getDefaultPublicLiveTheme();
+    const publicLiveLogoUrl = getTournamentPublicLiveLogoUrl(safeTournament);
+    const publicLiveBackgroundUrl =
+      getTournamentPublicLiveBackgroundUrl(safeTournament);
+    const publicPageBackground = publicLiveBackgroundUrl
+      ? `linear-gradient(135deg, ${hexToRgba(
+          publicTheme.background,
+          0.88
+        )}, ${hexToRgba(publicTheme.surface, 0.92)}), url(${publicLiveBackgroundUrl})`
+      : publicTheme.background;
+    const publicHeroBackground = publicLiveBackgroundUrl
+      ? `linear-gradient(145deg, ${hexToRgba(
+          publicTheme.surface,
+          0.90
+        )}, ${hexToRgba(publicTheme.panel, 0.88)}), url(${publicLiveBackgroundUrl})`
+      : `linear-gradient(145deg, ${publicTheme.surface}, ${publicTheme.panel})`;
+    const hasGroups = publicSeriesSections.some(
+      (section) => section.groups.length > 0
+    );
+    const hasKnockout = publicSeriesSections.some(
+      (section) => section.knockoutStages.length > 0
+    );
     const teamCount = groups.reduce(
       (sum, group) =>
         sum +
         (group.teams || []).filter((team) => String(team.name || "").trim())
-          .length,
+        .length,
       0
     );
-    const publicSeries = getTournamentSeries(safeTournament);
-    const publicSeriesLabels = publicSeries.map((series) =>
-      Number(series.teamSize) === 4
+    const publicSeriesLabels = publicVisibleSeriesClasses.map((series) =>
+      Number(series.playersPerTeam || series.teamSize) === 4
         ? tournamentText.fourSide
-        : Number(series.teamSize) === 5
+        : Number(series.playersPerTeam || series.teamSize) === 5
           ? tournamentText.fiveSide
-          : series.name || tournamentText.seriesLabel
+          : getSeriesDisplayName(series, language)
     );
     const publicLocation = [
       safeTournament?.locationName,
@@ -9644,12 +10839,33 @@ const savedRound = readStorageWithTtl(
       .map((part) => String(part || "").trim())
       .filter(Boolean)
       .join(", ");
-    const allKnockoutMatches = knockoutStages.flatMap((stage) => stage.matches);
+    const allKnockoutMatches = publicSeriesSections.flatMap(
+      (section) => section.knockoutMatches
+    );
+    const publicLiveSeries = publicVisibleSeriesClasses.filter(
+      (series) => series.publicStatus === "live"
+    );
+    const publicCompletedSeries = publicVisibleSeriesClasses.filter(
+      (series) => series.publicStatus === "completed"
+    );
+    const hasPublicVisibleSeries = publicVisibleSeriesClasses.length > 0;
+    const publicClassStatusNotice =
+      publicLiveSeries.length > 0 && publicCompletedSeries.length > 0
+        ? `${publicCompletedSeries
+            .map((series) => `${series.name} ${tournamentText.classFinishedSuffix}`)
+            .join(". ")}. ${publicLiveSeries
+            .map((series) => `${series.name} ${tournamentText.classLiveNowSuffix}`)
+            .join(". ")}.`
+        : "";
     const publicSectionStyle = {
       ...styles.publicTournamentSection,
       background: publicTheme.surface,
       borderColor: publicTheme.border,
       color: publicTheme.text,
+    };
+    const publicSecondarySectionStyle = {
+      ...publicSectionStyle,
+      background: hexToRgba(publicTheme.surface, 0.88),
     };
     const publicSectionHeaderStyle = {
       ...styles.publicTournamentSectionHeader,
@@ -9671,28 +10887,28 @@ const savedRound = readStorageWithTtl(
       ...styles.publicTournamentMuted,
       color: publicTheme.mutedText,
     };
-    const publicInnerCardStyle = {
-      background: publicTheme.panel,
-      borderColor: publicTheme.border,
-      color: publicTheme.mutedText,
-    };
-
-    const findPublicKnockoutMatch = (label) =>
-      allKnockoutMatches.find(
+    const findPublicKnockoutMatch = (label, contextMatches = allKnockoutMatches) =>
+      contextMatches.find(
         (match) => match?.label === label || match?.id === label
       );
 
-    const resolvePublicSource = (source, depth = 0) => {
+    const resolvePublicSource = (source, depth = 0, context = {}) => {
+      const contextGroups = context.groups || groups;
+      const contextStandings =
+        context.standings || publicSeriesSections.flatMap((section) => section.standings);
+      const contextMatches = context.matches || matches;
+      const contextKnockoutMatches =
+        context.knockoutMatches || allKnockoutMatches;
       const raw = String(source || "").trim();
       if (!raw || depth > 8) return raw;
 
       const groupPosition = raw.match(/^([A-Z])([12])$/);
       if (groupPosition) {
         const [, groupCode, position] = groupPosition;
-        const groupIndex = groups.findIndex((group) => group.code === groupCode);
-        const group = groups[groupIndex];
-        const standing = standings.find((item) => item.groupId === group?.id);
-        const hasCompletedGroupMatch = matches.some(
+        const groupIndex = contextGroups.findIndex((group) => group.code === groupCode);
+        const group = contextGroups[groupIndex];
+        const standing = contextStandings.find((item) => item.groupId === group?.id);
+        const hasCompletedGroupMatch = contextMatches.some(
           (match) =>
             match.groupId === group?.id &&
             isMatchCompleted(match)
@@ -9706,30 +10922,36 @@ const savedRound = readStorageWithTtl(
 
       const winnerMatch = raw.match(/^Winner (QF\d+|SF\d+)$/);
       if (winnerMatch) {
-        const match = findPublicKnockoutMatch(winnerMatch[1]);
+        const match = findPublicKnockoutMatch(
+          winnerMatch[1],
+          contextKnockoutMatches
+        );
         return match?.winnerSource
-          ? resolvePublicSource(match.winnerSource, depth + 1)
+          ? resolvePublicSource(match.winnerSource, depth + 1, context)
           : raw;
       }
 
       const loserMatch = raw.match(/^Loser (QF\d+|SF\d+)$/);
       if (loserMatch) {
-        const match = findPublicKnockoutMatch(loserMatch[1]);
+        const match = findPublicKnockoutMatch(
+          loserMatch[1],
+          contextKnockoutMatches
+        );
         return match?.loserSource
-          ? resolvePublicSource(match.loserSource, depth + 1)
+          ? resolvePublicSource(match.loserSource, depth + 1, context)
           : raw;
       }
 
       return raw;
     };
 
-    const renderPublicKnockoutMatch = (match) => {
+    const renderPublicKnockoutMatch = (match, context = {}) => {
       const sourceA = match.sourceA || match.teamA;
       const sourceB = match.sourceB || match.teamB;
-      const teamA = resolvePublicSource(sourceA);
-      const teamB = resolvePublicSource(sourceB);
+      const teamA = resolvePublicSource(sourceA, 0, context);
+      const teamB = resolvePublicSource(sourceB, 0, context);
       const winner = match.winnerSource
-        ? resolvePublicSource(match.winnerSource)
+        ? resolvePublicSource(match.winnerSource, 0, context)
         : "";
 
       return (
@@ -9802,7 +11024,10 @@ const savedRound = readStorageWithTtl(
         style={{
           ...styles.publicTournamentPage,
           ...getPublicThemeStyle(publicTheme),
-          background: publicTheme.background,
+          background: publicPageBackground,
+          backgroundSize: publicLiveBackgroundUrl ? "cover" : undefined,
+          backgroundPosition: publicLiveBackgroundUrl ? "center" : undefined,
+          backgroundAttachment: publicLiveBackgroundUrl ? "fixed" : undefined,
           color: publicTheme.text,
         }}
       >
@@ -9856,12 +11081,29 @@ const savedRound = readStorageWithTtl(
               <section
                 style={{
                   ...styles.publicTournamentHero,
-                  background: `linear-gradient(145deg, ${publicTheme.surface}, ${publicTheme.panel})`,
+                  background: publicHeroBackground,
+                  backgroundSize: publicLiveBackgroundUrl ? "cover" : undefined,
+                  backgroundPosition: publicLiveBackgroundUrl ? "center" : undefined,
                   borderColor: publicTheme.border,
                   color: publicTheme.text,
                 }}
               >
                 <div style={styles.publicTournamentHeroTop}>
+                  {publicLiveLogoUrl && (
+                    <span
+                      style={{
+                        ...styles.publicTournamentHeroLogo,
+                        background: publicTheme.surface,
+                        borderColor: publicTheme.border,
+                      }}
+                    >
+                      <img
+                        src={publicLiveLogoUrl}
+                        alt=""
+                        style={styles.publicTournamentHeroLogoImage}
+                      />
+                    </span>
+                  )}
                   <span style={publicStatusPillStyle}>
                     {tournamentText.publicLinkReadonly}
                   </span>
@@ -9910,10 +11152,6 @@ const savedRound = readStorageWithTtl(
                       safeTournament.registrationDeadline,
                     ],
                     [tournamentText.teamsLabel, teamCount],
-                    [
-                      tournamentText.matchStatusCompleted,
-                      completedMatchesCount,
-                    ],
                   ].filter(([, value]) => String(value || "").trim()).map(([label, value]) => (
                     <div
                       key={label}
@@ -9929,120 +11167,42 @@ const savedRound = readStorageWithTtl(
                     </div>
                   ))}
                 </div>
-              </section>
 
-              {standings.length > 0 && (
-                <section style={publicSectionStyle}>
-                  <div style={publicSectionHeaderStyle}>
-                    <span>{tournamentText.standingsTitle}</span>
-                    <strong>{standings.length}</strong>
-                  </div>
-                  <div style={styles.publicTournamentStandingsGrid}>
-                    {standings.map((group, groupIndex) => {
-                      const sourceGroup =
-                        groups.find((item) => item.id === group.groupId) || {};
-                      const groupCode =
-                        sourceGroup.code || getTournamentGroupCode(groupIndex);
-                      const groupColor = getTournamentGroupColor(groupCode);
-
+                {hasPublicVisibleSeries && (
+                  <div style={styles.publicTournamentClassStatusList}>
+                    {publicVisibleSeriesClasses.map((series) => {
+                      const isCompleted = series.publicStatus === "completed";
                       return (
-                        <article
-                          key={`public-standings-${group.groupId}`}
+                        <span
+                          key={`public-status-${series.id}`}
                           style={{
-                            ...styles.publicTournamentStandingsCard,
-                            background: `linear-gradient(135deg, ${groupColor.publicSoft}, ${publicTheme.panel} 72%)`,
-                            borderColor: groupColor.publicBorder,
-                            borderLeft: `5px solid ${groupColor.publicText}`,
-                            borderTopColor: groupColor.publicText,
-                            color: publicTheme.text,
+                            ...styles.publicTournamentClassStatusBadge,
+                            ...(isCompleted
+                              ? styles.publicTournamentClassStatusBadgeDone
+                              : {}),
                           }}
                         >
-                          <div style={styles.publicTournamentStandingsHeader}>
-                            <h2
-                              style={{
-                                ...styles.publicTournamentGroupTitle,
-                                color: publicTheme.text,
-                              }}
-                            >
-                              {group.groupName}
-                            </h2>
-                            <span
-                              style={{
-                                ...styles.publicTournamentGroupCode,
-                                background: groupColor.publicSoft,
-                                borderColor: groupColor.publicBorder,
-                                color: groupColor.publicText,
-                              }}
-                            >
-                              {groupCode}
-                            </span>
-                          </div>
-                          <div style={styles.publicTournamentTableWrap}>
-                            <table
-                              style={{
-                                ...styles.publicTournamentTable,
-                                color: publicTheme.mutedText,
-                              }}
-                            >
-                              <thead>
-                                <tr>
-                                  <th style={styles.publicTournamentTableHead}>
-                                    {tournamentText.teamLabel}
-                                  </th>
-                                  <th style={styles.publicTournamentTableHead}>
-                                    {tournamentText.playedShort}
-                                  </th>
-                                  <th style={styles.publicTournamentTableHead}>
-                                    {tournamentText.winsShort}
-                                  </th>
-                                  <th style={styles.publicTournamentTableHead}>
-                                    {tournamentText.drawsShort}
-                                  </th>
-                                  <th style={styles.publicTournamentTableHead}>
-                                    {tournamentText.lossesShort}
-                                  </th>
-                                  <th style={styles.publicTournamentTableHead}>
-                                    {tournamentText.pointsShort}
-                                  </th>
-                                  <th style={styles.publicTournamentTableHead}>
-                                    {tournamentText.scoreDiffShort}
-                                  </th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {group.rows.map((row) => (
-                                  <tr
-                                    key={`public-row-${group.groupId}-${row.teamName}`}
-                                  >
-                                    <td style={styles.publicTournamentTableCell}>
-                                      {row.teamName}
-                                    </td>
-                                    <td style={styles.publicTournamentTableCell}>
-                                      {row.played}
-                                    </td>
-                                    <td style={styles.publicTournamentTableCell}>
-                                      {row.wins}
-                                    </td>
-                                    <td style={styles.publicTournamentTableCell}>
-                                      {row.draws}
-                                    </td>
-                                    <td style={styles.publicTournamentTableCell}>
-                                      {row.losses}
-                                    </td>
-                                    <td style={styles.publicTournamentTableCell}>
-                                      {row.points}
-                                    </td>
-                                    <td style={styles.publicTournamentTableCell}>
-                                      {row.scoreDiff}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </article>
+                          {series.name}{" "}
+                          {isCompleted
+                            ? tournamentText.classFinishedSuffix
+                            : tournamentText.classLiveSuffix}
+                        </span>
                       );
                     })}
+                  </div>
+                )}
+              </section>
+
+              {publicClassStatusNotice && (
+                <section style={publicSecondarySectionStyle}>
+                  {publicClassStatusNotice}
+                </section>
+              )}
+
+              {!hasPublicVisibleSeries && (
+                <section style={publicSectionStyle}>
+                  <div style={publicMutedStyle}>
+                    {tournamentText.noClassLiveYet}
                   </div>
                 </section>
               )}
@@ -10068,115 +11228,237 @@ const savedRound = readStorageWithTtl(
                 </section>
               )}
 
-              {hasKnockout && (
+              {standings.length > 0 && (
                 <section style={publicSectionStyle}>
                   <div style={publicSectionHeaderStyle}>
-                    <span>{tournamentText.knockoutPreview}</span>
-                    <strong>{allKnockoutMatches.length}</strong>
+                    <span>{tournamentText.standingsTitle}</span>
+                    <strong>{publicStandingsCount}</strong>
                   </div>
-                  <div style={styles.publicTournamentBracketGrid}>
-                    {knockoutStages.map((stage) => (
-                      <div key={stage.key} style={styles.publicTournamentBracketStage}>
-                        <div
-                          style={{
-                            ...styles.publicTournamentBracketTitle,
-                            color: publicTheme.primary,
-                          }}
-                        >
-                          {stage.label}
-                        </div>
-                        {stage.matches.map(renderPublicKnockoutMatch)}
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )}
-
-              {completedPublicMatches.length > 0 && (
-                <section style={publicSectionStyle}>
-                  <div style={publicSectionHeaderStyle}>
-                    <span>{tournamentText.matchStatusCompleted}</span>
-                    <strong>{completedPublicMatches.length}</strong>
-                  </div>
-                  <div style={styles.publicTournamentMatchGrid}>
-                    {completedPublicMatches.map((match, index) => {
-                      const hasScore =
-                        hasScoreValue(match.scoreA) || hasScoreValue(match.scoreB);
-                      const matchGroupIndex = groups.findIndex(
-                        (group) =>
-                          group.id === match.groupId ||
-                          group.name === match.groupName
-                      );
-                      const matchGroup = groups[matchGroupIndex];
-                      const matchGroupCode =
-                        matchGroup?.code ||
-                        (matchGroupIndex >= 0
-                          ? getTournamentGroupCode(matchGroupIndex)
-                          : "");
-                      const matchGroupColor = matchGroupCode
-                        ? getTournamentGroupColor(matchGroupCode)
-                        : null;
+                  <div style={styles.tournamentStandingsList}>
+                    {standings.map((group, groupIndex) => {
+                      const sourceGroup =
+                        groups.find((item) => item.id === group.groupId) || {};
+                      const groupCode =
+                        sourceGroup.code || getTournamentGroupCode(groupIndex);
+                      const groupColor = getTournamentGroupColor(groupCode);
 
                       return (
-                        <article
-                          key={match.id || `${match.teamA}-${match.teamB}-${index}`}
+                        <div
+                          key={`public-standings-${group.groupId}`}
                           style={{
-                            ...styles.publicTournamentMatchCard,
-                            ...(matchGroupColor
-                              ? {
-                                  background: `linear-gradient(135deg, ${matchGroupColor.publicSoft}, ${publicTheme.panel} 72%)`,
-                                  borderColor: matchGroupColor.publicBorder,
-                                  color: publicTheme.text,
-                                }
-                              : publicInnerCardStyle),
+                            ...styles.tournamentStandingsCard,
+                            background: `linear-gradient(135deg, ${groupColor.publicSoft}, ${publicTheme.panel} 72%)`,
+                            borderColor: groupColor.publicBorder,
+                            borderTop: `4px solid ${groupColor.publicText}`,
+                            borderLeft: `6px solid ${groupColor.publicText}`,
+                            color: publicTheme.text,
                           }}
                         >
-                          <div
-                            style={{
-                              ...styles.publicTournamentMatchTop,
-                              color: publicTheme.primary,
-                            }}
-                          >
-                            <span>
-                              {match.groupName ||
-                                match.stage ||
-                                `${tournamentText.matchLabel} ${index + 1}`}
-                            </span>
-                            <strong>
-                              {getMatchDisplayStatus(match).label}
-                            </strong>
-                          </div>
-                          {getMatchResultTypeLabel(match) && (
+                          <div style={styles.tournamentStandingsHeader}>
                             <div
                               style={{
-                                ...styles.publicTournamentSourceBadge,
-                                borderColor: publicTheme.border,
+                                ...styles.tournamentMiniTitle,
+                                color: publicTheme.text,
+                              }}
+                            >
+                              {group.groupName ||
+                                `${tournamentText.groupLabel} ${groupCode}`}
+                            </div>
+                            <span
+                              style={{
+                                ...styles.tournamentTeamSeed,
+                                background: groupColor.publicSoft,
+                                borderColor: groupColor.publicBorder,
+                                color: groupColor.publicText,
+                              }}
+                            >
+                              {groupCode}
+                            </span>
+                          </div>
+                          <div style={styles.tournamentTableWrap}>
+                            <table
+                              style={{
+                                ...styles.tournamentTable,
                                 color: publicTheme.mutedText,
                               }}
                             >
-                              {getMatchResultTypeLabel(match)}
-                            </div>
-                          )}
-                          <div
-                            style={{
-                              ...styles.publicTournamentTeams,
-                              color: publicTheme.text,
-                            }}
-                          >
-                            {match.teamA} vs {match.teamB}
+                              <thead>
+                                <tr>
+                                  <th
+                                    style={{
+                                      ...styles.tournamentTableHead,
+                                      color: publicTheme.primary,
+                                      borderBottomColor: publicTheme.border,
+                                    }}
+                                  >
+                                    {tournamentText.teamLabel}
+                                  </th>
+                                  <th
+                                    style={{
+                                      ...styles.tournamentTableHead,
+                                      color: publicTheme.primary,
+                                      borderBottomColor: publicTheme.border,
+                                    }}
+                                  >
+                                    {tournamentText.playedShort}
+                                  </th>
+                                  <th
+                                    style={{
+                                      ...styles.tournamentTableHead,
+                                      color: publicTheme.primary,
+                                      borderBottomColor: publicTheme.border,
+                                    }}
+                                  >
+                                    {tournamentText.winsShort}
+                                  </th>
+                                  <th
+                                    style={{
+                                      ...styles.tournamentTableHead,
+                                      color: publicTheme.primary,
+                                      borderBottomColor: publicTheme.border,
+                                    }}
+                                  >
+                                    {tournamentText.drawsShort}
+                                  </th>
+                                  <th
+                                    style={{
+                                      ...styles.tournamentTableHead,
+                                      color: publicTheme.primary,
+                                      borderBottomColor: publicTheme.border,
+                                    }}
+                                  >
+                                    {tournamentText.lossesShort}
+                                  </th>
+                                  <th
+                                    style={{
+                                      ...styles.tournamentTableHead,
+                                      color: publicTheme.primary,
+                                      borderBottomColor: publicTheme.border,
+                                    }}
+                                  >
+                                    {tournamentText.pointsShort}
+                                  </th>
+                                  <th
+                                    style={{
+                                      ...styles.tournamentTableHead,
+                                      color: publicTheme.primary,
+                                      borderBottomColor: publicTheme.border,
+                                    }}
+                                  >
+                                    {tournamentText.scoreForShort}
+                                  </th>
+                                  <th
+                                    style={{
+                                      ...styles.tournamentTableHead,
+                                      color: publicTheme.primary,
+                                      borderBottomColor: publicTheme.border,
+                                    }}
+                                  >
+                                    {tournamentText.scoreAgainstShort}
+                                  </th>
+                                  <th
+                                    style={{
+                                      ...styles.tournamentTableHead,
+                                      color: publicTheme.primary,
+                                      borderBottomColor: publicTheme.border,
+                                    }}
+                                  >
+                                    {tournamentText.scoreDiffShort}
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {group.rows.map((row) => (
+                                  <tr
+                                    key={`public-row-${group.groupId}-${row.teamName}`}
+                                  >
+                                    <td
+                                      style={{
+                                        ...styles.tournamentTableTeam,
+                                        color: publicTheme.text,
+                                        borderBottomColor: publicTheme.border,
+                                      }}
+                                    >
+                                      {row.teamName}
+                                    </td>
+                                    <td
+                                      style={{
+                                        ...styles.tournamentTableCell,
+                                        color: publicTheme.mutedText,
+                                        borderBottomColor: publicTheme.border,
+                                      }}
+                                    >
+                                      {row.played}
+                                    </td>
+                                    <td
+                                      style={{
+                                        ...styles.tournamentTableCell,
+                                        color: publicTheme.mutedText,
+                                        borderBottomColor: publicTheme.border,
+                                      }}
+                                    >
+                                      {row.wins}
+                                    </td>
+                                    <td
+                                      style={{
+                                        ...styles.tournamentTableCell,
+                                        color: publicTheme.mutedText,
+                                        borderBottomColor: publicTheme.border,
+                                      }}
+                                    >
+                                      {row.draws}
+                                    </td>
+                                    <td
+                                      style={{
+                                        ...styles.tournamentTableCell,
+                                        color: publicTheme.mutedText,
+                                        borderBottomColor: publicTheme.border,
+                                      }}
+                                    >
+                                      {row.losses}
+                                    </td>
+                                    <td
+                                      style={{
+                                        ...styles.tournamentTablePoints,
+                                        color: publicTheme.primary,
+                                        borderBottomColor: publicTheme.border,
+                                      }}
+                                    >
+                                      {row.points}
+                                    </td>
+                                    <td
+                                      style={{
+                                        ...styles.tournamentTableCell,
+                                        color: publicTheme.mutedText,
+                                        borderBottomColor: publicTheme.border,
+                                      }}
+                                    >
+                                      {row.scoreFor}
+                                    </td>
+                                    <td
+                                      style={{
+                                        ...styles.tournamentTableCell,
+                                        color: publicTheme.mutedText,
+                                        borderBottomColor: publicTheme.border,
+                                      }}
+                                    >
+                                      {row.scoreAgainst}
+                                    </td>
+                                    <td
+                                      style={{
+                                        ...styles.tournamentTableCell,
+                                        color: publicTheme.mutedText,
+                                        borderBottomColor: publicTheme.border,
+                                      }}
+                                    >
+                                      {row.scoreDiff}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
                           </div>
-                          <div
-                            style={{
-                              ...styles.publicTournamentScore,
-                              background: publicTheme.surface,
-                              color: publicTheme.primary,
-                            }}
-                          >
-                            {hasScore
-                              ? `${getMatchScoreDisplayValue(match.scoreA)} - ${getMatchScoreDisplayValue(match.scoreB)}`
-                              : "vs"}
-                          </div>
-                        </article>
+                        </div>
                       );
                     })}
                   </div>
@@ -10184,9 +11466,9 @@ const savedRound = readStorageWithTtl(
               )}
 
               {hasGroups && (
-                <section style={publicSectionStyle}>
+                <section style={publicSecondarySectionStyle}>
                   <div style={publicSectionHeaderStyle}>
-                    <span>{tournamentText.groupDrawTitle}</span>
+                    <span>{tournamentText.teamsGroupsTitle}</span>
                     <strong>{groups.length}</strong>
                   </div>
                   <div style={styles.publicTournamentGroupGrid}>
@@ -10250,7 +11532,9 @@ const savedRound = readStorageWithTtl(
                                   {team.slot || `${groupCode}${teamIndex + 1}`}
                                 </span>
                                 <strong>
-                                  {String(team.name || "").trim() || "-"}
+                                  {String(team.name || "").trim() ||
+                                    team.slot ||
+                                    `${groupCode}${teamIndex + 1}`}
                                 </strong>
                               </div>
                             ))}
@@ -10258,6 +11542,63 @@ const savedRound = readStorageWithTtl(
                         </article>
                       );
                     })}
+                  </div>
+                </section>
+              )}
+
+              {hasKnockout && (
+                <section style={publicSectionStyle}>
+                  <div style={publicSectionHeaderStyle}>
+                    <span>{tournamentText.knockoutPreview}</span>
+                    <strong>{allKnockoutMatches.length}</strong>
+                  </div>
+                  <div style={styles.publicTournamentBracketGrid}>
+                    {publicSeriesSections
+                      .filter((section) => section.knockoutStages.length > 0)
+                      .map((section) => {
+                        const sectionContext = {
+                          groups: section.groups,
+                          standings: section.standings,
+                          matches: section.tournament.matches || [],
+                          knockoutMatches: section.knockoutMatches,
+                        };
+
+                        return (
+                          <div
+                            key={`public-bracket-series-${section.series.id}`}
+                            style={styles.publicTournamentBracketStage}
+                          >
+                            {hasPublicExplicitSeries && (
+                              <div
+                                style={{
+                                  ...styles.publicTournamentBracketTitle,
+                                  color: publicTheme.text,
+                                }}
+                              >
+                                {section.series.name}
+                              </div>
+                            )}
+                            {section.knockoutStages.map((stage) => (
+                              <div
+                                key={`${section.series.id}-${stage.key}`}
+                                style={styles.publicTournamentBracketStage}
+                              >
+                                <div
+                                  style={{
+                                    ...styles.publicTournamentBracketTitle,
+                                    color: publicTheme.primary,
+                                  }}
+                                >
+                                  {stage.label}
+                                </div>
+                                {stage.matches.map((match) =>
+                                  renderPublicKnockoutMatch(match, sectionContext)
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
                   </div>
                 </section>
               )}
@@ -10302,9 +11643,6 @@ const savedRound = readStorageWithTtl(
       : [];
     const completedMatchesCount =
       tournamentMatches.filter(isMatchCompleted).length;
-    const startedMatchesCount = tournamentMatches.filter(
-      (match) => getMatchDisplayStatus(match).status === "in_progress"
-    ).length;
     const scheduledMatchesCount = tournamentMatches.filter(
       (match) => getMatchDisplayStatus(match).status === "scheduled"
     ).length;
@@ -10332,6 +11670,114 @@ const savedRound = readStorageWithTtl(
     const isBackendPublished = hasTournamentBackendPublicSync(activeTournament);
     const publicUrl = getPublicTournamentUrl(activeTournament);
     const activePublicTheme = normalizePublicTheme(activeTournament?.publicTheme);
+    const activePublicLiveTheme = getTournamentPublicLiveTheme(activeTournament);
+    const activePublicLiveLogoUrl =
+      getTournamentPublicLiveLogoUrl(activeTournament);
+    const activePublicLiveBackgroundUrl =
+      getTournamentPublicLiveBackgroundUrl(activeTournament);
+    const tournamentSeriesClasses = activeTournament
+      ? getTournamentSeriesClasses(activeTournament, language)
+      : [];
+    const seriesPublicStatusOptions = [
+      { id: "hidden", label: tournamentText.classStatusHidden },
+      { id: "live", label: tournamentText.classStatusLive },
+      { id: "completed", label: tournamentText.classStatusCompleted },
+    ];
+    const selectedSetupSeries =
+      getTournamentSeriesById(
+        activeTournament,
+        activeTournamentSetupSeriesId,
+        language
+      ) ||
+      tournamentSeriesClasses[0] ||
+      null;
+    const visibleSeriesClasses =
+      activeTournamentSeriesFilter === "all"
+        ? tournamentSeriesClasses
+        : tournamentSeriesClasses.filter(
+            (series) => String(series.id) === String(activeTournamentSeriesFilter)
+          );
+    const selectedSetupTournament = selectedSetupSeries
+      ? getTournamentForSeries(activeTournament, selectedSetupSeries, language)
+      : activeTournament;
+    const hasTournamentClassFilters =
+      hasExplicitTournamentSeries(activeTournament) &&
+      tournamentSeriesClasses.length > 1;
+    const visibleSeriesSections = getTournamentSeriesRenderSections(
+      activeTournament,
+      visibleSeriesClasses
+    );
+    const selectedSetupStandings =
+      selectedSetupTournament?.format === "group-stage"
+        ? computeTournamentStandings(selectedSetupTournament)
+        : [];
+    const selectedAdvancingTeamsByGroup = selectedSetupStandings.map(
+      (group, index) => {
+        const sourceGroup =
+          (selectedSetupTournament.groups || []).find(
+            (item) => item.id === group.groupId
+          ) || {};
+
+        return {
+          groupId: group.groupId,
+          groupName: group.groupName,
+          groupCode: sourceGroup.code || getTournamentGroupCode(index),
+          winner:
+            group.rows?.[0]?.teamName ||
+            `${group.groupName} ${tournamentText.winnerLabel}`,
+          runnerUp:
+            group.rows?.[1]?.teamName ||
+            `${group.groupName} ${tournamentText.runnerUpLabel}`,
+        };
+      }
+    );
+    const visibleGroups = visibleSeriesSections.flatMap((section) =>
+      section.groups.map((group) => ({
+        ...group,
+        seriesId: section.series.id,
+        seriesName: section.series.name,
+        name: hasExplicitTournamentSeries(activeTournament)
+          ? `${section.series.name} - ${group.name}`
+          : group.name,
+      }))
+    );
+    const visibleStandings = visibleSeriesSections.flatMap((section) =>
+      section.standings.map((standing) => ({
+        ...standing,
+        seriesId: section.series.id,
+        seriesName: section.series.name,
+        groupName: hasExplicitTournamentSeries(activeTournament)
+          ? `${section.series.name} - ${standing.groupName}`
+          : standing.groupName,
+      }))
+    );
+    const visibleConfiguredTotalTeams = visibleSeriesSections.reduce(
+      (sum, section) => sum + Number(section.series.totalTeams || 0),
+      0
+    );
+    const visibleFilledSlotCount = visibleGroups.reduce(
+      (sum, group) =>
+        sum +
+        (group.teams || []).filter((team) => String(team.name || "").trim())
+          .length,
+      0
+    );
+    const visibleTournamentMatches =
+      hasExplicitTournamentSeries(activeTournament) &&
+      activeTournamentSeriesFilter !== "all"
+        ? tournamentMatches.filter(
+            (match) =>
+              String(match.seriesId || "") === String(activeTournamentSeriesFilter)
+          )
+        : tournamentMatches;
+    const visibleCompletedMatchesCount =
+      visibleTournamentMatches.filter(isMatchCompleted).length;
+    const visibleStartedMatchesCount = visibleTournamentMatches.filter(
+      (match) => getMatchDisplayStatus(match).status === "in_progress"
+    ).length;
+    const visibleScheduledMatchesCount = visibleTournamentMatches.filter(
+      (match) => getMatchDisplayStatus(match).status === "scheduled"
+    ).length;
     const formatLabel =
       {
         "group-stage": tournamentText.formatGroupStage,
@@ -10351,15 +11797,19 @@ const savedRound = readStorageWithTtl(
           }[tournamentSyncStatus] || tournamentText.tournamentSyncLocal;
     const configuredTotalTeams = Math.max(
       2,
-      Number(activeTournament?.totalTeams || 10)
+      Number(selectedSetupSeries?.totalTeams || activeTournament?.totalTeams || 10)
     );
     const configuredTeamsPerGroup = Math.max(
       1,
-      Number(activeTournament?.teamsPerGroup || 5)
+      Number(selectedSetupSeries?.teamsPerGroup || activeTournament?.teamsPerGroup || 5)
     );
     const configuredQualifiersPerGroup = Math.max(
       2,
-      Number(activeTournament?.qualifiersPerGroup || 2)
+      Number(
+        selectedSetupSeries?.qualifiersPerGroup ||
+          activeTournament?.qualifiersPerGroup ||
+          2
+      )
     );
     const scheduleCourtCount = Math.max(
       1,
@@ -10367,20 +11817,28 @@ const savedRound = readStorageWithTtl(
     );
     const scheduleGroupMinutes = Math.max(
       1,
-      Number(activeTournament?.groupMatchMinutes || 12)
+      Number(
+        selectedSetupSeries?.groupMatchMinutes ||
+          activeTournament?.groupMatchMinutes ||
+          12
+      )
     );
     const schedulePlayoffMinutes = Math.max(
       1,
-      Number(activeTournament?.playoffMatchMinutes || 15)
+      Number(
+        selectedSetupSeries?.playoffMatchMinutes ||
+          activeTournament?.playoffMatchMinutes ||
+          15
+      )
     );
     const scheduleBreakMinutes = Math.max(
       0,
       Number(activeTournament?.breakMinutes || 0)
     );
-    const manualPreviewGroups = activeTournament
-      ? getTournamentGroupsForDisplay(activeTournament)
+    const manualPreviewGroups = selectedSetupTournament
+      ? getTournamentGroupsForDisplay(selectedSetupTournament, selectedSetupSeries)
       : [];
-    const storedKnockout = activeTournament?.knockout || {};
+    const storedKnockout = selectedSetupTournament?.knockout || {};
     const hasStoredKnockout = Boolean(
       (storedKnockout.quarterFinals || []).length ||
         (storedKnockout.semiFinals || []).length ||
@@ -10389,13 +11847,34 @@ const savedRound = readStorageWithTtl(
     );
     const knockoutPreview = activeTournament
       ? buildManualKnockout({
-          ...activeTournament,
+          ...selectedSetupTournament,
           groups: manualPreviewGroups,
         })
       : {};
     const displayKnockout = hasStoredKnockout
       ? storedKnockout
       : knockoutPreview;
+    const visibleBracketSections = visibleSeriesSections.map((section) => {
+      const sectionKnockout = section.knockout || {};
+      const sectionHasStoredKnockout = Boolean(
+        (sectionKnockout.quarterFinals || []).length ||
+          (sectionKnockout.semiFinals || []).length ||
+          sectionKnockout.final ||
+          sectionKnockout.thirdPlace
+      );
+      const sectionPreview = buildManualKnockout({
+        ...section.tournament,
+        groups: section.groups,
+      });
+
+      return {
+        ...section,
+        displayKnockout: sectionHasStoredKnockout
+          ? sectionKnockout
+          : sectionPreview,
+        hasStoredKnockout: sectionHasStoredKnockout,
+      };
+    });
     const filledSlotCount = manualPreviewGroups.reduce(
       (sum, group) =>
         sum +
@@ -10403,6 +11882,31 @@ const savedRound = readStorageWithTtl(
           .length,
       0
     );
+    const manualSlotTotal = manualPreviewGroups.reduce(
+      (sum, group) => sum + (group.teams || []).length,
+      0
+    );
+    const manualSlotsComplete =
+      manualSlotTotal > 0 && filledSlotCount >= manualSlotTotal;
+    const selectedSetupSeriesIndex = tournamentSeriesClasses.findIndex(
+      (series) => String(series.id) === String(selectedSetupSeries?.id || "")
+    );
+    const nextSetupSeries =
+      tournamentSeriesClasses.length > 1 && selectedSetupSeriesIndex >= 0
+        ? tournamentSeriesClasses[
+            (selectedSetupSeriesIndex + 1) % tournamentSeriesClasses.length
+          ]
+        : null;
+    const doneWithSelectedClassLabel = selectedSetupSeries
+      ? language === "no"
+        ? `Ferdig med ${selectedSetupSeries.name}`
+        : `Done with ${selectedSetupSeries.name}`
+      : "";
+    const continueToNextClassLabel = nextSetupSeries
+      ? language === "no"
+        ? `Fortsett til ${nextSetupSeries.name}`
+        : `Continue to ${nextSetupSeries.name}`
+      : "";
     const previewFirstRound =
       (knockoutPreview.quarterFinals || []).length > 0
         ? knockoutPreview.quarterFinals
@@ -10435,8 +11939,8 @@ const savedRound = readStorageWithTtl(
       },
     ];
 
-    const findKnockoutMatch = (label) => {
-      const knockout = activeTournament?.knockout || {};
+    const findKnockoutMatch = (label, knockoutOverride = displayKnockout) => {
+      const knockout = knockoutOverride || {};
       return [
         ...(knockout.quarterFinals || []),
         ...(knockout.semiFinals || []),
@@ -10445,16 +11949,21 @@ const savedRound = readStorageWithTtl(
       ].find((match) => match?.label === label || match?.id === label);
     };
 
-    const resolveKnockoutSource = (source) => {
+    const resolveKnockoutSource = (source, context = {}) => {
       const raw = String(source || "").trim();
+      const contextAdvancingTeams =
+        context.advancingTeamsByGroup || selectedAdvancingTeamsByGroup;
+      const contextMatches =
+        context.matches || selectedSetupTournament?.matches || [];
+      const contextKnockout = context.knockout || displayKnockout;
       const groupPosition = raw.match(/^([A-Z])([12])$/);
       if (groupPosition) {
         const [, groupCode, position] = groupPosition;
-        const group = advancingTeamsByGroup.find(
+        const group = contextAdvancingTeams.find(
           (item) => item.groupCode === groupCode
         );
         if (!group) return raw;
-        const hasCompletedGroupMatch = tournamentMatches.some(
+        const hasCompletedGroupMatch = contextMatches.some(
           (match) =>
             match.groupId === group.groupId &&
             isMatchCompleted(match)
@@ -10465,29 +11974,29 @@ const savedRound = readStorageWithTtl(
 
       const winnerMatch = raw.match(/^Winner (QF\d+|SF\d+)$/);
       if (winnerMatch) {
-        const match = findKnockoutMatch(winnerMatch[1]);
+        const match = findKnockoutMatch(winnerMatch[1], contextKnockout);
         return match?.winnerSource
-          ? resolveKnockoutSource(match.winnerSource)
+          ? resolveKnockoutSource(match.winnerSource, context)
           : raw;
       }
 
       const loserMatch = raw.match(/^Loser (QF\d+|SF\d+)$/);
       if (loserMatch) {
-        const match = findKnockoutMatch(loserMatch[1]);
+        const match = findKnockoutMatch(loserMatch[1], contextKnockout);
         return match?.loserSource
-          ? resolveKnockoutSource(match.loserSource)
+          ? resolveKnockoutSource(match.loserSource, context)
           : raw;
       }
 
       return raw;
     };
 
-    const renderBracketMatch = (match, stageKey, isFinal = false) => {
+    const renderBracketMatch = (match, stageKey, isFinal = false, context = {}) => {
       if (!match) return null;
-      const teamA = resolveKnockoutSource(match.sourceA || match.teamA);
-      const teamB = resolveKnockoutSource(match.sourceB || match.teamB);
+      const teamA = resolveKnockoutSource(match.sourceA || match.teamA, context);
+      const teamB = resolveKnockoutSource(match.sourceB || match.teamB, context);
       const winner = match.winnerSource
-        ? resolveKnockoutSource(match.winnerSource)
+        ? resolveKnockoutSource(match.winnerSource, context)
         : "";
 
       return (
@@ -10525,15 +12034,16 @@ const savedRound = readStorageWithTtl(
                   ...(isWinner ? styles.tournamentBracketLineWinner : {}),
                 }}
                 onClick={() => {
-                  updateKnockoutMatchWinner(
-                    stageKey,
-                    match.id,
-                    source,
-                    source === (match.sourceA || match.teamA)
-                      ? match.sourceB || match.teamB
-                      : match.sourceA || match.teamA
-                  );
-                }}
+                    updateKnockoutMatchWinner(
+                      stageKey,
+                      match.id,
+                      source,
+                      source === (match.sourceA || match.teamA)
+                        ? match.sourceB || match.teamB
+                        : match.sourceA || match.teamA,
+                      context.seriesId || ""
+                    );
+                  }}
               >
                 <span
                   style={
@@ -10557,10 +12067,10 @@ const savedRound = readStorageWithTtl(
       );
     };
 
-    const renderBracketPreviewMatch = (match, isFinal = false) => {
+    const renderBracketPreviewMatch = (match, isFinal = false, context = {}) => {
       if (!match) return null;
-      const teamA = resolveKnockoutSource(match.sourceA || match.teamA);
-      const teamB = resolveKnockoutSource(match.sourceB || match.teamB);
+      const teamA = resolveKnockoutSource(match.sourceA || match.teamA, context);
+      const teamB = resolveKnockoutSource(match.sourceB || match.teamB, context);
 
       return (
         <div
@@ -10875,9 +12385,12 @@ const savedRound = readStorageWithTtl(
       scheduleCursor += duration + scheduleBreakMinutes;
     });
 
-    const displayHallScheduleBatches = applyTournamentScheduleOverrides(
-      hallScheduleBatches,
-      scheduleCourtCount
+    const generatedHallSchedule = buildTournamentHallSchedule(activeTournament);
+    const displayHallScheduleBatches = filterScheduleBatchesBySeries(
+      generatedHallSchedule.batches,
+      hasExplicitTournamentSeries(activeTournament)
+        ? activeTournamentSeriesFilter
+        : "all"
     );
     const courtBlockSummaries = getCourtBlockSummaries(activeTournament);
     const unplacedScheduleMatches = getUnplacedScheduleMatches(activeTournament);
@@ -11077,6 +12590,82 @@ const savedRound = readStorageWithTtl(
                   </div>
 
                   <div style={styles.tournamentSetupBlock}>
+                    <div style={styles.tournamentSectionHeader}>
+                      <div>
+                        <div style={styles.tournamentMiniTitle}>
+                          {tournamentText.classesLabel}
+                        </div>
+                        <div style={styles.tournamentSidebarNote}>
+                          {tournamentText.bothSeriesLabel}
+                        </div>
+                      </div>
+                      <div style={styles.tournamentInlineActions}>
+                        <button
+                          type="button"
+                          style={styles.secondaryButtonCompact}
+                          onClick={() =>
+                            addTournamentSeries({
+                              name: "4-manns",
+                              playersPerTeam: 4,
+                            })
+                          }
+                        >
+                          {tournamentText.addFourManns}
+                        </button>
+                        <button
+                          type="button"
+                          style={styles.secondaryButtonCompact}
+                          onClick={() =>
+                            addTournamentSeries({
+                              name: "5-manns",
+                              playersPerTeam: 5,
+                            })
+                          }
+                        >
+                          {tournamentText.addFiveManns}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div style={styles.tournamentClassCompactRow}>
+                      <div style={styles.tournamentSubTabs}>
+                        {tournamentSeriesClasses.map((series) => (
+                          <button
+                            key={`setup-series-${series.id}`}
+                            type="button"
+                            style={{
+                              ...styles.tournamentSubTab,
+                              ...(String(selectedSetupSeries?.id || "") ===
+                              String(series.id)
+                                ? styles.tournamentSubTabActive
+                                : {}),
+                            }}
+                            onClick={() =>
+                              setActiveTournamentSetupSeriesId(series.id)
+                            }
+                          >
+                            {series.name}
+                          </button>
+                        ))}
+                      </div>
+
+                      {hasExplicitTournamentSeries(activeTournament) &&
+                        selectedSetupSeries &&
+                        tournamentSeriesClasses.length > 1 && (
+                          <button
+                            type="button"
+                            style={styles.dangerButtonCompact}
+                            onClick={() =>
+                              removeTournamentSeries(selectedSetupSeries.id)
+                            }
+                          >
+                            {tournamentText.removeSeries}
+                          </button>
+                        )}
+                    </div>
+                  </div>
+
+                  <div style={styles.tournamentSetupBlock}>
                     <div style={styles.tournamentMiniTitle}>
                       {tournamentText.structureLabel}
                     </div>
@@ -11085,9 +12674,11 @@ const savedRound = readStorageWithTtl(
                     </div>
                     <select
                       style={styles.select}
-                      value={activeTournament.format}
+                      value={selectedSetupTournament?.format || activeTournament.format}
                       onChange={(e) =>
-                        updateActiveTournament({ format: e.target.value })
+                        updateSelectedTournamentClassConfig({
+                          format: e.target.value,
+                        })
                       }
                     >
                       <option value="group-stage">
@@ -11115,7 +12706,7 @@ const savedRound = readStorageWithTtl(
                           style={styles.input}
                           type="number"
                           min={2}
-                          value={activeTournament.totalTeams}
+                          value={configuredTotalTeams}
                           onChange={(e) => {
                             const nextTotalTeams = Math.max(
                               2,
@@ -11123,10 +12714,14 @@ const savedRound = readStorageWithTtl(
                             );
                             const nextGroupCount = Math.max(
                               1,
-                              Number(activeTournament.groupCount || 2)
+                              Number(
+                                selectedSetupSeries?.groupCount ||
+                                  activeTournament.groupCount ||
+                                  2
+                              )
                             );
 
-                            updateActiveTournament({
+                            updateSelectedTournamentClassConfig({
                               totalTeams: nextTotalTeams,
                               teamsPerGroup: Math.max(
                                 1,
@@ -11145,7 +12740,14 @@ const savedRound = readStorageWithTtl(
                           style={styles.input}
                           type="number"
                           min={1}
-                          value={activeTournament.groupCount}
+                          value={Math.max(
+                            1,
+                            Number(
+                              selectedSetupSeries?.groupCount ||
+                                activeTournament.groupCount ||
+                                2
+                            )
+                          )}
                           onChange={(e) => {
                             const nextGroupCount = Math.max(
                               1,
@@ -11153,10 +12755,10 @@ const savedRound = readStorageWithTtl(
                             );
                             const nextTotalTeams = Math.max(
                               2,
-                              Number(activeTournament.totalTeams || 10)
+                              Number(configuredTotalTeams || 10)
                             );
 
-                            updateActiveTournament({
+                            updateSelectedTournamentClassConfig({
                               groupCount: nextGroupCount,
                               teamsPerGroup: Math.max(
                                 1,
@@ -11176,7 +12778,7 @@ const savedRound = readStorageWithTtl(
                           style={styles.input}
                           type="number"
                           min={1}
-                          value={activeTournament.teamsPerGroup}
+                          value={configuredTeamsPerGroup}
                           onChange={(e) => {
                             const nextTeamsPerGroup = Math.max(
                               1,
@@ -11184,10 +12786,14 @@ const savedRound = readStorageWithTtl(
                             );
                             const nextGroupCount = Math.max(
                               1,
-                              Number(activeTournament.groupCount || 2)
+                              Number(
+                                selectedSetupSeries?.groupCount ||
+                                  activeTournament.groupCount ||
+                                  2
+                              )
                             );
 
-                            updateActiveTournament({
+                            updateSelectedTournamentClassConfig({
                               teamsPerGroup: nextTeamsPerGroup,
                               totalTeams: nextGroupCount * nextTeamsPerGroup,
                             });
@@ -11202,10 +12808,16 @@ const savedRound = readStorageWithTtl(
                         <input
                           style={styles.input}
                           type="number"
-                          min={2}
-                          max={2}
+                          min={1}
                           value={configuredQualifiersPerGroup}
-                          readOnly
+                          onChange={(e) =>
+                            updateSelectedTournamentClassConfig({
+                              qualifiersPerGroup: Math.max(
+                                1,
+                                Number(e.target.value) || 1
+                              ),
+                            })
+                          }
                         />
                       </div>
                     </div>
@@ -11275,7 +12887,7 @@ const savedRound = readStorageWithTtl(
                           min={1}
                           value={scheduleGroupMinutes}
                           onChange={(e) =>
-                            updateActiveTournament({
+                            updateSelectedTournamentClassConfig({
                               groupMatchMinutes: Math.max(
                                 1,
                                 Number(e.target.value) || 1
@@ -11295,7 +12907,7 @@ const savedRound = readStorageWithTtl(
                           min={1}
                           value={schedulePlayoffMinutes}
                           onChange={(e) =>
-                            updateActiveTournament({
+                            updateSelectedTournamentClassConfig({
                               playoffMatchMinutes: Math.max(
                                 1,
                                 Number(e.target.value) || 1
@@ -11389,6 +13001,27 @@ const savedRound = readStorageWithTtl(
                       </div>
                     </div>
 
+                    <div style={styles.tournamentSubTabs}>
+                      {tournamentSeriesClasses.map((series) => (
+                        <button
+                          key={`manual-series-${series.id}`}
+                          type="button"
+                          style={{
+                            ...styles.tournamentSubTab,
+                            ...(String(selectedSetupSeries?.id || "") ===
+                            String(series.id)
+                              ? styles.tournamentSubTabActive
+                              : {}),
+                          }}
+                          onClick={() =>
+                            setActiveTournamentSetupSeriesId(series.id)
+                          }
+                        >
+                          {series.name}
+                        </button>
+                      ))}
+                    </div>
+
                     <div style={styles.tournamentSidebarSlotList}>
                       {manualPreviewGroups.map((group, groupIndex) => {
                         const groupColor = getTournamentGroupColor(group.code);
@@ -11443,6 +13076,31 @@ const savedRound = readStorageWithTtl(
                         );
                       })}
                     </div>
+
+                    {manualSlotsComplete && selectedSetupSeries && (
+                      <div style={styles.tournamentInlineActions}>
+                        <button
+                          type="button"
+                          style={styles.primaryButtonSmall}
+                          onClick={() =>
+                            setTournamentActionMessage(doneWithSelectedClassLabel)
+                          }
+                        >
+                          {doneWithSelectedClassLabel}
+                        </button>
+                        {nextSetupSeries && (
+                          <button
+                            type="button"
+                            style={styles.secondaryButtonCompact}
+                            onClick={() =>
+                              setActiveTournamentSetupSeriesId(nextSetupSeries.id)
+                            }
+                          >
+                            {continueToNextClassLabel}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <button
@@ -11708,6 +13366,45 @@ const savedRound = readStorageWithTtl(
                     ))}
                   </div>
 
+                  {hasTournamentClassFilters &&
+                    ["groups", "matches", "table", "bracket"].includes(
+                      activeTournamentView
+                    ) && (
+                      <div style={styles.tournamentSubTabs}>
+                        <button
+                          type="button"
+                          style={{
+                            ...styles.tournamentSubTab,
+                            ...(activeTournamentSeriesFilter === "all"
+                              ? styles.tournamentSubTabActive
+                              : {}),
+                          }}
+                          onClick={() => setActiveTournamentSeriesFilter("all")}
+                        >
+                          {tournamentText.allClassesLabel}
+                        </button>
+                        {tournamentSeriesClasses.map((series) => (
+                          <button
+                            key={`filter-series-${series.id}`}
+                            type="button"
+                            style={{
+                              ...styles.tournamentSubTab,
+                              ...(String(activeTournamentSeriesFilter) ===
+                              String(series.id)
+                                ? styles.tournamentSubTabActive
+                                : {}),
+                            }}
+                            onClick={() => {
+                              setActiveTournamentSeriesFilter(series.id);
+                              setActiveTournamentSetupSeriesId(series.id);
+                            }}
+                          >
+                            {series.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
                   <div style={styles.tournamentWorkspace}>
                     {activeTournamentView === "overview" && (
                       <div
@@ -11914,18 +13611,19 @@ const savedRound = readStorageWithTtl(
                             </div>
                           </div>
                           <div style={styles.tournamentStatusBadge}>
-                            {filledSlotCount}/{configuredTotalTeams}
+                            {visibleFilledSlotCount}/
+                            {visibleConfiguredTotalTeams || configuredTotalTeams}
                           </div>
                         </div>
 
-                        {manualPreviewGroups.length > 0 ? (
+                        {visibleGroups.length > 0 ? (
                           <div
                             style={{
                               ...styles.tournamentGroupGrid,
                               ...(isMobile ? styles.tournamentGroupGridMobile : {}),
                             }}
                         >
-                          {manualPreviewGroups.map((group, groupIndex) => {
+                          {visibleGroups.map((group, groupIndex) => {
                               const groupColor = getTournamentGroupColor(group.code);
 
                               return (
@@ -12030,70 +13728,174 @@ const savedRound = readStorageWithTtl(
                           </button>
                         </div>
 
-                        {(displayKnockout.quarterFinals || []).length ||
-                        (displayKnockout.semiFinals || []).length ? (
-                          <div
-                            style={{
-                              ...styles.tournamentBracketBoard,
-                              ...(isMobile ? styles.tournamentGroupGridMobile : {}),
-                            }}
-                          >
-                            {(displayKnockout.quarterFinals || []).length > 0 && (
-                              <div style={styles.tournamentBracketStage}>
-                                <div style={styles.tournamentBracketStageTitle}>
-                                  {tournamentText.firstKnockoutLabel}
-                                </div>
-                                {displayKnockout.quarterFinals.map((match) =>
-                                  hasStoredKnockout
-                                    ? renderBracketMatch(match, "quarterFinals")
-                                    : renderBracketPreviewMatch(match)
-                                )}
-                              </div>
-                            )}
+                        {visibleBracketSections.some(
+                          (section) =>
+                            (section.displayKnockout.quarterFinals || [])
+                              .length ||
+                            (section.displayKnockout.semiFinals || []).length
+                        ) ? (
+                          <div style={styles.tournamentStandingsList}>
+                            {visibleBracketSections.map((section) => {
+                              const sectionDisplayKnockout =
+                                section.displayKnockout || {};
+                              const hasSectionKnockout = Boolean(
+                                (sectionDisplayKnockout.quarterFinals || [])
+                                  .length ||
+                                  (sectionDisplayKnockout.semiFinals || []).length
+                              );
+                              if (!hasSectionKnockout) return null;
 
-                            <div style={styles.tournamentBracketStage}>
-                              <div style={styles.tournamentBracketStageTitle}>
-                                {tournamentText.semiFinals}
-                              </div>
-                              {(displayKnockout.semiFinals || []).map((match) =>
-                                hasStoredKnockout
-                                  ? renderBracketMatch(match, "semiFinals")
-                                  : renderBracketPreviewMatch(match)
-                              )}
-                            </div>
+                              const sectionAdvancingTeams = section.standings.map(
+                                (group, index) => {
+                                  const sourceGroup =
+                                    section.groups.find(
+                                      (item) => item.id === group.groupId
+                                    ) || {};
 
-                            <div style={styles.tournamentBracketStage}>
-                              <div style={styles.tournamentBracketStageTitle}>
-                                {tournamentText.final}
-                              </div>
-                              {hasStoredKnockout
-                                ? renderBracketMatch(
-                                    displayKnockout.final,
-                                    "final",
-                                    true
-                                  )
-                                : renderBracketPreviewMatch(
-                                    displayKnockout.final,
-                                    true
+                                  return {
+                                    groupId: group.groupId,
+                                    groupName: group.groupName,
+                                    groupCode:
+                                      sourceGroup.code ||
+                                      getTournamentGroupCode(index),
+                                    winner:
+                                      group.rows?.[0]?.teamName ||
+                                      `${group.groupName} ${tournamentText.winnerLabel}`,
+                                    runnerUp:
+                                      group.rows?.[1]?.teamName ||
+                                      `${group.groupName} ${tournamentText.runnerUpLabel}`,
+                                  };
+                                }
+                              );
+                              const sectionContext = {
+                                seriesId: hasExplicitTournamentSeries(activeTournament)
+                                  ? section.series.id
+                                  : "",
+                                knockout: sectionDisplayKnockout,
+                                matches: section.tournament.matches || [],
+                                advancingTeamsByGroup: sectionAdvancingTeams,
+                              };
+
+                              return (
+                                <div
+                                  key={`bracket-series-${section.series.id}`}
+                                  style={styles.tournamentStandingsCard}
+                                >
+                                  {hasExplicitTournamentSeries(activeTournament) && (
+                                    <div style={styles.tournamentMiniTitle}>
+                                      {section.series.name}
+                                    </div>
                                   )}
-                            </div>
+                                  <div
+                                    style={{
+                                      ...styles.tournamentBracketBoard,
+                                      ...(isMobile
+                                        ? styles.tournamentGroupGridMobile
+                                        : {}),
+                                    }}
+                                  >
+                                    {(sectionDisplayKnockout.quarterFinals || [])
+                                      .length > 0 && (
+                                      <div style={styles.tournamentBracketStage}>
+                                        <div
+                                          style={
+                                            styles.tournamentBracketStageTitle
+                                          }
+                                        >
+                                          {tournamentText.firstKnockoutLabel}
+                                        </div>
+                                        {sectionDisplayKnockout.quarterFinals.map(
+                                          (match) =>
+                                            section.hasStoredKnockout
+                                              ? renderBracketMatch(
+                                                  match,
+                                                  "quarterFinals",
+                                                  false,
+                                                  sectionContext
+                                                )
+                                              : renderBracketPreviewMatch(
+                                                  match,
+                                                  false,
+                                                  sectionContext
+                                                )
+                                        )}
+                                      </div>
+                                    )}
 
-                            {activeTournament.thirdPlaceMatch &&
-                              displayKnockout.thirdPlace && (
-                                <div style={styles.tournamentBracketStage}>
-                                  <div style={styles.tournamentBracketStageTitle}>
-                                    {tournamentText.thirdPlace}
-                                  </div>
-                                  {hasStoredKnockout
-                                    ? renderBracketMatch(
-                                        displayKnockout.thirdPlace,
-                                        "thirdPlace"
-                                      )
-                                    : renderBracketPreviewMatch(
-                                        displayKnockout.thirdPlace
+                                    <div style={styles.tournamentBracketStage}>
+                                      <div
+                                        style={styles.tournamentBracketStageTitle}
+                                      >
+                                        {tournamentText.semiFinals}
+                                      </div>
+                                      {(
+                                        sectionDisplayKnockout.semiFinals || []
+                                      ).map((match) =>
+                                        section.hasStoredKnockout
+                                          ? renderBracketMatch(
+                                              match,
+                                              "semiFinals",
+                                              false,
+                                              sectionContext
+                                            )
+                                          : renderBracketPreviewMatch(
+                                              match,
+                                              false,
+                                              sectionContext
+                                            )
                                       )}
+                                    </div>
+
+                                    <div style={styles.tournamentBracketStage}>
+                                      <div
+                                        style={styles.tournamentBracketStageTitle}
+                                      >
+                                        {tournamentText.final}
+                                      </div>
+                                      {section.hasStoredKnockout
+                                        ? renderBracketMatch(
+                                            sectionDisplayKnockout.final,
+                                            "final",
+                                            true,
+                                            sectionContext
+                                          )
+                                        : renderBracketPreviewMatch(
+                                            sectionDisplayKnockout.final,
+                                            true,
+                                            sectionContext
+                                          )}
+                                    </div>
+
+                                    {activeTournament.thirdPlaceMatch &&
+                                      sectionDisplayKnockout.thirdPlace && (
+                                        <div
+                                          style={styles.tournamentBracketStage}
+                                        >
+                                          <div
+                                            style={
+                                              styles.tournamentBracketStageTitle
+                                            }
+                                          >
+                                            {tournamentText.thirdPlace}
+                                          </div>
+                                          {section.hasStoredKnockout
+                                            ? renderBracketMatch(
+                                                sectionDisplayKnockout.thirdPlace,
+                                                "thirdPlace",
+                                                false,
+                                                sectionContext
+                                              )
+                                            : renderBracketPreviewMatch(
+                                                sectionDisplayKnockout.thirdPlace,
+                                                false,
+                                                sectionContext
+                                              )}
+                                        </div>
+                                      )}
+                                  </div>
                                 </div>
-                              )}
+                              );
+                            })}
                           </div>
                         ) : (
                           <div style={styles.tournamentMutedPanel}>
@@ -12422,19 +14224,19 @@ const savedRound = readStorageWithTtl(
                           {renderHallSchedulePreview(18)}
                         </div>
 
-                        {tournamentMatches.length > 0 ? (
+                        {visibleTournamentMatches.length > 0 ? (
                           <div style={styles.tournamentMatchSummaryGrid}>
                             <div style={styles.tournamentInfoTile}>
                               <span>{tournamentText.matchStatusCompleted}</span>
-                              <strong>{completedMatchesCount}</strong>
+                              <strong>{visibleCompletedMatchesCount}</strong>
                             </div>
                             <div style={styles.tournamentInfoTile}>
                               <span>{tournamentText.matchStatusStarted}</span>
-                              <strong>{startedMatchesCount}</strong>
+                              <strong>{visibleStartedMatchesCount}</strong>
                             </div>
                             <div style={styles.tournamentInfoTile}>
                               <span>{tournamentText.matchStatusScheduled}</span>
-                              <strong>{scheduledMatchesCount}</strong>
+                              <strong>{visibleScheduledMatchesCount}</strong>
                             </div>
                           </div>
                         ) : (
@@ -12457,17 +14259,17 @@ const savedRound = readStorageWithTtl(
                             </div>
                           </div>
                           <div style={styles.tournamentStatusBadge}>
-                            {tournamentStandings.length} {tournamentText.groupsLabel}
+                            {visibleStandings.length} {tournamentText.groupsLabel}
                           </div>
                         </div>
 
                         {activeTournament.format === "group-stage" &&
-                        Array.isArray(tournamentStandings) &&
-                        tournamentStandings.length > 0 ? (
+                        Array.isArray(visibleStandings) &&
+                        visibleStandings.length > 0 ? (
                           <div style={styles.tournamentStandingsList}>
-                            {tournamentStandings.map((group, groupIndex) => {
+                            {visibleStandings.map((group, groupIndex) => {
                               const sourceGroup =
-                                (activeTournament.groups || []).find(
+                                visibleGroups.find(
                                   (item) => item.id === group.groupId
                                 ) || {};
                               const groupCode =
@@ -12650,6 +14452,274 @@ const savedRound = readStorageWithTtl(
                             </div>
                           )}
                         </div>
+
+                        <div style={styles.tournamentSetupDivider} />
+
+                        <div style={styles.tournamentSectionHeader}>
+                          <div>
+                            <div style={styles.tournamentMiniTitle}>
+                              {tournamentText.classVisibilityTitle}
+                            </div>
+                            <div style={styles.tournamentMutedText}>
+                              {tournamentText.classVisibilityHint}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div style={styles.tournamentClassVisibilityList}>
+                          {tournamentSeriesClasses.map((series) => (
+                            <div
+                              key={`class-visibility-${series.id}`}
+                              style={styles.tournamentClassVisibilityRow}
+                            >
+                              <strong>{series.name}</strong>
+                              <div style={styles.tournamentClassVisibilityActions}>
+                                <div style={styles.tournamentClassSegmented}>
+                                  {seriesPublicStatusOptions.map((option) => {
+                                    const isActive =
+                                      series.publicStatus === option.id;
+                                    return (
+                                      <button
+                                        key={`${series.id}-${option.id}`}
+                                        type="button"
+                                        style={{
+                                          ...styles.tournamentClassSegmentButton,
+                                          ...(isActive
+                                            ? styles.tournamentClassSegmentButtonActive
+                                            : {}),
+                                        }}
+                                        onClick={() =>
+                                          updateTournamentSeriesPublicStatus(
+                                            series.id,
+                                            option.id
+                                          )
+                                        }
+                                      >
+                                        {option.label}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                <button
+                                  type="button"
+                                  style={styles.secondaryButtonCompact}
+                                  onClick={() =>
+                                    updateTournamentSeriesPublicStatus(
+                                      series.id,
+                                      "live"
+                                    )
+                                  }
+                                >
+                                  {language === "no"
+                                    ? `Start ${series.name} live`
+                                    : `Start ${series.name} live`}
+                                </button>
+                                <button
+                                  type="button"
+                                  style={styles.secondaryButtonCompact}
+                                  onClick={() =>
+                                    updateTournamentSeriesPublicStatus(
+                                      series.id,
+                                      "completed"
+                                    )
+                                  }
+                                >
+                                  {language === "no"
+                                    ? `Marker ${series.name} ferdig`
+                                    : `Mark ${series.name} finished`}
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div style={styles.tournamentSetupDivider} />
+
+                        <div style={styles.tournamentSectionHeader}>
+                          <div>
+                            <div style={styles.tournamentMiniTitle}>
+                              {tournamentText.liveViewDesign}
+                            </div>
+                            <div style={styles.tournamentMutedText}>
+                              {tournamentText.publicPreviewSubtitle}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            style={styles.secondaryButtonCompact}
+                            onClick={() => applyPublicLiveThemePreset("clean-white")}
+                          >
+                            {tournamentText.resetTheme}
+                          </button>
+                        </div>
+
+                        <div style={styles.tournamentMiniTitle}>
+                          {tournamentText.themePresetLabel}
+                        </div>
+                        <div style={styles.tournamentThemePresetGrid}>
+                          {Object.entries(PUBLIC_THEME_PRESETS).map(
+                            ([presetKey, preset]) => (
+                              <button
+                                key={`live-${presetKey}`}
+                                type="button"
+                                style={{
+                                  ...styles.tournamentThemePresetButton,
+                                  borderColor:
+                                    activePublicLiveTheme.preset === presetKey
+                                      ? preset.primary
+                                      : "#dbe3ef",
+                                }}
+                                onClick={() => applyPublicLiveThemePreset(presetKey)}
+                              >
+                                <span
+                                  style={{
+                                    ...styles.tournamentThemeSwatch,
+                                    background: preset.background,
+                                    borderColor: preset.primary,
+                                  }}
+                                />
+                                <strong>
+                                  {preset.label?.[language] || preset.label?.en}
+                                </strong>
+                                <small>{tournamentText.usePreset}</small>
+                              </button>
+                            )
+                          )}
+                        </div>
+
+                        <div
+                          style={{
+                            ...styles.tournamentFieldGrid,
+                            ...(isMobile ? styles.tournamentFieldGridMobile : {}),
+                          }}
+                        >
+                          {[
+                            ["background", tournamentText.pageBackground],
+                            ["panel", tournamentText.cardPanel],
+                            ["primary", tournamentText.primaryColor],
+                            ["accent", tournamentText.accentColor],
+                            ["text", tournamentText.textColor],
+                          ].map(([field, label]) => (
+                            <div key={`live-${field}`}>
+                              <div style={styles.settingsLabel}>{label}</div>
+                              <input
+                                style={styles.input}
+                                value={activePublicLiveTheme[field] || ""}
+                                onChange={(e) =>
+                                  updatePublicLiveThemeField(field, e.target.value)
+                                }
+                              />
+                              {publicLiveThemeColorErrors[field] && (
+                                <div style={styles.tournamentInlineWarning}>
+                                  {tournamentText.invalidColor}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        <div
+                          style={{
+                            ...styles.tournamentFieldGrid,
+                            ...(isMobile ? styles.tournamentFieldGridMobile : {}),
+                          }}
+                        >
+                          {[
+                            [
+                              "publicLiveLogoUrl",
+                              tournamentText.liveLogoUrlLabel,
+                            ],
+                            [
+                              "publicLiveBackgroundUrl",
+                              tournamentText.liveBackgroundUrlLabel,
+                            ],
+                          ].map(([field, label]) => (
+                            <div key={field}>
+                              <div style={styles.settingsLabel}>{label}</div>
+                              <input
+                                style={styles.input}
+                                type="url"
+                                placeholder={tournamentText.optionalPlaceholder}
+                                value={activeTournament[field] || ""}
+                                onChange={(e) =>
+                                  updateActiveTournament({
+                                    [field]: e.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+                          ))}
+                        </div>
+
+                        <div
+                          style={{
+                            ...styles.tournamentLiveThemePreview,
+                            background: activePublicLiveBackgroundUrl
+                              ? `linear-gradient(145deg, ${hexToRgba(
+                                  activePublicLiveTheme.surface,
+                                  0.91
+                                )}, ${hexToRgba(
+                                  activePublicLiveTheme.panel,
+                                  0.88
+                                )}), url(${activePublicLiveBackgroundUrl})`
+                              : `linear-gradient(145deg, ${activePublicLiveTheme.surface}, ${activePublicLiveTheme.panel})`,
+                            backgroundSize: activePublicLiveBackgroundUrl
+                              ? "cover"
+                              : undefined,
+                            backgroundPosition: activePublicLiveBackgroundUrl
+                              ? "center"
+                              : undefined,
+                            borderColor: activePublicLiveTheme.border,
+                            color: activePublicLiveTheme.text,
+                          }}
+                        >
+                          <div style={styles.tournamentLiveThemePreviewHeader}>
+                            {activePublicLiveLogoUrl && (
+                              <span
+                                style={{
+                                  ...styles.tournamentLiveThemeLogo,
+                                  background: activePublicLiveTheme.surface,
+                                  borderColor: activePublicLiveTheme.border,
+                                }}
+                              >
+                                <img
+                                  src={activePublicLiveLogoUrl}
+                                  alt=""
+                                  style={styles.publicTournamentHeroLogoImage}
+                                />
+                              </span>
+                            )}
+                            <div style={styles.tournamentLiveThemePreviewTitle}>
+                              <strong>{getTournamentPublicTitle(activeTournament)}</strong>
+                              <span style={{ color: activePublicLiveTheme.mutedText }}>
+                                {tournamentText.publicLinkReadonly}
+                              </span>
+                            </div>
+                          </div>
+                          <div
+                            style={{
+                              ...styles.tournamentThemePreviewSchedule,
+                              background: activePublicLiveTheme.surface,
+                              borderColor: activePublicLiveTheme.border,
+                              color: activePublicLiveTheme.text,
+                            }}
+                          >
+                            <span>09:00</span>
+                            <strong>
+                              {tournamentText.teamLabel} A {tournamentText.vsLabel}{" "}
+                              {tournamentText.teamLabel} B
+                            </strong>
+                            <span
+                              style={{
+                                ...styles.tournamentThemePreviewButton,
+                                background: activePublicLiveTheme.primary,
+                                color: activePublicLiveTheme.background,
+                              }}
+                            >
+                              {tournamentText.matchStatusStarted}
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     )}
 
@@ -12820,18 +14890,25 @@ const savedRound = readStorageWithTtl(
                         >
                           {[
                             ["publicTitle", tournamentText.publicTitleLabel, "text"],
+                            [
+                              "organizerName",
+                              tournamentText.organizerDisplayNameLabel,
+                              "text",
+                              tournamentText.optionalPlaceholder,
+                            ],
                             ["startDate", tournamentText.dateLabel, "date"],
                             ["startTime", tournamentText.startTimeLabel, "time"],
                             ["country", tournamentText.countryLabel, "text"],
                             ["city", tournamentText.cityLabel, "text"],
                             ["locationName", tournamentText.venueLabel, "text"],
                             ["address", tournamentText.addressLabel, "text"],
-                          ].map(([field, label, type]) => (
+                          ].map(([field, label, type, placeholder]) => (
                             <div key={field}>
                               <div style={styles.settingsLabel}>{label}</div>
                               <input
                                 style={styles.input}
                                 type={type}
+                                placeholder={placeholder || ""}
                                 value={activeTournament[field] || ""}
                                 onChange={(e) =>
                                   updateActiveTournament({
@@ -12980,209 +15057,6 @@ const savedRound = readStorageWithTtl(
                             </div>
                           ))}
                         </div>
-
-                        <div style={styles.tournamentSetupDivider} />
-
-                        <div style={styles.tournamentSectionHeader}>
-                          <div>
-                            <div style={styles.tournamentMiniTitle}>
-                              {tournamentText.seriesLabel}
-                            </div>
-                            <div style={styles.tournamentMutedText}>
-                              {tournamentText.bothSeriesLabel}
-                            </div>
-                          </div>
-                          <button
-                            style={styles.primaryButtonSmall}
-                            onClick={addTournamentSeries}
-                          >
-                            {tournamentText.addSeries}
-                          </button>
-                        </div>
-
-                        {(activeTournament.series || []).length === 0 ? (
-                          <div style={styles.tournamentMutedPanel}>
-                            {tournamentText.noTeamsYet}
-                          </div>
-                        ) : (
-                          <div style={styles.tournamentMarketingSeriesList}>
-                            {(activeTournament.series || []).map((series) => (
-                              <div
-                                key={series.id}
-                                style={styles.tournamentMarketingSeriesCard}
-                              >
-                                <div
-                                  style={{
-                                    ...styles.tournamentFieldGrid,
-                                    ...(isMobile
-                                      ? styles.tournamentFieldGridMobile
-                                      : {}),
-                                  }}
-                                >
-                                  <div>
-                                    <div style={styles.settingsLabel}>
-                                      {tournamentText.seriesNameLabel}
-                                    </div>
-                                    <input
-                                      style={styles.input}
-                                      value={series.name || ""}
-                                      onChange={(e) =>
-                                        updateTournamentSeries(series.id, {
-                                          name: e.target.value,
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                  <div>
-                                    <div style={styles.settingsLabel}>
-                                      {tournamentText.teamSizeLabel}
-                                    </div>
-                                    <select
-                                      style={styles.select}
-                                      value={String(series.teamSize || 4)}
-                                      onChange={(e) =>
-                                        updateTournamentSeries(series.id, {
-                                          teamSize: Number(e.target.value),
-                                        })
-                                      }
-                                    >
-                                      <option value="4">
-                                        {tournamentText.fourSide}
-                                      </option>
-                                      <option value="5">
-                                        {tournamentText.fiveSide}
-                                      </option>
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <div style={styles.settingsLabel}>
-                                      {tournamentText.formatLabel}
-                                    </div>
-                                    <select
-                                      style={styles.select}
-                                      value={series.format || "group-stage"}
-                                      onChange={(e) =>
-                                        updateTournamentSeries(series.id, {
-                                          format: e.target.value,
-                                        })
-                                      }
-                                    >
-                                      <option value="group-stage">
-                                        {tournamentText.formatGroupStage}
-                                      </option>
-                                      <option value="knockout">
-                                        {tournamentText.knockoutLabel}
-                                      </option>
-                                      <option value="setup">
-                                        {tournamentText.tournamentSetupTitle}
-                                      </option>
-                                      <option value="other">
-                                        {tournamentText.otherClub || "Other"}
-                                      </option>
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <div style={styles.settingsLabel}>
-                                      {tournamentText.maxTeamsLabel}
-                                    </div>
-                                    <input
-                                      style={styles.input}
-                                      type="number"
-                                      value={series.maxTeams || ""}
-                                      onChange={(e) =>
-                                        updateTournamentSeries(series.id, {
-                                          maxTeams: e.target.value,
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                  <div>
-                                    <div style={styles.settingsLabel}>
-                                      {tournamentText.minimumTeamsLabel}
-                                    </div>
-                                    <input
-                                      style={styles.input}
-                                      type="number"
-                                      value={series.minimumTeams || ""}
-                                      onChange={(e) =>
-                                        updateTournamentSeries(series.id, {
-                                          minimumTeams: e.target.value,
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                  <div>
-                                    <div style={styles.settingsLabel}>
-                                      {tournamentText.startTimeLabel}
-                                    </div>
-                                    <input
-                                      style={styles.input}
-                                      type="time"
-                                      value={series.startTime || ""}
-                                      onChange={(e) =>
-                                        updateTournamentSeries(series.id, {
-                                          startTime: e.target.value,
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                  <div>
-                                    <div style={styles.settingsLabel}>
-                                      {tournamentText.prizeLabel}
-                                    </div>
-                                    <input
-                                      style={styles.input}
-                                      value={series.prizeText || ""}
-                                      onChange={(e) =>
-                                        updateTournamentSeries(series.id, {
-                                          prizeText: e.target.value,
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                  <div>
-                                    <div style={styles.settingsLabel}>
-                                      {tournamentText.feeLabel}
-                                    </div>
-                                    <input
-                                      style={styles.input}
-                                      value={series.feeText || ""}
-                                      onChange={(e) =>
-                                        updateTournamentSeries(series.id, {
-                                          feeText: e.target.value,
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                </div>
-
-                                <div>
-                                  <div style={styles.settingsLabel}>
-                                    {tournamentText.notesLabel}
-                                  </div>
-                                  <textarea
-                                    style={styles.textarea}
-                                    value={series.notes || ""}
-                                    onChange={(e) =>
-                                      updateTournamentSeries(series.id, {
-                                        notes: e.target.value,
-                                      })
-                                    }
-                                  />
-                                </div>
-
-                                <button
-                                  style={styles.dangerButtonCompact}
-                                  onClick={() =>
-                                    removeTournamentSeries(series.id)
-                                  }
-                                >
-                                  {tournamentText.removeSeries}
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
@@ -16646,6 +18520,44 @@ const styles = {
     width: "100%",
   },
 
+  tournamentLiveThemePreview: {
+    display: "grid",
+    gap: "12px",
+    maxWidth: "520px",
+    padding: "15px",
+    borderRadius: "18px",
+    border: "1px solid #dbe3ef",
+    minWidth: 0,
+    overflow: "hidden",
+  },
+
+  tournamentLiveThemePreviewHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    minWidth: 0,
+  },
+
+  tournamentLiveThemePreviewTitle: {
+    display: "grid",
+    gap: "3px",
+    minWidth: 0,
+    fontSize: "13px",
+    fontWeight: "900",
+  },
+
+  tournamentLiveThemeLogo: {
+    width: "38px",
+    height: "38px",
+    borderRadius: "12px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid #dbe3ef",
+    overflow: "hidden",
+    flexShrink: 0,
+  },
+
   tournamentPromotionPreviewCard: {
     borderRadius: "20px",
     overflow: "hidden",
@@ -16889,6 +18801,25 @@ const styles = {
     flexWrap: "wrap",
   },
 
+  publicTournamentHeroLogo: {
+    width: "42px",
+    height: "42px",
+    borderRadius: "12px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid rgba(255,255,255,0.16)",
+    overflow: "hidden",
+    flexShrink: 0,
+  },
+
+  publicTournamentHeroLogoImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    display: "block",
+  },
+
   publicTournamentTitle: {
     margin: 0,
     color: "#fff",
@@ -16923,6 +18854,33 @@ const styles = {
     background: "rgba(255,255,255,0.08)",
     border: "1px solid rgba(255,255,255,0.12)",
     minWidth: 0,
+  },
+
+  publicTournamentClassStatusList: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "8px",
+    minWidth: 0,
+  },
+
+  publicTournamentClassStatusBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "999px",
+    padding: "6px 10px",
+    background: "#dcfce7",
+    border: "1px solid #86efac",
+    color: "#166534",
+    fontSize: "12px",
+    fontWeight: "900",
+    lineHeight: 1.2,
+  },
+
+  publicTournamentClassStatusBadgeDone: {
+    background: "#f1f5f9",
+    borderColor: "#cbd5e1",
+    color: "#475569",
   },
 
   publicTournamentSection: {
@@ -17772,6 +19730,15 @@ const styles = {
     textOverflow: "ellipsis",
   },
 
+  tournamentClassCompactRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+
   tournamentSubTabs: {
     display: "flex",
     gap: "8px",
@@ -18248,6 +20215,18 @@ const styles = {
   tournamentScheduleRoundLabel: {
     color: "#64748b",
     fontWeight: "800",
+  },
+
+  tournamentScheduleSeriesBadge: {
+    justifySelf: "start",
+    borderRadius: "999px",
+    padding: "3px 7px",
+    background: "#eef2ff",
+    border: "1px solid #c7d2fe",
+    color: "#3730a3",
+    fontSize: "10px",
+    fontWeight: "900",
+    lineHeight: 1.2,
   },
 
   tournamentScheduleMatchTeams: {
@@ -19131,6 +21110,60 @@ const styles = {
   tournamentShareStateLive: {
     background: "#ecfdf5",
     border: "1px solid #a7f3d0",
+  },
+
+  tournamentClassVisibilityList: {
+    display: "grid",
+    gap: "10px",
+    minWidth: 0,
+  },
+
+  tournamentClassVisibilityRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    flexWrap: "wrap",
+    padding: "12px",
+    borderRadius: "14px",
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    minWidth: 0,
+  },
+
+  tournamentClassVisibilityActions: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    flexWrap: "wrap",
+    gap: "8px",
+    minWidth: 0,
+  },
+
+  tournamentClassSegmented: {
+    display: "inline-flex",
+    flexWrap: "wrap",
+    gap: "4px",
+    padding: "3px",
+    borderRadius: "12px",
+    background: "#e2e8f0",
+  },
+
+  tournamentClassSegmentButton: {
+    border: 0,
+    borderRadius: "9px",
+    padding: "6px 9px",
+    background: "transparent",
+    color: "#475569",
+    fontSize: "12px",
+    fontWeight: "900",
+    cursor: "pointer",
+  },
+
+  tournamentClassSegmentButtonActive: {
+    background: "#fff",
+    color: "#0f172a",
+    boxShadow: "0 5px 12px rgba(15,23,42,0.12)",
   },
 
   tournamentShareTitle: {
