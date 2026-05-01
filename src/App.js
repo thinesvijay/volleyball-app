@@ -3,7 +3,6 @@ import html2canvas from "html2canvas";
 
 const API =
   "https://script.google.com/macros/s/AKfycbx9FWReNsr6vJam6b02OCf96K482opSh_SPZVSeBqoTs65M7S2E1ZGZXt9qGUMzpE2dDw/exec";
-
 const ROUND_CACHE_KEY = "volleyball-current-round";
 const ROUND_SAVE_KEY = "volleyball-saved-round";
 const AUTH_STORAGE_KEY = "volleyball-auth";
@@ -13,8 +12,23 @@ const TEAM_SKILL_VISIBILITY_KEY = "volleyball-team-skill-visibility";
 const TEAM_LOCK_VISIBILITY_KEY = "volleyball-team-lock-visibility";
 const MATCH_METHOD_KEY = "volleyball-match-method";
 const PLAYER_SORT_KEY = "volleyball-player-sort";
+const TOURNAMENTS_STORAGE_KEY = "volleyball-tournaments-v1";
+const ACTIVE_TOURNAMENT_STORAGE_KEY_PREFIX = "volleyball-active-tournament-id:";
 const CURRENT_ROUND_TTL_MS = 60 * 60 * 1000;
 const SAVED_ROUND_TTL_MS = 6 * 60 * 60 * 1000;
+
+const TOURNAMENT_SERVER_SAFE_FIELDS = [
+  "publicCode",
+  "published",
+  "Published",
+  "publishedAt",
+  "updatedAt",
+  "status",
+  "backendSyncedAt",
+  "publicVerifiedAt",
+  "promotionVerifiedAt",
+  "publishVerificationError",
+];
 
 const SKILL_SCALE_OPTIONS = [3, 5];
 const TRAINER_COPY_OPTIONS_BASE = [
@@ -25,6 +39,63 @@ const TRAINER_COPY_OPTIONS_BASE = [
 const MATCH_METHOD_OPTIONS = [
   { value: "balanced" },
   { value: "shuffle" },
+];
+
+const TOURNAMENT_GROUP_COLORS = [
+  {
+    soft: "#eff6ff",
+    border: "#bfdbfe",
+    accent: "#2563eb",
+    text: "#1e3a8a",
+    publicSoft: "rgba(37,99,235,0.16)",
+    publicBorder: "rgba(147,197,253,0.28)",
+    publicText: "#bfdbfe",
+  },
+  {
+    soft: "#ecfdf5",
+    border: "#a7f3d0",
+    accent: "#059669",
+    text: "#065f46",
+    publicSoft: "rgba(5,150,105,0.16)",
+    publicBorder: "rgba(167,243,208,0.28)",
+    publicText: "#bbf7d0",
+  },
+  {
+    soft: "#f5f3ff",
+    border: "#ddd6fe",
+    accent: "#7c3aed",
+    text: "#5b21b6",
+    publicSoft: "rgba(124,58,237,0.16)",
+    publicBorder: "rgba(196,181,253,0.28)",
+    publicText: "#ddd6fe",
+  },
+  {
+    soft: "#fff7ed",
+    border: "#fed7aa",
+    accent: "#ea580c",
+    text: "#9a3412",
+    publicSoft: "rgba(234,88,12,0.16)",
+    publicBorder: "rgba(253,186,116,0.28)",
+    publicText: "#fed7aa",
+  },
+  {
+    soft: "#fdf2f8",
+    border: "#fbcfe8",
+    accent: "#db2777",
+    text: "#9d174d",
+    publicSoft: "rgba(219,39,119,0.16)",
+    publicBorder: "rgba(251,207,232,0.28)",
+    publicText: "#fbcfe8",
+  },
+  {
+    soft: "#f0fdfa",
+    border: "#99f6e4",
+    accent: "#0d9488",
+    text: "#115e59",
+    publicSoft: "rgba(13,148,136,0.16)",
+    publicBorder: "rgba(153,246,228,0.28)",
+    publicText: "#99f6e4",
+  },
 ];
 
 const CLUB_OPTIONS = [
@@ -62,8 +133,8 @@ const TRANSLATIONS = {
     trainer: "Trainer",
     logout: "Logout",
     loginOk: "Login ok.",
-    trainerLogin: "Trainer Login",
-    loginRequired: "Login required to view players",
+    trainerLogin: "Sign in",
+    loginRequired: "Sign in to continue",
     username: "Username",
     password: "Password",
     login: "Login",
@@ -157,8 +228,8 @@ const TRANSLATIONS = {
     archivedTrainersSubtitle: "Archived trainers can be restored later",
     noArchivedTrainers: "No archived trainers.",
     archivedStatus: "Archived",
-    playersLoginRequired: "Log in as admin or trainer to view the player list.",
-    teamsLoginRequired: "Log in as admin or trainer to use Teams.",
+    playersLoginRequired: "Sign in to continue.",
+    teamsLoginRequired: "Sign in to continue.",
     roundLabel: "Round",
     ofLabel: "of",
     courtLabel: "Court",
@@ -200,8 +271,8 @@ const TRANSLATIONS = {
     trainer: "Trener",
     logout: "Logg ut",
     loginOk: "Innlogging ok.",
-    trainerLogin: "Trenerinnlogging",
-    loginRequired: "Innlogging kreves for å se spillere",
+    trainerLogin: "Logg inn",
+    loginRequired: "Logg inn for å fortsette",
     username: "Brukernavn",
     password: "Passord",
     login: "Logg inn",
@@ -295,8 +366,8 @@ const TRANSLATIONS = {
     archivedTrainersSubtitle: "Arkiverte trenere kan gjenopprettes senere",
     noArchivedTrainers: "Ingen arkiverte trenere.",
     archivedStatus: "Arkivert",
-    playersLoginRequired: "Logg inn som admin eller trener for å se spillerlisten.",
-    teamsLoginRequired: "Logg inn som admin eller trener for å bruke Lag.",
+    playersLoginRequired: "Logg inn for å fortsette.",
+    teamsLoginRequired: "Logg inn for å fortsette.",
     roundLabel: "Runde",
     ofLabel: "av",
     courtLabel: "Bane",
@@ -580,6 +651,30 @@ function getDefaultAuth() {
 function getDefaultTournamentConfig() {
   return {
     format: "group-stage",
+    publicListingEnabled: false,
+    publicTitle: "",
+    publicSummary: "",
+    description: "",
+    country: "",
+    city: "",
+    locationName: "",
+    address: "",
+    startDate: "",
+    endDate: "",
+    registrationDeadline: "",
+    contactName: "",
+    contactPhone: "",
+    contactEmail: "",
+    prizeText: "",
+    feeText: "",
+    breakfastInfo: "",
+    breakBallInfo: "",
+    sodduInfo: "",
+    posterImageUrl: "",
+    themeColor: "#0f766e",
+    accentColor: "#22c55e",
+    maxTeams: "",
+    series: [],
     totalTeams: 10,
     groupCount: 2,
     teamsPerGroup: 5,
@@ -595,7 +690,9 @@ function getDefaultTournamentConfig() {
       showScores: true,
       showDates: false,
       showLocations: false,
-      showRoundTitles: true,
+      showRoundTitles: false,
+      showRoundLabels: false,
+      showRoundNumbers: false,
     },
     groups: [],
     knockout: {
@@ -608,18 +705,33 @@ function getDefaultTournamentConfig() {
   };
 }
 
+function createStableTournamentId() {
+  return `t-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getTournamentIdentity(tournament) {
+  return String(
+    tournament?.id || tournament?.tournamentId || tournament?.TournamentId || ""
+  ).trim();
+}
+
 function applyTournamentDefaults(tournament) {
   const defaults = getDefaultTournamentConfig();
   if (!tournament) return defaults;
+  const tournamentId = getTournamentIdentity(tournament);
 
   return {
     ...defaults,
     ...tournament,
+    id: tournamentId,
+    tournamentId,
+    TournamentId: tournamentId,
     displaySettings: {
       ...defaults.displaySettings,
       ...(tournament.displaySettings || {}),
     },
     groups: Array.isArray(tournament.groups) ? tournament.groups : [],
+    series: Array.isArray(tournament.series) ? tournament.series : [],
     knockout: {
       ...defaults.knockout,
       ...(tournament.knockout || {}),
@@ -634,8 +746,419 @@ function applyTournamentDefaults(tournament) {
   };
 }
 
+function getTournamentStorageUsername(username) {
+  return String(username || "").trim().toLowerCase();
+}
+
+function isTournamentOwnedByUsername(tournament, username) {
+  const currentUsername = getTournamentStorageUsername(username);
+  const ownerUsernames = [
+    tournament?.organizerUsername,
+    tournament?.OrganizerUsername,
+    tournament?.ownerUsername,
+    tournament?.OwnerUsername,
+  ]
+    .map(getTournamentStorageUsername)
+    .filter(Boolean);
+
+  return Boolean(
+    currentUsername && ownerUsernames.some((owner) => owner === currentUsername)
+  );
+}
+
+function filterTournamentsForUsername(tournaments, username) {
+  if (!Array.isArray(tournaments)) return [];
+
+  return tournaments.filter((tournament) =>
+    isTournamentOwnedByUsername(tournament, username)
+  );
+}
+
+function dedupeTournamentsById(tournaments) {
+  if (!Array.isArray(tournaments)) return [];
+
+  const seenIds = new Set();
+  return tournaments.filter((tournament) => {
+    const tournamentId = getTournamentIdentity(tournament);
+    if (!tournamentId || seenIds.has(tournamentId)) return false;
+    seenIds.add(tournamentId);
+    return true;
+  });
+}
+
+function getTournamentsStorageKey(username) {
+  const normalizedUsername = getTournamentStorageUsername(username);
+  return normalizedUsername
+    ? `${TOURNAMENTS_STORAGE_KEY}:${normalizedUsername}`
+    : "";
+}
+
+function saveStoredTournaments(tournaments, username) {
+  if (typeof window === "undefined") return;
+
+  try {
+    localStorage.removeItem(TOURNAMENTS_STORAGE_KEY);
+
+    const storageKey = getTournamentsStorageKey(username);
+    if (!storageKey) return;
+
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify(
+        dedupeTournamentsById(filterTournamentsForUsername(tournaments, username)).filter(
+          (tournament) => getTournamentIdentity(tournament)
+        )
+      )
+    );
+  } catch (error) {
+    console.error("Could not cache tournaments:", error);
+  }
+}
+
+function getActiveTournamentStorageKey(username) {
+  const normalizedUsername = getTournamentStorageUsername(username);
+  return normalizedUsername
+    ? `${ACTIVE_TOURNAMENT_STORAGE_KEY_PREFIX}${normalizedUsername}`
+    : "";
+}
+
+function loadActiveTournamentId(username) {
+  if (typeof window === "undefined") return "";
+
+  try {
+    const storageKey = getActiveTournamentStorageKey(username);
+    return storageKey ? String(localStorage.getItem(storageKey) || "") : "";
+  } catch (error) {
+    console.error("Could not load active tournament id:", error);
+    return "";
+  }
+}
+
+function saveActiveTournamentId(username, tournamentId) {
+  if (typeof window === "undefined" || !tournamentId) return;
+
+  try {
+    const storageKey = getActiveTournamentStorageKey(username);
+    if (!storageKey) return;
+    localStorage.setItem(storageKey, String(tournamentId));
+  } catch (error) {
+    console.error("Could not save active tournament id:", error);
+  }
+}
+
+function removeActiveTournamentId(username, tournamentId = "") {
+  if (typeof window === "undefined") return;
+
+  try {
+    const storageKey = getActiveTournamentStorageKey(username);
+    if (!storageKey) return;
+
+    const storedId = String(localStorage.getItem(storageKey) || "");
+    if (!tournamentId || storedId === String(tournamentId)) {
+      localStorage.removeItem(storageKey);
+    }
+  } catch (error) {
+    console.error("Could not remove active tournament id:", error);
+  }
+}
+
+function getPreferredActiveTournamentId(tournaments, username, currentId = "") {
+  const scopedTournaments = filterTournamentsForUsername(tournaments, username);
+  if (!scopedTournaments.length) return "";
+
+  if (currentId && scopedTournaments.some((tournament) => tournament.id === currentId)) {
+    return currentId;
+  }
+
+  const storedId = loadActiveTournamentId(username);
+  if (storedId && scopedTournaments.some((tournament) => tournament.id === storedId)) {
+    return storedId;
+  }
+
+  return scopedTournaments[0]?.id || "";
+}
+
+function createTournamentPublicCode(tournamentName) {
+  const slug = String(tournamentName || "tournament")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 16);
+  const prefix = slug || "t";
+  const suffix = Math.random().toString(36).slice(2, 8);
+
+  return `${prefix}-${suffix}`;
+}
+
+function getPublicTournamentUrl(tournament) {
+  if (typeof window === "undefined" || !tournament?.publicCode) return "";
+
+  return `${window.location.origin}${window.location.pathname}?publicTournament=${encodeURIComponent(
+    tournament.publicCode
+  )}`;
+}
+
+function getTournamentPublicTitle(tournament) {
+  return (
+    String(tournament?.publicTitle || "").trim() ||
+    String(tournament?.name || "").trim() ||
+    "Tournament"
+  );
+}
+
+function getTournamentPublicSummary(tournament) {
+  return (
+    String(tournament?.publicSummary || "").trim() ||
+    String(tournament?.description || "").trim() ||
+    String(tournament?.rules || "").trim()
+  );
+}
+
+function getTournamentSeries(tournament) {
+  const series = Array.isArray(tournament?.series) ? tournament.series : [];
+
+  if (series.length > 0) return series;
+
+  const configuredTeamSize = Number(tournament?.teamSize) || 0;
+  if (configuredTeamSize === 4 || configuredTeamSize === 5) {
+    return [
+      {
+        id: `${configuredTeamSize}-side`,
+        name: `${configuredTeamSize}-side`,
+        teamSize: configuredTeamSize,
+        format: tournament?.format || "group-stage",
+        maxTeams: tournament?.maxTeams || tournament?.totalTeams || "",
+        minimumTeams: "",
+        prizeText: tournament?.prizeText || "",
+        feeText: tournament?.feeText || "",
+        startTime: tournament?.startTime || "",
+        notes: "",
+      },
+    ];
+  }
+
+  return [];
+}
+
+function parseTournamentDateValue(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+
+  function buildLocalDate(year, month, day) {
+    const parsed = new Date(year, month - 1, day);
+    if (
+      parsed.getFullYear() !== year ||
+      parsed.getMonth() !== month - 1 ||
+      parsed.getDate() !== day
+    ) {
+      return null;
+    }
+
+    return parsed;
+  }
+
+  let match = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (match) {
+    return buildLocalDate(
+      Number(match[1]),
+      Number(match[2]),
+      Number(match[3])
+    );
+  }
+
+  match = raw.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
+  if (match) {
+    return buildLocalDate(
+      Number(match[3]),
+      Number(match[2]),
+      Number(match[1])
+    );
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getTournamentDateValue(tournament) {
+  return parseTournamentDateValue(tournament?.startDate || tournament?.eventDate);
+}
+
+function isTournamentFinishedForFilter(tournament) {
+  const parsed = parseTournamentDateValue(
+    tournament?.endDate || tournament?.startDate || tournament?.eventDate
+  );
+  if (!parsed) return false;
+
+  parsed.setHours(23, 59, 59, 999);
+  return parsed.getTime() < Date.now();
+}
+
+function isTruthyTournamentValue(value) {
+  if (value === true || value === 1) return true;
+
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["true", "1", "yes", "y"].includes(normalized);
+}
+
+function isTournamentPublished(tournament) {
+  const status = String(tournament?.status || tournament?.Status || "")
+    .trim()
+    .toLowerCase();
+
+  return Boolean(
+    isTruthyTournamentValue(tournament?.published) ||
+      isTruthyTournamentValue(tournament?.Published) ||
+      status === "published"
+  );
+}
+
+function isTournamentPubliclyListed(tournament) {
+  return Boolean(
+    isTruthyTournamentValue(tournament?.publicListingEnabled) ||
+      isTruthyTournamentValue(tournament?.listPublicly) ||
+      isTruthyTournamentValue(tournament?.publicListed)
+  );
+}
+
+function prepareTournamentForBackend(tournament, overrides = {}) {
+  const now = new Date().toISOString();
+  const prepared = applyTournamentDefaults({
+    ...tournament,
+    ...overrides,
+    updatedAt: overrides.updatedAt || now,
+  });
+
+  const tournamentId = getTournamentIdentity(prepared);
+  if (!tournamentId) return prepared;
+
+  return {
+    ...prepared,
+    id: tournamentId,
+    tournamentId,
+    TournamentId: tournamentId,
+  };
+}
+
+function buildTournamentBackendPayload(tournament) {
+  const safeTournament = applyTournamentDefaults(tournament);
+  const tournamentId = getTournamentIdentity(safeTournament);
+  const payloadTournament = {
+    ...safeTournament,
+    id: tournamentId,
+    tournamentId,
+    TournamentId: tournamentId,
+  };
+  const published = isTournamentPublished(safeTournament);
+  const tournamentJson = JSON.stringify(payloadTournament);
+  const publishedValue = published ? "TRUE" : "FALSE";
+
+  return {
+    tournament: payloadTournament,
+    tournamentJson,
+    TournamentJson: tournamentJson,
+    tournamentId,
+    TournamentId: tournamentId,
+    id: tournamentId,
+    name: safeTournament.name || "",
+    Name: safeTournament.name || "",
+    country: safeTournament.country || "",
+    Country: safeTournament.country || "",
+    city: safeTournament.city || "",
+    City: safeTournament.city || "",
+    startDate: safeTournament.startDate || "",
+    StartDate: safeTournament.startDate || "",
+    endDate: safeTournament.endDate || "",
+    EndDate: safeTournament.endDate || "",
+    registrationDeadline: safeTournament.registrationDeadline || "",
+    RegistrationDeadline: safeTournament.registrationDeadline || "",
+    visibility: safeTournament.visibility || "",
+    Visibility: safeTournament.visibility || "",
+    status: safeTournament.status || (published ? "published" : "draft"),
+    Status: safeTournament.status || (published ? "published" : "draft"),
+    publicCode: safeTournament.publicCode || "",
+    PublicCode: safeTournament.publicCode || "",
+    published,
+    Published: publishedValue,
+    publishedAt: safeTournament.publishedAt || "",
+    PublishedAt: safeTournament.publishedAt || "",
+    updatedAt: safeTournament.updatedAt || "",
+    UpdatedAt: safeTournament.updatedAt || "",
+  };
+}
+
+function markTournamentBackendSynced(tournament) {
+  if (!tournament) return null;
+
+  return applyTournamentDefaults({
+    ...tournament,
+    backendSyncedAt: new Date().toISOString(),
+  });
+}
+
+function markTournamentPublicVerified(tournament) {
+  if (!tournament) return null;
+
+  const verifiedAt = new Date().toISOString();
+  return applyTournamentDefaults({
+    ...tournament,
+    backendSyncedAt: tournament.backendSyncedAt || verifiedAt,
+    publicVerifiedAt: verifiedAt,
+  });
+}
+
+function hasTournamentBackendPublicSync(tournament) {
+  return Boolean(
+    isTournamentPublished(tournament) &&
+      tournament?.publicCode &&
+      tournament.publicVerifiedAt
+  );
+}
+
+function mergeTournamentServerFields(currentTournament, backendTournament) {
+  if (!backendTournament) return applyTournamentDefaults(currentTournament || {});
+  if (!currentTournament) return applyTournamentDefaults(backendTournament);
+
+  const safeServerFields = {};
+  TOURNAMENT_SERVER_SAFE_FIELDS.forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(backendTournament, field)) {
+      safeServerFields[field] = backendTournament[field];
+    }
+  });
+
+  return applyTournamentDefaults({
+    ...currentTournament,
+    ...safeServerFields,
+  });
+}
+
+function shouldShowTournamentRoundLabels(tournament) {
+  const displaySettings = tournament?.displaySettings || {};
+
+  return Boolean(
+    displaySettings.showRoundLabels || displaySettings.showRoundNumbers
+  );
+}
+
 function getTournamentGroupCode(index) {
   return String.fromCharCode(65 + index);
+}
+
+function getTournamentGroupColor(groupCodeOrIndex) {
+  const raw = String(groupCodeOrIndex ?? "A").trim().toUpperCase();
+  const index = Number.isFinite(Number(groupCodeOrIndex))
+    ? Number(groupCodeOrIndex)
+    : Math.max(0, raw.charCodeAt(0) - 65);
+
+  return TOURNAMENT_GROUP_COLORS[
+    ((index % TOURNAMENT_GROUP_COLORS.length) +
+      TOURNAMENT_GROUP_COLORS.length) %
+      TOURNAMENT_GROUP_COLORS.length
+  ];
+}
+
+function getTournamentSourceGroupCode(source) {
+  const match = String(source || "").trim().match(/^([A-Z])\d+$/);
+  return match ? match[1] : "";
 }
 
 function buildGroupPositionSource(groupCode, position) {
@@ -650,6 +1173,14 @@ function displayPlayerName(player) {
 }
 
 export default function App() {
+  const [currentSearch, setCurrentSearch] = useState(() =>
+    typeof window === "undefined" ? "" : window.location.search
+  );
+  const publicTournamentCode = useMemo(() => {
+    if (!currentSearch) return "";
+    return new URLSearchParams(currentSearch).get("publicTournament") || "";
+  }, [currentSearch]);
+
   const [players, setPlayers] = useState([]);
   const [archivedPlayers, setArchivedPlayers] = useState([]);
   const [selected, setSelected] = useState([]);
@@ -737,7 +1268,7 @@ export default function App() {
 
   const tournamentText = language === "no" ? {
     tabTitle: "Turneringer",
-    loginRequired: "Innlogging kreves for å administrere turneringer",
+    loginRequired: "Logg inn for a administrere turneringer",
     createTitle: "Opprett turnering",
     createSubtitle: "Opprett en ny turnering",
     newTournament: "Ny turnering",
@@ -773,8 +1304,50 @@ export default function App() {
     unpublished: "Upublisert",
     publishedOk: "Turnering publisert.",
     unpublishedOk: "Turnering avpublisert.",
+    deleteLabel: "Slett",
+    deleteTournament: "Slett turnering",
+    confirmDeleteTournament: "Slette denne turneringen? Dette kan ikke angres.",
+    tournamentDeleted: "Turnering slettet.",
+    deleteTournamentFailed: "Sletting mislyktes.",
+    tournamentDeletePublishedWarning:
+      "Publiserte turneringer ma avpubliseres for de kan slettes.",
+    cleanupDraftTournaments: "Rydd mine draft/upubliserte testturneringer",
+    confirmCleanupDraftTournaments:
+      "Rydde mine draft/upubliserte testturneringer? Publiserte turneringer slettes ikke.",
+    cleanupDraftTournamentsOk: "Ryddet testturneringer.",
+    cleanupDraftTournamentsFailed: "Opprydding mislyktes.",
     publicPreviewTitle: "Offentlig forhåndsvisning",
     publicPreviewSubtitle: "Skrivebeskyttet visning av publisert turnering",
+    publicLinkUnavailable:
+      "Publiser turneringen for a gjøre den offentlige lenken klar.",
+    localPublicPreviewLink: "Offentlig turneringslenke",
+    localPreviewLimit:
+      "Offentlig lenke er live og kan apnes fra en annen enhet etter publisering.",
+    publicLinkReadonly: "Offentlig forhandsvisning er skrivebeskyttet.",
+    publicCodeLabel: "Offentlig kode",
+    copyLink: "Kopier lenke",
+    openPublicPreview: "Apne offentlig visning",
+    publicLinkCopied: "Offentlig lenke kopiert.",
+    publicLinkCopyFailed: "Kunne ikke kopiere lenken.",
+    publicNotFound: "Turnering ikke funnet eller ikke publisert.",
+    openApp: "Apne app",
+    loadingTournament: "Laster turnering...",
+    tournamentSyncLoading: "Laster turneringer",
+    tournamentSyncSaving: "Lagrer",
+    tournamentSyncSaved: "Lagret",
+    tournamentSyncError: "Backend-feil",
+    tournamentSyncLocal: "Lokal cache",
+    tournamentBackendTodo:
+      "Backend-handlinger for turneringer mangler i Apps Script.",
+    tournamentPublishVerifyFailed:
+      "Backend-publisering kunne ikke bekreftes. Den offentlige turneringen ble ikke funnet etter publisering.",
+    backendPublicLinkReady:
+      "Offentlig lenke er live og kan apnes fra en annen enhet.",
+    backendPublicLinkPending:
+      "Offentlig lenke vises nar backend-publisering er bekreftet.",
+    backendPublicRequired:
+      "Publiser turneringen for a aktivere en offentlig lenke som virker pa andre enheter.",
+    publicTournamentLink: "Offentlig turneringslenke",
     noTeamsInPreview: "Ingen lag publisert ennå.",
     noPlayersInPreview: "Ingen spillere ennå.",
     generateBasicMatches: "Generer enkle kamper",
@@ -782,7 +1355,7 @@ export default function App() {
     notEnoughTeamsForMatches: "Minst 2 lag kreves for å generere kamper.",
     matchesGenerated: "Kamper generert.",
     noMatchesYet: "Ingen kamper ennå.",
-    standingsTitle: "Tabell",
+    standingsTitle: "Resultater",
     playedShort: "K",
     winsShort: "V",
     drawsShort: "U",
@@ -794,6 +1367,74 @@ export default function App() {
     noStandingsYet: "Ingen tabell ennå.",
     matchStatusCompleted: "Ferdig",
     matchStatusScheduled: "Planlagt",
+    matchStatusStarted: "Pågår",
+    completeMatch: "Ferdig",
+    markFinished: "Ferdig",
+    knockoutNeedsWinner: "Må ha vinner",
+    overviewTab: "Oversikt",
+    groupsTab: "Grupper",
+    bracketTab: "Sluttspill",
+    tableTab: "Tabell",
+    sharingTab: "Deling",
+    controlPanelLabel: "Kontrollpanel",
+    tournamentSetupTitle: "Turneringsoppsett",
+    newLabel: "Ny",
+    editTournamentTitle: "Rediger turnering",
+    totalTeamsLabel: "Totalt antall lag",
+    teamsPerGroupLabel: "Lag per gruppe",
+    qualifiersLabel: "Kvalifiserte",
+    startTimeLabel: "Starttid",
+    groupMinutesLabel: "Gruppe min",
+    playoffMinutesLabel: "Sluttspill min",
+    breakMinutesLabel: "Pause min",
+    buildGroupSlots: "Bygg gruppesloter",
+    buildUpdateSlots: "Bygg / oppdater sloter",
+    manualGroupEntryTitle: "Manuell gruppeinndata",
+    manualGroupEntryHint: "Fyll slotene i samme rekkefolge som papirtrekket.",
+    groupDrawTitle: "Gruppetrekning",
+    manualPaperOrderLabel: "Manuell papirrekkefolge",
+    teamNamePlaceholder: "Lagnavn",
+    playerNamePlaceholder: "Spillernavn",
+    enterTeamNamePlaceholder: "Skriv lagnavn",
+    buildSlotsToEdit: "Bygg sloter for a redigere",
+    previewLabel: "Forhandsvisning",
+    matchManagementLabel: "Kampstyring",
+    slotsLabel: "sloter",
+    manualDrawLabel: "Manuell trekning",
+    emptySlotLabel: "Tom",
+    hideSetup: "Skjul oppsett",
+    editSetup: "Rediger oppsett",
+    knockoutLabel: "Sluttspill",
+    topQualifiersLabel: "Topp 2",
+    nextLabel: "Neste",
+    nextMatchesTitle: "Neste 3 kamper",
+    firstKnockoutLabel: "Forste utslag",
+    matchLabel: "Kamp",
+    openRegistration: "Apne registrering",
+    closeRegistration: "Lukk registrering",
+    registrationTitle: "Registrering",
+    clubPlaceholder: "Klubb",
+    lockedLabel: "Last",
+    openLabel: "Apen",
+    roundLabel: "Runde",
+    batchLabel: "Runde",
+    batchesLabel: "runder",
+    courtLabel: "Bane",
+    courtsLabel: "Baner",
+    groupLabel: "Gruppe",
+    groupsLabel: "grupper",
+    teamLabel: "Lag",
+    teamsLabel: "Lag",
+    openCourt: "Ledig bane",
+    breakLabel: "Pause",
+    scheduledLabel: "Planlagt",
+    standingsLabel: "Resultater",
+    moreBatchesLabel: "flere runder",
+    scheduleTitle: "Kampoppsett",
+    scheduleSubtitle: "Basert pa starttid, baner, kamplengde og pauser.",
+    scheduleOverviewTitle: "Runder, baner og tidspunkter",
+    scheduleTimeColumn: "Tid",
+    minutesShort: "min",
     winnerLabel: "Vinner",
     runnerUpLabel: "Toer",
     builderTitle: "Turneringsbygger",
@@ -823,15 +1464,79 @@ export default function App() {
     showScores: "Vis score",
     showDates: "Vis datoer",
     showLocations: "Vis steder",
-    showRoundTitles: "Vis rundenavn",
+    showRoundTitles: "Vis rundenummer",
+    showRoundLabels: "Vis rundenummer",
+    vsLabel: "vs",
     teamManagementTitle: "Lagadministrasjon",
     addTeamButton: "Legg til lag",
     addPlayerButton: "Legg til spiller",
     noTeamsYet: "Ingen lag ennå.",
-    noPlayersYet: "Ingen spillere ennå."
+    noPlayersYet: "Ingen spillere ennå.",
+    promotionTab: "Promotering",
+    marketingTitle: "Offentlig promotering",
+    marketingSubtitle: "Lag et offentlig turneringskort for kommende turneringer.",
+    listPublicLabel: "Vis denne turneringen på offentlig kommende-side",
+    publishPromotion: "Publiser promotering",
+    hidePromotion: "Skjul fra kommende-side",
+    promotionVisibleBadge: "Synlig på kommende-side",
+    promotionDirectLinkOnly:
+      "Direktelenke er publisert, men promotering er ikke synlig på kommende-side.",
+    promotionPublishedOk: "Promotering er synlig på kommende-side.",
+    promotionHiddenOk: "Promotering skjult fra kommende-side.",
+    promotionPublishVerifyFailed:
+      "Promotering ble lagret, men vises ikke på kommende-siden ennå. Sjekk backend listPublicTournaments.",
+    promotionPreviewTitle: "Forhåndsvisning",
+    publicTitleLabel: "Offentlig tittel",
+    publicSummaryLabel: "Kort beskrivelse",
+    countryLabel: "Land",
+    cityLabel: "By",
+    venueLabel: "Hall / sted",
+    addressLabel: "Adresse",
+    dateLabel: "Dato",
+    endDateLabel: "Sluttdato",
+    contactNameLabel: "Kontaktperson",
+    contactPhoneLabel: "Telefon",
+    contactEmailLabel: "E-post",
+    prizeLabel: "Premie",
+    feeLabel: "Pamelingsavgift",
+    foodLabel: "Mat / frokost / soddu",
+    breakfastLabel: "Frokost",
+    breakBallLabel: "Pauseball",
+    sodduLabel: "Soddu",
+    posterImageUrlLabel: "Poster bilde-URL",
+    themeColorLabel: "Temafarge",
+    accentColorLabel: "Aksentfarge",
+    maxTeamsLabel: "Maks lag",
+    seriesLabel: "Serier",
+    addSeries: "Legg til serie",
+    removeSeries: "Fjern",
+    seriesNameLabel: "Serienavn",
+    teamSizeLabel: "Lagstorrelse",
+    minimumTeamsLabel: "Minimum lag",
+    notesLabel: "Notater",
+    upcomingTournamentsTitle: "Kommende volleyballturneringer",
+    upcomingTournamentsSubtitle:
+      "Finn publiserte turneringer og apne kampoppsett nar arrangoren publiserer.",
+    allCountries: "Alle land",
+    norway: "Norge",
+    denmark: "Danmark",
+    allTypes: "Alle typer",
+    fourSide: "4-side",
+    fiveSide: "5-side",
+    upcomingLabel: "Kommende",
+    finishedLabel: "Ferdige",
+    openTournament: "Apne turnering",
+    noPublicTournaments: "Ingen publiserte turneringer ennå.",
+    loadingPublicTournaments: "Laster kommende turneringer...",
+    publicListingError: "Kunne ikke laste offentlige turneringer.",
+    organizerLabel: "Arrangor",
+    registrationDeadlineLabel: "Pameldingsfrist",
+    contactLabel: "Kontakt",
+    locationLabel: "Sted",
+    bothSeriesLabel: "4-side og 5-side"
   } : {
     tabTitle: "Tournaments",
-    loginRequired: "Login required to manage tournaments",
+    loginRequired: "Sign in to manage tournaments",
     createTitle: "Create Tournament",
     createSubtitle: "Create a new tournament",
     newTournament: "New Tournament",
@@ -867,8 +1572,50 @@ export default function App() {
     unpublished: "Unpublished",
     publishedOk: "Tournament published.",
     unpublishedOk: "Tournament unpublished.",
+    deleteLabel: "Delete",
+    deleteTournament: "Delete tournament",
+    confirmDeleteTournament: "Delete this tournament? This cannot be undone.",
+    tournamentDeleted: "Tournament deleted.",
+    deleteTournamentFailed: "Delete failed.",
+    tournamentDeletePublishedWarning:
+      "Published tournaments must be unpublished before deletion.",
+    cleanupDraftTournaments: "Clean my draft/unpublished test tournaments",
+    confirmCleanupDraftTournaments:
+      "Clean my draft/unpublished test tournaments? Published tournaments will not be deleted.",
+    cleanupDraftTournamentsOk: "Test tournaments cleaned.",
+    cleanupDraftTournamentsFailed: "Cleanup failed.",
     publicPreviewTitle: "Public Preview",
     publicPreviewSubtitle: "Read-only view of published tournament",
+    publicLinkUnavailable:
+      "Publish this tournament to make the public link available.",
+    localPublicPreviewLink: "Public tournament link",
+    localPreviewLimit:
+      "Public link is live and can be opened from another device after publishing.",
+    publicLinkReadonly: "Public preview is read-only.",
+    publicCodeLabel: "Public code",
+    copyLink: "Copy link",
+    openPublicPreview: "Open public preview",
+    publicLinkCopied: "Public link copied.",
+    publicLinkCopyFailed: "Could not copy the public link.",
+    publicNotFound: "Tournament not found or not published.",
+    openApp: "Open app",
+    loadingTournament: "Loading tournament...",
+    tournamentSyncLoading: "Loading tournaments",
+    tournamentSyncSaving: "Saving",
+    tournamentSyncSaved: "Saved",
+    tournamentSyncError: "Backend error",
+    tournamentSyncLocal: "Local cache",
+    tournamentBackendTodo:
+      "Tournament backend actions are missing in Apps Script.",
+    tournamentPublishVerifyFailed:
+      "Backend publish verification failed. The public tournament was not found after publishing.",
+    backendPublicLinkReady:
+      "Public link is live and can be opened from another device.",
+    backendPublicLinkPending:
+      "Public link appears after backend publishing is verified.",
+    backendPublicRequired:
+      "Publish this tournament to activate a public link that works on other devices.",
+    publicTournamentLink: "Public tournament link",
     noTeamsInPreview: "No teams published yet.",
     noPlayersInPreview: "No players yet.",
     generateBasicMatches: "Generate Basic Matches",
@@ -888,6 +1635,74 @@ export default function App() {
     noStandingsYet: "No standings yet.",
     matchStatusCompleted: "Completed",
     matchStatusScheduled: "Scheduled",
+    matchStatusStarted: "Started",
+    completeMatch: "Complete",
+    markFinished: "Mark finished",
+    knockoutNeedsWinner: "Needs winner",
+    overviewTab: "Overview",
+    groupsTab: "Groups",
+    bracketTab: "Bracket",
+    tableTab: "Table",
+    sharingTab: "Sharing",
+    controlPanelLabel: "Control Panel",
+    tournamentSetupTitle: "Tournament Setup",
+    newLabel: "New",
+    editTournamentTitle: "Edit tournament",
+    totalTeamsLabel: "Total Teams",
+    teamsPerGroupLabel: "Teams per Group",
+    qualifiersLabel: "Qualifiers",
+    startTimeLabel: "Start Time",
+    groupMinutesLabel: "Group Min",
+    playoffMinutesLabel: "Playoff Min",
+    breakMinutesLabel: "Break Min",
+    buildGroupSlots: "Build Group Slots",
+    buildUpdateSlots: "Build / Update Slots",
+    manualGroupEntryTitle: "Manual Group Entry",
+    manualGroupEntryHint: "Fill slots in the exact paper-draw order.",
+    groupDrawTitle: "Group draw",
+    manualPaperOrderLabel: "Manual paper-draw order",
+    teamNamePlaceholder: "Team name",
+    playerNamePlaceholder: "Player name",
+    enterTeamNamePlaceholder: "Enter team name",
+    buildSlotsToEdit: "Build slots to edit",
+    previewLabel: "Preview",
+    matchManagementLabel: "Match Management",
+    slotsLabel: "slots",
+    manualDrawLabel: "Manual draw",
+    emptySlotLabel: "Empty",
+    hideSetup: "Hide setup",
+    editSetup: "Edit setup",
+    knockoutLabel: "Knockout",
+    topQualifiersLabel: "Top 2",
+    nextLabel: "Next",
+    nextMatchesTitle: "Next 3 matches",
+    firstKnockoutLabel: "First Knockout",
+    matchLabel: "Match",
+    openRegistration: "Open registration",
+    closeRegistration: "Close registration",
+    registrationTitle: "Registration",
+    clubPlaceholder: "Club",
+    lockedLabel: "Locked",
+    openLabel: "Open",
+    roundLabel: "Round",
+    batchLabel: "Round",
+    batchesLabel: "rounds",
+    courtLabel: "Court",
+    courtsLabel: "Courts",
+    groupLabel: "Group",
+    groupsLabel: "groups",
+    teamLabel: "Team",
+    teamsLabel: "Teams",
+    openCourt: "Open court",
+    breakLabel: "Break",
+    scheduledLabel: "Scheduled",
+    standingsLabel: "Standings",
+    moreBatchesLabel: "more batches",
+    scheduleTitle: "Schedule",
+    scheduleSubtitle: "Based on start time, courts, match duration and breaks.",
+    scheduleOverviewTitle: "Rounds, courts and times",
+    scheduleTimeColumn: "Time",
+    minutesShort: "min",
     winnerLabel: "Winner",
     runnerUpLabel: "Runner-up",
     builderTitle: "Tournament Builder",
@@ -917,12 +1732,76 @@ export default function App() {
     showScores: "Show Scores",
     showDates: "Show Dates",
     showLocations: "Show Locations",
-    showRoundTitles: "Show Round Titles",
+    showRoundTitles: "Show round labels",
+    showRoundLabels: "Show round labels",
+    vsLabel: "vs",
     teamManagementTitle: "Team Management",
     addTeamButton: "Add team",
     addPlayerButton: "Add player",
     noTeamsYet: "No teams yet.",
-    noPlayersYet: "No players yet."
+    noPlayersYet: "No players yet.",
+    promotionTab: "Promotion",
+    marketingTitle: "Public promotion",
+    marketingSubtitle: "Build a public tournament card for upcoming tournaments.",
+    listPublicLabel: "Show this tournament on the public upcoming page",
+    publishPromotion: "Publish promotion",
+    hidePromotion: "Hide from upcoming page",
+    promotionVisibleBadge: "Visible on upcoming page",
+    promotionDirectLinkOnly:
+      "Direct public link is published, but promotion is not visible on the upcoming page.",
+    promotionPublishedOk: "Promotion is visible on the upcoming page.",
+    promotionHiddenOk: "Promotion hidden from the upcoming page.",
+    promotionPublishVerifyFailed:
+      "Promotion was saved, but is not visible on the upcoming page yet. Check backend listPublicTournaments.",
+    promotionPreviewTitle: "Preview",
+    publicTitleLabel: "Public title",
+    publicSummaryLabel: "Short description",
+    countryLabel: "Country",
+    cityLabel: "City",
+    venueLabel: "Venue / hall",
+    addressLabel: "Address",
+    dateLabel: "Date",
+    endDateLabel: "End date",
+    contactNameLabel: "Contact name",
+    contactPhoneLabel: "Contact phone",
+    contactEmailLabel: "Contact email",
+    prizeLabel: "Prize",
+    feeLabel: "Registration fee",
+    foodLabel: "Food / breakfast / soddu",
+    breakfastLabel: "Breakfast",
+    breakBallLabel: "Break-ball",
+    sodduLabel: "Soddu",
+    posterImageUrlLabel: "Poster image URL",
+    themeColorLabel: "Theme color",
+    accentColorLabel: "Accent color",
+    maxTeamsLabel: "Max teams",
+    seriesLabel: "Series",
+    addSeries: "Add series",
+    removeSeries: "Remove",
+    seriesNameLabel: "Series name",
+    teamSizeLabel: "Team size",
+    minimumTeamsLabel: "Minimum teams",
+    notesLabel: "Notes",
+    upcomingTournamentsTitle: "Upcoming volleyball tournaments",
+    upcomingTournamentsSubtitle:
+      "Find published tournaments and open schedules when organizers publish them.",
+    allCountries: "All countries",
+    norway: "Norway",
+    denmark: "Denmark",
+    allTypes: "All types",
+    fourSide: "4-side",
+    fiveSide: "5-side",
+    upcomingLabel: "Upcoming",
+    finishedLabel: "Finished",
+    openTournament: "Open tournament",
+    noPublicTournaments: "No published tournaments yet.",
+    loadingPublicTournaments: "Loading upcoming tournaments...",
+    publicListingError: "Could not load public tournaments.",
+    organizerLabel: "Organizer",
+    registrationDeadlineLabel: "Registration deadline",
+    contactLabel: "Contact",
+    locationLabel: "Location",
+    bothSeriesLabel: "4-side and 5-side"
   };
 
   const [newPlayerClubOption, setNewPlayerClubOption] = useState("");
@@ -932,7 +1811,26 @@ export default function App() {
 
   const [tournaments, setTournaments] = useState([]);
   const [activeTournamentId, setActiveTournamentId] = useState("");
+  const [tournamentSyncStatus, setTournamentSyncStatus] = useState("local");
+  const [tournamentSyncMessage, setTournamentSyncMessage] = useState("");
+  const [tournamentBackendReady, setTournamentBackendReady] = useState(false);
+  const [publicTournamentBackend, setPublicTournamentBackend] = useState(null);
+  const [publicTournamentLoadStatus, setPublicTournamentLoadStatus] =
+    useState("idle");
+  const [publicTournaments, setPublicTournaments] = useState([]);
+  const [publicTournamentsStatus, setPublicTournamentsStatus] =
+    useState("idle");
+  const [publicTournamentsMessage, setPublicTournamentsMessage] = useState("");
+  const [publicTournamentCountryFilter, setPublicTournamentCountryFilter] =
+    useState("all");
+  const [publicTournamentTypeFilter, setPublicTournamentTypeFilter] =
+    useState("all");
+  const [publicTournamentTimeFilter, setPublicTournamentTimeFilter] =
+    useState("upcoming");
   const [showCreateTournamentForm, setShowCreateTournamentForm] =
+    useState(false);
+  const [showTournamentSetupPanel, setShowTournamentSetupPanel] = useState(true);
+  const [showTournamentRegistration, setShowTournamentRegistration] =
     useState(false);
 
   const [newTournamentName, setNewTournamentName] = useState("");
@@ -944,6 +1842,13 @@ export default function App() {
   const [editingTournamentTeamId, setEditingTournamentTeamId] = useState("");
   const [editingTournamentTeamName, setEditingTournamentTeamName] = useState("");
   const [activeTournamentView, setActiveTournamentView] = useState("overview");
+  const [matchFinishWarnings, setMatchFinishWarnings] = useState({});
+  const tournamentAutosaveTimerRef = useRef(null);
+  const manualGroupEditingRef = useRef(false);
+  const manualGroupEditingTimerRef = useRef(null);
+  const tournamentSessionUsernameRef = useRef("");
+  const lastTournamentBackendJsonRef = useRef("[]");
+  const deletedTournamentIdsRef = useRef(new Set());
 
   const removablePlayersFromTeams = useMemo(() => {
     return teams.flatMap((team, teamIndex) =>
@@ -1116,6 +2021,417 @@ export default function App() {
       }
     },
     [auth.loggedIn, auth.password, auth.username]
+  );
+
+  function normalizeTournamentApiList(data) {
+    const list = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.tournaments)
+        ? data.tournaments
+        : [];
+
+    return dedupeTournamentsById(
+      list
+        .filter(Boolean)
+        .map((tournament) =>
+          markTournamentBackendSynced(applyTournamentDefaults(tournament))
+        )
+    );
+  }
+
+  function normalizeTournamentApiItem(data) {
+    if (!data) return null;
+
+    if (data && Object.prototype.hasOwnProperty.call(data, "tournament")) {
+      const tournament = data.tournament;
+      if (!tournament || Array.isArray(tournament)) return null;
+      return markTournamentBackendSynced(applyTournamentDefaults(tournament));
+    }
+
+    if (data && Object.prototype.hasOwnProperty.call(data, "data")) {
+      const tournament = data.data;
+      if (!tournament || Array.isArray(tournament)) return null;
+      return markTournamentBackendSynced(applyTournamentDefaults(tournament));
+    }
+
+    if (Array.isArray(data)) return null;
+    return markTournamentBackendSynced(applyTournamentDefaults(data));
+  }
+
+  const mergeTournamentFromBackend = useCallback((tournament) => {
+    const tournamentId = getTournamentIdentity(tournament);
+    if (!tournamentId) return;
+    if (deletedTournamentIdsRef.current.has(tournamentId)) return;
+
+    if (!isTournamentOwnedByUsername(tournament, auth.username)) return;
+
+    const scopedTournament = {
+      ...tournament,
+      id: tournamentId,
+      tournamentId,
+      TournamentId: tournamentId,
+      organizerUsername: tournament.organizerUsername || auth.username,
+      ownerUsername: tournament.ownerUsername || auth.username,
+    };
+
+    setTournaments((prev) => {
+      const previousScoped = filterTournamentsForUsername(prev, auth.username);
+      const previousSerialized = JSON.stringify(previousScoped);
+      const exists = prev.some((item) => item.id === scopedTournament.id);
+      const next = filterTournamentsForUsername(
+        exists
+        ? prev.map((item) =>
+            item.id === scopedTournament.id
+              ? mergeTournamentServerFields(item, scopedTournament)
+              : item
+          )
+          : [scopedTournament, ...prev],
+        auth.username
+      );
+      const nextSerialized = JSON.stringify(next);
+
+      if (previousSerialized === lastTournamentBackendJsonRef.current) {
+        lastTournamentBackendJsonRef.current = nextSerialized;
+      }
+      saveStoredTournaments(next, auth.username);
+      return next;
+    });
+  }, [auth.username]);
+
+  function buildTournamentFormBody(payload) {
+    const formBody = new URLSearchParams();
+
+    Object.entries(payload).forEach(([key, value]) => {
+      if (value === undefined || value === null) return;
+
+      if (key === "tournament" || typeof value === "object") {
+        formBody.set(key, JSON.stringify(value));
+        return;
+      }
+
+      formBody.set(key, String(value));
+    });
+
+    return formBody.toString();
+  }
+
+  async function readTournamentApiResponse(response) {
+    const text = await response.text();
+    let data = null;
+
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (error) {
+      throw new Error(
+        "Tournament backend did not return JSON. Apps Script tournament actions may still need to be added."
+      );
+    }
+
+    if (!response.ok || data?.success === false) {
+      throw new Error(
+        data?.message ||
+          data?.error ||
+          "Tournament backend action failed. Check Apps Script tournament actions."
+      );
+    }
+
+    return data;
+  }
+
+  const callTournamentBackend = useCallback(
+    async (action, payload = {}, options = {}) => {
+      const tournamentPayload = payload.tournament
+        ? buildTournamentBackendPayload(payload.tournament)
+        : {};
+      const requestPayload = {
+        action,
+        username: auth.username,
+        password: auth.password,
+        ...tournamentPayload,
+        ...payload,
+      };
+
+      const sendRequest = async (transport) => {
+        const response = await fetch(
+          `${API}?_ts=${Date.now()}`,
+          {
+            method: "POST",
+            cache: "no-store",
+            headers: {
+              "Content-Type":
+                transport === "form"
+                  ? "application/x-www-form-urlencoded;charset=UTF-8"
+                  : "text/plain;charset=utf-8",
+            },
+            body:
+              transport === "form"
+                ? buildTournamentFormBody(requestPayload)
+                : JSON.stringify(requestPayload),
+          }
+        );
+        const data = await readTournamentApiResponse(response);
+        return data;
+      };
+
+      const preferredTransport = options.transport === "form" ? "form" : "json";
+      const fallbackTransport =
+        preferredTransport === "json" ? "form" : "json";
+
+      try {
+        return await sendRequest(preferredTransport);
+      } catch (error) {
+        return sendRequest(fallbackTransport);
+      }
+    },
+    [auth.password, auth.username]
+  );
+
+  const fetchPublicTournamentFromBackend = useCallback(async (publicCode) => {
+    const requestPayload = {
+      action: "getPublicTournament",
+      publicCode,
+    };
+    const queryString = buildQueryString({
+      ...requestPayload,
+      _ts: Date.now(),
+    });
+
+    const response = await fetch(`${API}?${queryString}`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    const data = await readTournamentApiResponse(response);
+
+    return normalizeTournamentApiItem(data);
+  }, []);
+
+  const normalizePublicTournamentList = useCallback((data) => {
+    const list = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.tournaments)
+        ? data.tournaments
+        : [];
+
+    return list
+      .filter(Boolean)
+      .map((tournament) =>
+        applyTournamentDefaults({
+          ...tournament,
+          publicListingEnabled: true,
+          listPublicly: true,
+          publicListed: true,
+        })
+      )
+      .filter((tournament) => isTournamentPublished(tournament));
+  }, []);
+
+  const fetchPublicTournamentList = useCallback(async () => {
+    const queryString = buildQueryString({
+      action: "listPublicTournaments",
+      _ts: Date.now(),
+    });
+
+    const response = await fetch(`${API}?${queryString}`, {
+      method: "GET",
+      cache: "no-store",
+    });
+    const data = await readTournamentApiResponse(response);
+    return normalizePublicTournamentList(data);
+  }, [normalizePublicTournamentList]);
+
+  const persistTournamentNow = useCallback(
+    async (action, tournament, options = {}) => {
+      if (!auth.loggedIn || !tournament) return null;
+      const tournamentId = getTournamentIdentity(tournament);
+      if (!tournamentId) {
+        setTournamentSyncStatus("error");
+        setTournamentSyncMessage("Missing tournament id");
+        return null;
+      }
+      if (deletedTournamentIdsRef.current.has(tournamentId)) {
+        return null;
+      }
+
+      try {
+        setTournamentSyncStatus("saving");
+        setTournamentSyncMessage("");
+
+        const backendTournament = prepareTournamentForBackend(tournament);
+        const data = await callTournamentBackend(
+          action,
+          {
+            tournament: backendTournament,
+            tournamentId,
+            TournamentId: tournamentId,
+            id: tournamentId,
+            publicCode: backendTournament.publicCode || "",
+          },
+          options
+        );
+        const normalizedSavedTournament = normalizeTournamentApiItem(data);
+        const savedTournament =
+          normalizedSavedTournament &&
+          getTournamentIdentity(normalizedSavedTournament) === tournamentId
+            ? normalizedSavedTournament
+            : markTournamentBackendSynced(backendTournament);
+
+        mergeTournamentFromBackend(savedTournament);
+        setTournamentSyncStatus("saved");
+        setTournamentSyncMessage(tournamentText.tournamentSyncSaved);
+        return savedTournament;
+      } catch (error) {
+        console.error(`Could not ${action} tournament:`, error);
+        setTournamentSyncStatus("error");
+        setTournamentSyncMessage(
+          error?.message || tournamentText.tournamentBackendTodo
+        );
+        return null;
+      }
+    },
+    [
+      auth.loggedIn,
+      callTournamentBackend,
+      mergeTournamentFromBackend,
+      tournamentText.tournamentBackendTodo,
+      tournamentText.tournamentSyncSaved,
+    ]
+  );
+
+  const loadTournamentsFromBackend = useCallback(async () => {
+    if (!auth.loggedIn || !auth.username || !auth.password) {
+      setTournamentBackendReady(false);
+      return;
+    }
+
+    const ownerUsername = getTournamentStorageUsername(auth.username);
+    try {
+      setTournamentSyncStatus("loading");
+      setTournamentSyncMessage(tournamentText.tournamentSyncLoading);
+
+      const data = await callTournamentBackend("listTournaments");
+      if (tournamentSessionUsernameRef.current !== ownerUsername) return;
+
+      const ownedBackendTournaments = filterTournamentsForUsername(
+        normalizeTournamentApiList(data),
+        auth.username
+      ).filter((tournament) => {
+        const tournamentId = getTournamentIdentity(tournament);
+        return (
+          tournamentId && !deletedTournamentIdsRef.current.has(tournamentId)
+        );
+      });
+      const backendTournaments = await Promise.all(
+        ownedBackendTournaments.map(async (tournament) => {
+          if (!isTournamentPublished(tournament) || !tournament.publicCode) {
+            return tournament;
+          }
+
+          try {
+            const publicTournament = await fetchPublicTournamentFromBackend(
+              tournament.publicCode
+            );
+            return publicTournament
+              ? markTournamentPublicVerified({
+                  ...tournament,
+                  ...publicTournament,
+                })
+              : tournament;
+          } catch (error) {
+            console.error("Could not verify listed public tournament:", error);
+            return tournament;
+          }
+        })
+      );
+      const nextTournaments = dedupeTournamentsById(
+        filterTournamentsForUsername(backendTournaments, auth.username)
+      ).filter((tournament) => {
+        const tournamentId = getTournamentIdentity(tournament);
+        return (
+          tournamentId && !deletedTournamentIdsRef.current.has(tournamentId)
+        );
+      });
+      const nextJson = JSON.stringify(nextTournaments);
+
+      setTournaments(nextTournaments);
+      setActiveTournamentId((currentId) =>
+        getPreferredActiveTournamentId(nextTournaments, auth.username, currentId)
+      );
+      setShowTournamentSetupPanel(true);
+      saveStoredTournaments(nextTournaments, auth.username);
+      lastTournamentBackendJsonRef.current = nextJson;
+      setTournamentBackendReady(true);
+
+      setTournamentSyncStatus("saved");
+      setTournamentSyncMessage(tournamentText.tournamentSyncSaved);
+    } catch (error) {
+      if (tournamentSessionUsernameRef.current !== ownerUsername) return;
+
+      console.error("Could not load tournaments from backend:", error);
+      setTournaments([]);
+      setActiveTournamentId("");
+      setShowTournamentSetupPanel(true);
+      lastTournamentBackendJsonRef.current = "[]";
+      setTournamentBackendReady(true);
+      setTournamentSyncStatus("error");
+      setTournamentSyncMessage(
+        error?.message || tournamentText.tournamentBackendTodo
+      );
+    }
+  }, [
+    auth.loggedIn,
+    auth.password,
+    auth.username,
+    callTournamentBackend,
+    fetchPublicTournamentFromBackend,
+    tournamentText.tournamentBackendTodo,
+    tournamentText.tournamentSyncLoading,
+    tournamentText.tournamentSyncSaved,
+  ]);
+
+  const loadSingleTournamentFromBackend = useCallback(
+    async (tournamentId) => {
+      if (!auth.loggedIn || !tournamentBackendReady || !tournamentId) return;
+
+      try {
+        const data = await callTournamentBackend("getTournament", {
+          tournamentId,
+        });
+        const backendTournament = normalizeTournamentApiItem(data);
+        if (!backendTournament) return;
+        if (getTournamentIdentity(backendTournament) !== String(tournamentId)) {
+          return;
+        }
+
+        if (!isTournamentOwnedByUsername(backendTournament, auth.username)) return;
+
+        setTournaments((prev) => {
+          const exists = prev.some((item) => item.id === backendTournament.id);
+          return filterTournamentsForUsername(
+            exists
+            ? prev.map((item) =>
+                item.id === backendTournament.id
+                  ? mergeTournamentServerFields(item, backendTournament)
+                  : item
+              )
+              : [backendTournament, ...prev],
+            auth.username
+          );
+        });
+      } catch (error) {
+        console.error("Could not load tournament from backend:", error);
+        setTournamentSyncStatus("error");
+        setTournamentSyncMessage(
+          error?.message || tournamentText.tournamentBackendTodo
+        );
+      }
+    },
+    [
+      auth.loggedIn,
+      auth.username,
+      callTournamentBackend,
+      tournamentBackendReady,
+      tournamentText.tournamentBackendTodo,
+    ]
   );
 
   function addTournamentTeam() {
@@ -1332,41 +2648,418 @@ export default function App() {
     setTournamentActionMessage(tournamentText.teamDeleted);
   }
 
-  function publishTournament() {
+  async function publishTournament() {
     if (!activeTournament) return;
+    const publicCode =
+      activeTournament.publicCode ||
+      createTournamentPublicCode(activeTournament.name);
+    const publishedAt = new Date().toISOString();
+    const nextTournament = prepareTournamentForBackend(activeTournament, {
+      published: true,
+      status: "published",
+      publicCode,
+      publishedAt,
+    });
+
+    const savedTournament = await persistTournamentNow(
+      "publishTournament",
+      nextTournament
+    );
+
+    if (!savedTournament) {
+      setTournaments((prev) =>
+        prev.map((tournament) =>
+          tournament.id !== activeTournament.id
+            ? tournament
+            : {
+                ...activeTournament,
+                publicCode,
+                published: false,
+                status: "unpublished",
+              }
+        )
+      );
+      return;
+    }
+
+    try {
+      let verifiedTournament = await fetchPublicTournamentFromBackend(publicCode);
+      let backendSavedTournament = savedTournament;
+
+      if (!verifiedTournament) {
+        const retryData = await callTournamentBackend(
+          "publishTournament",
+          {
+            tournament: nextTournament,
+            tournamentId: nextTournament.id,
+            TournamentId: nextTournament.id,
+            id: nextTournament.id,
+            publicCode,
+          },
+          { transport: "form" }
+        );
+        backendSavedTournament =
+          (() => {
+            const normalizedRetryTournament = normalizeTournamentApiItem(retryData);
+            return normalizedRetryTournament &&
+              getTournamentIdentity(normalizedRetryTournament) ===
+                getTournamentIdentity(nextTournament)
+              ? normalizedRetryTournament
+              : savedTournament;
+          })();
+        verifiedTournament = await fetchPublicTournamentFromBackend(publicCode);
+      }
+
+      if (!verifiedTournament) {
+        throw new Error(tournamentText.tournamentPublishVerifyFailed);
+      }
+
+      const backendPublishedTournament = markTournamentPublicVerified({
+        ...backendSavedTournament,
+        ...verifiedTournament,
+        publicCode,
+        published: true,
+        status: "published",
+        publishedAt:
+          verifiedTournament.publishedAt ||
+          backendSavedTournament.publishedAt ||
+          publishedAt,
+      });
+
+      mergeTournamentFromBackend(backendPublishedTournament);
+      setTournamentSyncStatus("saved");
+      setTournamentSyncMessage(tournamentText.backendPublicLinkReady);
+      setTournamentActionMessage(tournamentText.publishedOk);
+    } catch (error) {
+      console.error("Could not verify public tournament after publish:", error);
+      setTournaments((prev) =>
+        prev.map((tournament) =>
+          tournament.id !== activeTournament.id
+            ? tournament
+            : {
+                ...activeTournament,
+                publicCode,
+                published: false,
+                status: "unpublished",
+                publishVerificationError:
+                  error?.message || tournamentText.tournamentPublishVerifyFailed,
+              }
+        )
+      );
+      setTournamentSyncStatus("error");
+      setTournamentSyncMessage(
+        error?.message || tournamentText.tournamentPublishVerifyFailed
+      );
+      setTournamentActionMessage(
+        error?.message || tournamentText.tournamentPublishVerifyFailed
+      );
+    }
+  }
+
+  async function publishTournamentPromotion() {
+    if (!activeTournament) return;
+
+    const publicCode =
+      activeTournament.publicCode ||
+      createTournamentPublicCode(activeTournament.name);
+    const publishedAt =
+      activeTournament.publishedAt || new Date().toISOString();
+    const nextTournament = prepareTournamentForBackend(activeTournament, {
+      publicListingEnabled: true,
+      listPublicly: true,
+      publicListed: true,
+      visibility: "public",
+      published: true,
+      status: "published",
+      publicCode,
+      publishedAt,
+    });
+
     setTournaments((prev) =>
       prev.map((tournament) =>
-        tournament.id !== activeTournament.id
-          ? tournament
-          : {
-              ...tournament,
-              published: true,
-              status: "published",
-            }
+        tournament.id === activeTournament.id ? nextTournament : tournament
       )
     );
-    setTournamentActionMessage(tournamentText.publishedOk);
+
+    const savedTournament = await persistTournamentNow(
+      "publishTournament",
+      nextTournament
+    );
+
+    if (!savedTournament) return;
+
+    try {
+      const publicList = await fetchPublicTournamentList();
+      const isVisibleOnUpcoming = publicList.some(
+        (tournament) =>
+          String(tournament.publicCode || "") === String(publicCode) ||
+          String(tournament.id || "") === String(nextTournament.id || "")
+      );
+
+      setPublicTournaments(publicList);
+      setPublicTournamentsStatus("ready");
+      setPublicTournamentsMessage("");
+
+      if (!isVisibleOnUpcoming) {
+        throw new Error(tournamentText.promotionPublishVerifyFailed);
+      }
+
+      const verifiedTournament = markTournamentPublicVerified({
+        ...mergeTournamentServerFields(nextTournament, savedTournament),
+        publicListingEnabled: true,
+        listPublicly: true,
+        publicListed: true,
+        visibility: "public",
+        published: true,
+        status: "published",
+        publicCode,
+        publishedAt: savedTournament.publishedAt || publishedAt,
+        promotionVerifiedAt: new Date().toISOString(),
+      });
+
+      mergeTournamentFromBackend(verifiedTournament);
+      setTournamentSyncStatus("saved");
+      setTournamentSyncMessage(tournamentText.promotionPublishedOk);
+      setTournamentActionMessage(tournamentText.promotionPublishedOk);
+    } catch (error) {
+      console.error("Could not verify tournament promotion:", error);
+      const message =
+        error?.message || tournamentText.promotionPublishVerifyFailed;
+      setTournamentSyncStatus("error");
+      setTournamentSyncMessage(message);
+      setTournamentActionMessage(message);
+    }
+  }
+
+  async function hideTournamentPromotion() {
+    if (!activeTournament) return;
+
+    const nextTournament = prepareTournamentForBackend(activeTournament, {
+      publicListingEnabled: false,
+      listPublicly: false,
+      publicListed: false,
+      visibility: isTournamentPublished(activeTournament) ? "unlisted" : "",
+    });
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id === activeTournament.id ? nextTournament : tournament
+      )
+    );
+
+    const savedTournament = await persistTournamentNow(
+      "saveTournament",
+      nextTournament
+    );
+
+    if (!savedTournament) {
+      setTournamentActionMessage(tournamentText.promotionPublishVerifyFailed);
+      return;
+    }
+
+    setPublicTournaments((prev) =>
+      prev.filter(
+        (tournament) =>
+          String(tournament.publicCode || "") !==
+            String(nextTournament.publicCode || "") &&
+          String(tournament.id || "") !== String(nextTournament.id || "")
+      )
+    );
+    setTournamentSyncStatus("saved");
+    setTournamentSyncMessage(tournamentText.promotionHiddenOk);
+    setTournamentActionMessage(tournamentText.promotionHiddenOk);
   }
 
   function unpublishTournament() {
     if (!activeTournament) return;
+    const nextTournament = prepareTournamentForBackend(activeTournament, {
+      published: false,
+      status: "unpublished",
+      publicVerifiedAt: "",
+    });
+
     setTournaments((prev) =>
       prev.map((tournament) =>
         tournament.id !== activeTournament.id
           ? tournament
-          : {
-              ...tournament,
-              published: false,
-              status: "unpublished",
-            }
+          : nextTournament
       )
     );
+    void persistTournamentNow("unpublishTournament", nextTournament);
     setTournamentActionMessage(tournamentText.unpublishedOk);
+  }
+
+  async function deleteActiveTournament() {
+    const tournamentId = getTournamentIdentity(activeTournament);
+    if (!tournamentId) return;
+
+    if (isTournamentPublished(activeTournament)) {
+      setTournamentActionMessage(
+        tournamentText.tournamentDeletePublishedWarning
+      );
+      return;
+    }
+
+    const confirmed =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(tournamentText.confirmDeleteTournament);
+    if (!confirmed) return;
+
+    try {
+      if (typeof window !== "undefined") {
+        window.clearTimeout(tournamentAutosaveTimerRef.current);
+      }
+      deletedTournamentIdsRef.current.add(tournamentId);
+
+      setTournamentSyncStatus("saving");
+      setTournamentSyncMessage(tournamentText.tournamentSyncSaving);
+
+      setTournaments((prev) => {
+        const next = filterTournamentsForUsername(
+          prev.filter(
+            (tournament) => getTournamentIdentity(tournament) !== tournamentId
+          ),
+          auth.username
+        );
+        lastTournamentBackendJsonRef.current = JSON.stringify(next);
+        saveStoredTournaments(next, auth.username);
+        return next;
+      });
+      setActiveTournamentId((currentId) =>
+        currentId === tournamentId ? "" : currentId
+      );
+      removeActiveTournamentId(auth.username, tournamentId);
+      setActiveTournamentView("overview");
+      setShowTournamentSetupPanel(true);
+      setTournamentSyncStatus("saved");
+      setTournamentSyncMessage(tournamentText.tournamentDeleted);
+      setTournamentActionMessage(tournamentText.tournamentDeleted);
+
+      await callTournamentBackend("deleteTournament", {
+        tournamentId,
+        TournamentId: tournamentId,
+        id: tournamentId,
+      });
+
+      await loadTournamentsFromBackend();
+    } catch (error) {
+      deletedTournamentIdsRef.current.delete(tournamentId);
+      console.error("Could not delete tournament:", error);
+      const message =
+        error?.message || tournamentText.deleteTournamentFailed;
+      setTournamentSyncStatus("error");
+      setTournamentSyncMessage(message);
+      setTournamentActionMessage(message);
+    }
+  }
+
+  async function cleanupMyDraftTournaments() {
+    const confirmed =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(tournamentText.confirmCleanupDraftTournaments);
+    if (!confirmed) return;
+
+    const cleanupTombstoneIds = [];
+
+    try {
+      if (typeof window !== "undefined") {
+        window.clearTimeout(tournamentAutosaveTimerRef.current);
+      }
+      filterTournamentsForUsername(tournaments, auth.username).forEach(
+        (tournament) => {
+          const isDraftTestTournament =
+            !isTournamentPublished(tournament) &&
+            String(tournament.name || "")
+              .toLowerCase()
+              .includes("test");
+
+          if (isDraftTestTournament && tournament.id) {
+            deletedTournamentIdsRef.current.add(tournament.id);
+            cleanupTombstoneIds.push(tournament.id);
+          }
+        }
+      );
+
+      setTournamentSyncStatus("saving");
+      setTournamentSyncMessage(tournamentText.tournamentSyncSaving);
+
+      const data = await callTournamentBackend("cleanupMyDraftTournaments", {
+        nameContains: "TEST",
+      });
+
+      setTournaments([]);
+      setActiveTournamentId("");
+      removeActiveTournamentId(auth.username);
+      saveStoredTournaments([], auth.username);
+      lastTournamentBackendJsonRef.current = "[]";
+
+      await loadTournamentsFromBackend();
+
+      const deletedCount = Number(data?.deletedCount || 0);
+      const message = `${tournamentText.cleanupDraftTournamentsOk} (${deletedCount})`;
+      setTournamentSyncStatus("saved");
+      setTournamentSyncMessage(message);
+      setTournamentActionMessage(message);
+    } catch (error) {
+      cleanupTombstoneIds.forEach((tournamentId) =>
+        deletedTournamentIdsRef.current.delete(tournamentId)
+      );
+      console.error("Could not clean draft tournaments:", error);
+      const message =
+        error?.message || tournamentText.cleanupDraftTournamentsFailed;
+      setTournamentSyncStatus("error");
+      setTournamentSyncMessage(message);
+      setTournamentActionMessage(message);
+    }
+  }
+
+  async function copyActiveTournamentPublicUrl() {
+    const publicUrl = getPublicTournamentUrl(activeTournament);
+    if (!publicUrl || !navigator?.clipboard?.writeText) {
+      setTournamentActionMessage(tournamentText.publicLinkCopyFailed);
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(publicUrl);
+      setTournamentActionMessage(tournamentText.publicLinkCopied);
+    } catch (error) {
+      console.error("Could not copy tournament public link:", error);
+      setTournamentActionMessage(tournamentText.publicLinkCopyFailed);
+    }
+  }
+
+  function openActiveTournamentPublicPreview() {
+    const publicUrl = getPublicTournamentUrl(activeTournament);
+    if (!publicUrl) return;
+    window.open(publicUrl, "_blank", "noopener,noreferrer");
+  }
+
+  function openPublicTournamentFromCard(tournament) {
+    if (typeof window === "undefined" || !tournament?.publicCode) return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("publicTournament", tournament.publicCode);
+    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+    window.history.pushState({}, "", nextUrl);
+    setCurrentSearch(window.location.search);
+  }
+
+  function openAppFromPublicTournament() {
+    if (typeof window === "undefined") return;
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete("publicTournament");
+    const nextUrl = `${url.pathname}${url.search}${url.hash}`;
+    window.history.pushState({}, "", nextUrl || window.location.pathname);
+    setCurrentSearch(window.location.search);
   }
 
   function getTournamentStatusLabel(tournament) {
     if (!tournament) return "";
-    if (tournament.published || tournament.status === "published") {
+    if (isTournamentPublished(tournament)) {
       return tournamentText.published;
     }
     if (tournament.status === "draft") return tournamentText.draft;
@@ -1376,6 +3069,7 @@ export default function App() {
 
   function updateActiveTournament(patch) {
     if (!activeTournament) return;
+
     setTournaments((prev) =>
       prev.map((tournament) =>
         tournament.id !== activeTournament.id
@@ -1388,25 +3082,7 @@ export default function App() {
     );
   }
 
-  function updateActiveTournamentDisplaySetting(key, value) {
-    if (!activeTournament) return;
-    setTournaments((prev) =>
-      prev.map((tournament) =>
-        tournament.id !== activeTournament.id
-          ? tournament
-          : {
-              ...tournament,
-              displaySettings: {
-                ...getDefaultTournamentConfig().displaySettings,
-                ...(tournament.displaySettings || {}),
-                [key]: value,
-              },
-            }
-      )
-    );
-  }
-
-  function buildManualGroups(tournament) {
+  const buildManualGroups = useCallback((tournament) => {
     const safeGroupCount = Math.max(1, Number(tournament?.groupCount || 2));
     const safeTeamsPerGroup = Math.max(1, Number(tournament?.teamsPerGroup || 5));
     const existingGroups = Array.isArray(tournament?.groups)
@@ -1443,9 +3119,88 @@ export default function App() {
         }),
       };
     });
+  }, [language]);
+
+  function markManualGroupEditing() {
+    manualGroupEditingRef.current = true;
+    if (typeof window !== "undefined") {
+      window.clearTimeout(manualGroupEditingTimerRef.current);
+      manualGroupEditingTimerRef.current = window.setTimeout(() => {
+        manualGroupEditingRef.current = false;
+      }, 1500);
+    }
   }
 
-  function updateManualGroupSlot(groupId, slotId, name) {
+  function getTournamentGroupsForDisplay(tournament) {
+    return Array.isArray(tournament?.groups) ? tournament.groups : [];
+  }
+
+  function resizeManualGroupsFromFormat() {
+    if (!activeTournament) return;
+
+    setTournaments((prev) =>
+      prev.map((tournament) => {
+        if (tournament.id !== activeTournament.id) return tournament;
+
+        const groups = buildManualGroups(tournament);
+        const groupCount = Math.max(1, Number(tournament.groupCount || 2));
+
+        return {
+          ...tournament,
+          groups,
+          bracketSize: Math.max(2, groupCount * 2),
+        };
+      })
+    );
+    setTournamentActionMessage(tournamentText.buildUpdateSlots);
+  }
+
+  function updateManualGroupSlot(groupIndex, slotIndex, value) {
+    if (!activeTournament) return;
+
+    markManualGroupEditing();
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : (() => {
+              const existingGroups = Array.isArray(tournament.groups)
+                ? tournament.groups
+                : [];
+              if (!existingGroups[groupIndex]) return tournament;
+
+              const groups = existingGroups.map((group, currentGroupIndex) => {
+                if (currentGroupIndex !== groupIndex) return group;
+
+                const existingTeams = Array.isArray(group.teams)
+                  ? group.teams
+                  : [];
+                if (!existingTeams[slotIndex]) return group;
+
+                return {
+                  ...group,
+                  teams: existingTeams.map((team, currentSlotIndex) =>
+                    currentSlotIndex === slotIndex
+                      ? {
+                          ...team,
+                          name: value,
+                        }
+                      : team
+                  ),
+                };
+              });
+
+              return {
+                ...tournament,
+                groups,
+              };
+            })()
+      )
+    );
+  }
+
+  function addTournamentSeries() {
     if (!activeTournament) return;
 
     setTournaments((prev) =>
@@ -1454,21 +3209,59 @@ export default function App() {
           ? tournament
           : {
               ...tournament,
-              groups: (tournament.groups || []).map((group) =>
-                group.id !== groupId
-                  ? group
-                  : {
-                      ...group,
-                      teams: (group.teams || []).map((team) =>
-                        team.id !== slotId
-                          ? team
-                          : {
-                              ...team,
-                              name,
-                            }
-                      ),
-                    }
+              series: [
+                ...(Array.isArray(tournament.series) ? tournament.series : []),
+                {
+                  id: `series-${Date.now()}`,
+                  name: "",
+                  teamSize: 4,
+                  format: "group-stage",
+                  maxTeams: "",
+                  minimumTeams: "",
+                  prizeText: "",
+                  feeText: "",
+                  startTime: tournament.startTime || "",
+                  notes: "",
+                },
+              ],
+            }
+      )
+    );
+  }
+
+  function updateTournamentSeries(seriesId, patch) {
+    if (!activeTournament) return;
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              series: (Array.isArray(tournament.series)
+                ? tournament.series
+                : []
+              ).map((series) =>
+                series.id === seriesId ? { ...series, ...patch } : series
               ),
+            }
+      )
+    );
+  }
+
+  function removeTournamentSeries(seriesId) {
+    if (!activeTournament) return;
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : {
+              ...tournament,
+              series: (Array.isArray(tournament.series)
+                ? tournament.series
+                : []
+              ).filter((series) => series.id !== seriesId),
             }
       )
     );
@@ -1562,24 +3355,633 @@ export default function App() {
     };
   }
 
-  function generateTournamentGroups() {
-    if (!activeTournament) return;
-    const groups = buildManualGroups(activeTournament);
-    const groupCount = Math.max(1, Number(activeTournament.groupCount || 2));
+  function getTournamentPreviewTeamName(team) {
+    return String(team?.name || "").trim() || team?.slot || "-";
+  }
 
-    updateActiveTournament({
-      totalTeams:
-        Number(activeTournament.totalTeams) ||
-        groupCount * Math.max(1, Number(activeTournament.teamsPerGroup || 5)),
+  function parseTournamentScheduleStart(value) {
+    const [hours, minutes] = String(value || "09:00")
+      .split(":")
+      .map((part) => Number(part));
+
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 9 * 60;
+    return hours * 60 + minutes;
+  }
+
+  function formatTournamentScheduleTime(totalMinutes) {
+    const normalized = ((totalMinutes % 1440) + 1440) % 1440;
+    const hours = Math.floor(normalized / 60);
+    const minutes = normalized % 60;
+
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
+      2,
+      "0"
+    )}`;
+  }
+
+  function hasScoreValue(value) {
+    return String(value ?? "").trim() !== "";
+  }
+
+  function parseMatchScore(value) {
+    if (!hasScoreValue(value)) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function getMatchCompletionScore(value) {
+    const parsed = parseMatchScore(value);
+    return parsed === null ? 0 : parsed;
+  }
+
+  function getMatchScoreDisplayValue(value) {
+    return hasScoreValue(value) ? String(value) : "0";
+  }
+
+  function isMatchCompleted(match) {
+    return Boolean(
+      String(match?.status || "").toLowerCase() === "completed" ||
+        match?.completed === true ||
+        match?.finalized === true
+    );
+  }
+
+  function isMatchInProgressFromScore(match) {
+    return Boolean(
+      (hasScoreValue(match?.scoreA) || hasScoreValue(match?.scoreB)) &&
+        !isMatchCompleted(match)
+    );
+  }
+
+  function isKnockoutMatch(match) {
+    if (match?.groupId || match?.groupCode) return false;
+
+    const text = [
+      match?.stage,
+      match?.sourceRound,
+      match?.round,
+      match?.label,
+      match?.id,
+    ]
+      .map((value) => String(value || "").toLowerCase())
+      .join(" ");
+
+    return (
+      text.includes("knockout") ||
+      text.includes("quarter") ||
+      text.includes("semi") ||
+      text.includes("final") ||
+      text.includes("third") ||
+      text.includes("ko-")
+    );
+  }
+
+  function getMatchPairKey(match) {
+    if (!match) return "";
+
+    const stage = String(match.stage || "group").trim().toLowerCase();
+    const groupKey = String(match.groupId || match.groupCode || "")
+      .trim()
+      .toLowerCase();
+    const teams = [match.teamA, match.teamB]
+      .map((team) => String(team || "").trim().toLowerCase())
+      .filter(Boolean)
+      .sort();
+
+    return teams.length === 2 ? `${stage}|${groupKey}|${teams.join("|")}` : "";
+  }
+
+  function getTournamentMatchLookup(tournament) {
+    const byId = new Map();
+    const byPair = new Map();
+
+    (Array.isArray(tournament?.matches) ? tournament.matches : []).forEach(
+      (match) => {
+        if (match?.id) byId.set(match.id, match);
+
+        const pairKey = getMatchPairKey(match);
+        if (pairKey && !byPair.has(pairKey)) {
+          byPair.set(pairKey, match);
+        }
+      }
+    );
+
+    return { byId, byPair };
+  }
+
+  function mergeScheduleItemWithSavedMatch(item, matchLookup) {
+    if (!item) return null;
+
+    const savedMatch =
+      matchLookup?.byId?.get(item.id) ||
+      matchLookup?.byPair?.get(getMatchPairKey(item));
+
+    if (!savedMatch) {
+      return {
+        ...item,
+        matchId: item.id,
+      };
+    }
+
+    return {
+      ...item,
+      ...savedMatch,
+      id: savedMatch.id,
+      matchId: savedMatch.id,
+      groupColor: item.groupColor,
+      scheduleBatch: item.scheduleBatch,
+      scheduleCourt: item.scheduleCourt,
+      scheduleOrder: item.scheduleOrder,
+      manualOrder: savedMatch.manualOrder ?? item.manualOrder,
+      round: item.round || savedMatch.round,
+      roundNumber: item.roundNumber ?? savedMatch.roundNumber,
+      sourceA: item.sourceA || savedMatch.sourceA,
+      sourceB: item.sourceB || savedMatch.sourceB,
+    };
+  }
+
+  function findTournamentTeamIdByName(tournament, teamName) {
+    const targetName = String(teamName || "").trim().toLowerCase();
+    if (!targetName) return "";
+
+    for (const group of Array.isArray(tournament?.groups) ? tournament.groups : []) {
+      for (const team of Array.isArray(group?.teams) ? group.teams : []) {
+        if (String(team?.name || "").trim().toLowerCase() === targetName) {
+          return team.id || team.slot || "";
+        }
+      }
+    }
+
+    for (const team of Array.isArray(tournament?.teams) ? tournament.teams : []) {
+      if (String(team?.name || "").trim().toLowerCase() === targetName) {
+        return team.id || "";
+      }
+    }
+
+    return "";
+  }
+
+  function hasCompletableMatchScore(match) {
+    const scoreA = getMatchCompletionScore(match?.scoreA);
+    const scoreB = getMatchCompletionScore(match?.scoreB);
+
+    if (isKnockoutMatch(match) && scoreA === scoreB) return false;
+    return true;
+  }
+
+  function getMatchProgressFromScore(match) {
+    const hasA = hasScoreValue(match?.scoreA);
+    const hasB = hasScoreValue(match?.scoreB);
+
+    return {
+      ...match,
+      status: hasA || hasB ? "in_progress" : "scheduled",
+      completed: false,
+      finalized: false,
+      winnerTeamId: "",
+      completedAt: "",
+    };
+  }
+
+  function finalizeMatchFromScore(match) {
+    const scoreA = getMatchCompletionScore(match?.scoreA);
+    const scoreB = getMatchCompletionScore(match?.scoreB);
+
+    if (isKnockoutMatch(match) && scoreA === scoreB) {
+      return match;
+    }
+
+    return {
+      ...match,
+      status: "completed",
+      completed: true,
+      finalized: true,
+      scoreTouched: true,
+      scoreA: String(scoreA),
+      scoreB: String(scoreB),
+      completedAt: new Date().toISOString(),
+      winnerTeamId:
+        scoreA === scoreB
+          ? null
+          : scoreA > scoreB
+            ? match.teamAId || match.teamA || ""
+            : match.teamBId || match.teamB || "",
+    };
+  }
+
+  function markMatchNeedsWinnerFromScore(match) {
+    const scoreA = getMatchCompletionScore(match?.scoreA);
+    const scoreB = getMatchCompletionScore(match?.scoreB);
+
+    return {
+      ...match,
+      status: "in_progress",
+      completed: false,
+      finalized: false,
+      scoreTouched: true,
+      scoreA: String(scoreA),
+      scoreB: String(scoreB),
+      winnerTeamId: "",
+      completedAt: "",
+    };
+  }
+
+  function getKnockoutStageKeyForMatch(match) {
+    const rawId = String(match?.id || match?.matchId || "")
+      .replace(/^schedule-/, "")
+      .toLowerCase();
+
+    if (rawId.startsWith("qf-") || rawId.startsWith("ko-")) {
+      return "quarterFinals";
+    }
+    if (rawId.startsWith("sf-")) return "semiFinals";
+    if (rawId.startsWith("final-")) return "final";
+    if (rawId.startsWith("third-place")) return "thirdPlace";
+
+    return "";
+  }
+
+  function getKnockoutBaseMatchId(match) {
+    return String(match?.id || match?.matchId || "").replace(/^schedule-/, "");
+  }
+
+  function applyCompletedKnockoutWinner(knockout, completedMatch) {
+    if (!isKnockoutMatch(completedMatch) || !completedMatch?.winnerTeamId) {
+      return knockout || {};
+    }
+
+    const stageKey = getKnockoutStageKeyForMatch(completedMatch);
+    const baseMatchId = getKnockoutBaseMatchId(completedMatch);
+    if (!stageKey || !baseMatchId) return knockout || {};
+
+    const winnerSource = String(completedMatch.winnerTeamId || "");
+    const sourceA = completedMatch.sourceA || completedMatch.teamA;
+    const sourceB = completedMatch.sourceB || completedMatch.teamB;
+    const loserSource =
+      winnerSource === sourceA
+        ? sourceB
+        : winnerSource === sourceB
+          ? sourceA
+          : "";
+    const nextKnockout = knockout || {};
+    const applyToMatch = (match) =>
+      match && match.id === baseMatchId
+        ? {
+            ...match,
+            winnerSource,
+            loserSource,
+            status: "completed",
+          }
+        : match;
+
+    if (Array.isArray(nextKnockout[stageKey])) {
+      return {
+        ...nextKnockout,
+        [stageKey]: nextKnockout[stageKey].map(applyToMatch),
+      };
+    }
+
+    return {
+      ...nextKnockout,
+      [stageKey]: applyToMatch(nextKnockout[stageKey]),
+    };
+  }
+
+  function getMatchDisplayStatus(match) {
+    const normalizedStatus = String(match?.status || "scheduled").toLowerCase();
+    if (isMatchCompleted(match)) {
+      return {
+        status: "completed",
+        label: tournamentText.matchStatusCompleted,
+      };
+    }
+
+    if (
+      normalizedStatus === "started" ||
+      normalizedStatus === "in_progress" ||
+      isMatchInProgressFromScore(match)
+    ) {
+      return {
+        status: "in_progress",
+        label: tournamentText.matchStatusStarted,
+      };
+    }
+
+    return {
+      status: "scheduled",
+      label: tournamentText.matchStatusScheduled,
+    };
+  }
+
+  function getMatchStatusForLog(match) {
+    if (isMatchCompleted(match)) return "completed";
+    return String(match?.status || "scheduled").toLowerCase();
+  }
+
+  function logMatchStatusChange() {
+  }
+
+  function buildTournamentRoundRobinRounds(group) {
+    const groupTeams = (group.teams || []).map((team, index) => ({
+      id: team.id || "",
+      slot: team.slot || `${group.code}${index + 1}`,
+      label: getTournamentPreviewTeamName(team),
+    }));
+
+    if (groupTeams.length < 2) return [];
+
+    const rotation =
+      groupTeams.length % 2 === 0 ? [...groupTeams] : [...groupTeams, null];
+    const rounds = [];
+    const roundCount = rotation.length - 1;
+    const half = rotation.length / 2;
+
+    for (let roundIndex = 0; roundIndex < roundCount; roundIndex += 1) {
+      const roundMatches = [];
+
+      for (let pairIndex = 0; pairIndex < half; pairIndex += 1) {
+        const first = rotation[pairIndex];
+        const second = rotation[rotation.length - 1 - pairIndex];
+        if (!first || !second) continue;
+
+        const shouldFlip = roundIndex % 2 === 1;
+        roundMatches.push({
+          teamAId: shouldFlip ? second.id : first.id,
+          teamBId: shouldFlip ? first.id : second.id,
+          teamA: shouldFlip ? second.label : first.label,
+          teamB: shouldFlip ? first.label : second.label,
+          sourceA: shouldFlip ? second.slot : first.slot,
+          sourceB: shouldFlip ? first.slot : second.slot,
+        });
+      }
+
+      rounds.push(roundMatches);
+      rotation.splice(1, 0, rotation.pop());
+    }
+
+    return rounds;
+  }
+
+  function buildTournamentHallSchedule(tournament) {
+    const safeTournament = tournament ? applyTournamentDefaults(tournament) : null;
+    if (!safeTournament) {
+      return {
+        batches: [],
+        courtCount: 1,
+        groups: [],
+        knockoutPreview: {},
+      };
+    }
+
+    const scheduleCourtCount = Math.max(
+      1,
+      Math.floor(Number(safeTournament.courtCount || 3))
+    );
+    const scheduleGroupMinutes = Math.max(
+      1,
+      Number(safeTournament.groupMatchMinutes || 12)
+    );
+    const schedulePlayoffMinutes = Math.max(
+      1,
+      Number(safeTournament.playoffMatchMinutes || 15)
+    );
+    const scheduleBreakMinutes = Math.max(
+      0,
+      Number(safeTournament.breakMinutes || 0)
+    );
+    const groups =
+      Array.isArray(safeTournament.groups) && safeTournament.groups.length
+        ? safeTournament.groups
+        : buildManualGroups(safeTournament);
+    const knockoutPreview = buildManualKnockout({
+      ...safeTournament,
       groups,
-      bracketSize: groupCount * 2,
-      knockout: buildManualKnockout({
-        ...activeTournament,
-        groups,
-        bracketSize: groupCount * 2,
-      }),
     });
-    setTournamentActionMessage(tournamentText.regenerateStructure);
+    const matchLookup = getTournamentMatchLookup(safeTournament);
+
+    const groupScheduleQueues = groups
+      .map((group, groupIndex) => {
+        const groupCode = group.code || getTournamentGroupCode(groupIndex);
+        const groupColor = getTournamentGroupColor(groupCode);
+        const queue = buildTournamentRoundRobinRounds({
+          ...group,
+          code: groupCode,
+        }).flatMap((roundMatches, roundIndex) =>
+          roundMatches.map((match, matchIndex) => ({
+            id: `schedule-${group.id}-${roundIndex}-${matchIndex}`,
+            stage: "group",
+            groupId: group.id,
+            groupName: group.name,
+            groupCode,
+            groupColor,
+            roundNumber: roundIndex + 1,
+            teamAId: match.teamAId,
+            teamBId: match.teamBId,
+            teamA: match.teamA,
+            teamB: match.teamB,
+            sourceA: match.sourceA,
+            sourceB: match.sourceB,
+          }))
+        );
+
+        return {
+          groupId: group.id,
+          groupCode,
+          queue,
+        };
+      })
+      .filter((groupQueue) => groupQueue.queue.length > 0);
+
+    const balancedGroupBatches = [];
+    let groupRotationStart = 0;
+    const pickNextScheduleMatch = (
+      queues,
+      rotationStart,
+      usedGroups,
+      usedTeams,
+      batchItems,
+      allowSameGroup,
+      allowTeamRepeat
+    ) => {
+      for (let offset = 0; offset < queues.length; offset += 1) {
+        const queueIndex = (rotationStart + offset) % queues.length;
+        const groupQueue = queues[queueIndex];
+        if (!groupQueue.queue.length) continue;
+        if (!allowSameGroup && usedGroups.has(groupQueue.groupId)) continue;
+
+        const matchIndex = groupQueue.queue.findIndex(
+          (match) =>
+            allowTeamRepeat ||
+            (!usedTeams.has(match.teamA) && !usedTeams.has(match.teamB))
+        );
+        if (matchIndex === -1) continue;
+
+        const [match] = groupQueue.queue.splice(matchIndex, 1);
+        batchItems.push(match);
+        usedGroups.add(groupQueue.groupId);
+        usedTeams.add(match.teamA);
+        usedTeams.add(match.teamB);
+        return true;
+      }
+
+      return false;
+    };
+
+    while (groupScheduleQueues.some((groupQueue) => groupQueue.queue.length)) {
+      const batchItems = [];
+      const usedGroups = new Set();
+      const usedTeams = new Set();
+
+      while (batchItems.length < scheduleCourtCount) {
+        if (
+          pickNextScheduleMatch(
+            groupScheduleQueues,
+            groupRotationStart,
+            usedGroups,
+            usedTeams,
+            batchItems,
+            false,
+            false
+          )
+        ) {
+          continue;
+        }
+        if (
+          pickNextScheduleMatch(
+            groupScheduleQueues,
+            groupRotationStart,
+            usedGroups,
+            usedTeams,
+            batchItems,
+            true,
+            false
+          )
+        ) {
+          continue;
+        }
+        if (
+          pickNextScheduleMatch(
+            groupScheduleQueues,
+            groupRotationStart,
+            usedGroups,
+            usedTeams,
+            batchItems,
+            true,
+            true
+          )
+        ) {
+          continue;
+        }
+        break;
+      }
+
+      if (!batchItems.length) break;
+      balancedGroupBatches.push(batchItems);
+      groupRotationStart =
+        (groupRotationStart + 1) % Math.max(1, groupScheduleQueues.length);
+    }
+
+    const scheduleKnockoutMatches = [
+      ...(knockoutPreview.quarterFinals || []).map((match) => ({
+        ...match,
+        stage: "knockout",
+        round: tournamentText.firstKnockoutLabel,
+      })),
+      ...(knockoutPreview.semiFinals || []).map((match) => ({
+        ...match,
+        stage: "knockout",
+        round: tournamentText.semiFinals,
+      })),
+      knockoutPreview.final
+        ? {
+            ...knockoutPreview.final,
+            stage: "knockout",
+            round: tournamentText.final,
+          }
+        : null,
+      safeTournament.thirdPlaceMatch && knockoutPreview.thirdPlace
+        ? {
+            ...knockoutPreview.thirdPlace,
+            stage: "knockout",
+            round: tournamentText.thirdPlace,
+          }
+        : null,
+    ].filter(Boolean);
+    const knockoutScheduleItems = scheduleKnockoutMatches.map((match) => ({
+      id: `schedule-${match.id}`,
+      stage: "knockout",
+      round: match.round,
+      teamA: match.sourceA || match.teamA,
+      teamB: match.sourceB || match.teamB,
+    }));
+    const knockoutScheduleBatches = [];
+
+    for (
+      let index = 0;
+      index < knockoutScheduleItems.length;
+      index += scheduleCourtCount
+    ) {
+      knockoutScheduleBatches.push(
+        knockoutScheduleItems.slice(index, index + scheduleCourtCount)
+      );
+    }
+
+    const scheduleBatches = [
+      ...balancedGroupBatches.map((items) => ({
+        stage: "group",
+        items,
+      })),
+      ...knockoutScheduleBatches.map((items) => ({
+        stage: "knockout",
+        items,
+      })),
+    ];
+    const batches = [];
+    let scheduleCursor = parseTournamentScheduleStart(safeTournament.startTime);
+
+    scheduleBatches.forEach((scheduleBatch, index) => {
+      const isPlayoffBatch = scheduleBatch.stage === "knockout";
+      const duration = isPlayoffBatch
+        ? schedulePlayoffMinutes
+        : scheduleGroupMinutes;
+
+      const batchNumber = index + 1;
+      batches.push({
+        id: `schedule-batch-${index + 1}`,
+        number: batchNumber,
+        time: formatTournamentScheduleTime(scheduleCursor),
+        duration,
+        items: Array.from(
+          { length: scheduleCourtCount },
+          (_, courtIndex) => {
+            const scheduleItem = scheduleBatch.items[courtIndex];
+            if (!scheduleItem) return null;
+
+            return mergeScheduleItemWithSavedMatch(
+              {
+                ...scheduleItem,
+                scheduleBatch: batchNumber,
+                scheduleCourt: courtIndex + 1,
+                scheduleOrder: index * scheduleCourtCount + courtIndex,
+                manualOrder:
+                  scheduleItem.manualOrder ??
+                  index * scheduleCourtCount + courtIndex,
+              },
+              matchLookup
+            );
+          }
+        ),
+      });
+
+      scheduleCursor += duration + scheduleBreakMinutes;
+    });
+
+    return {
+      batches,
+      courtCount: scheduleCourtCount,
+      groups,
+      knockoutPreview,
+    };
   }
 
   function generateTournamentKnockout() {
@@ -1597,6 +3999,7 @@ export default function App() {
       ? activeTournament.groups
       : [];
     const nextMatches = [];
+    let manualOrderIndex = 0;
 
     groups.forEach((group) => {
       const groupTeams = (group.teams || []).filter((team) =>
@@ -1606,16 +4009,23 @@ export default function App() {
       for (let i = 0; i < groupTeams.length; i += 1) {
         for (let j = i + 1; j < groupTeams.length; j += 1) {
           nextMatches.push({
-            id: `gm-${activeTournament.id}-${group.id}-${i}-${j}-${Date.now()}`,
+            id: `gm-${activeTournament.id}-${group.id}-${i}-${j}`,
             stage: "group",
             groupId: group.id,
             groupName: group.name,
+            groupCode: group.code || "",
+            sourceRound: "group",
+            manualOrder: manualOrderIndex,
+            scheduleOrder: manualOrderIndex,
+            teamAId: groupTeams[i].id || groupTeams[i].slot || "",
+            teamBId: groupTeams[j].id || groupTeams[j].slot || "",
             teamA: groupTeams[i].name,
             teamB: groupTeams[j].name,
             scoreA: "",
             scoreB: "",
             status: "scheduled",
           });
+          manualOrderIndex += 1;
         }
       }
     });
@@ -1627,14 +4037,20 @@ export default function App() {
       for (let i = 0; i < teams.length; i += 1) {
         for (let j = i + 1; j < teams.length; j += 1) {
           nextMatches.push({
-            id: `tm-${activeTournament.id}-${i}-${j}-${Date.now()}`,
+            id: `tm-${activeTournament.id}-${i}-${j}`,
             stage: "group",
+            sourceRound: "group",
+            manualOrder: manualOrderIndex,
+            scheduleOrder: manualOrderIndex,
+            teamAId: teams[i].id || "",
+            teamBId: teams[j].id || "",
             teamA: teams[i].name,
             teamB: teams[j].name,
             scoreA: "",
             scoreB: "",
             status: "scheduled",
           });
+          manualOrderIndex += 1;
         }
       }
     }
@@ -1657,30 +4073,301 @@ export default function App() {
     setTournamentActionMessage(tournamentText.matchesGenerated);
   }
 
-  function updateTournamentMatchScore(matchId, scoreA, scoreB) {
+  function findScheduleItemByMatchId(tournament, matchId) {
+    const schedule = buildTournamentHallSchedule(tournament);
+    for (const batch of schedule.batches || []) {
+      for (const item of batch.items || []) {
+        if (item && item.id === matchId) return item;
+      }
+    }
+
+    return null;
+  }
+
+  function createTournamentMatchFromScheduleItem(tournament, scheduleItem, overrides = {}) {
+    if (!scheduleItem) return null;
+
+    return {
+      id: scheduleItem.id,
+      stage: scheduleItem.stage || "group",
+      groupId: scheduleItem.groupId || "",
+      groupName: scheduleItem.groupName || "",
+      groupCode: scheduleItem.groupCode || "",
+      sourceRound: scheduleItem.sourceRound || scheduleItem.stage || "",
+      sourceA: scheduleItem.sourceA || "",
+      sourceB: scheduleItem.sourceB || "",
+      manualOrder: scheduleItem.manualOrder ?? scheduleItem.scheduleOrder,
+      scheduleOrder: scheduleItem.scheduleOrder,
+      scheduleBatch: scheduleItem.scheduleBatch,
+      scheduleCourt: scheduleItem.scheduleCourt,
+      teamAId:
+        scheduleItem.teamAId ||
+        findTournamentTeamIdByName(tournament, scheduleItem.teamA),
+      teamBId:
+        scheduleItem.teamBId ||
+        findTournamentTeamIdByName(tournament, scheduleItem.teamB),
+      teamA: scheduleItem.teamA || "",
+      teamB: scheduleItem.teamB || "",
+      scoreA: "",
+      scoreB: "",
+      status: "scheduled",
+      ...overrides,
+    };
+  }
+
+  function updateMatchScore(matchId, side, value) {
     if (!activeTournament) return;
 
-    const normalizedA = String(scoreA ?? "");
-    const normalizedB = String(scoreB ?? "");
-    const hasBoth = normalizedA.trim() !== "" && normalizedB.trim() !== "";
+    const normalizedValue = String(value ?? "").replace(/[^\d]/g, "");
+    const normalizedSide = String(side || "").toUpperCase() === "B" ? "B" : "A";
+    setMatchFinishWarnings((prev) => {
+      if (!prev[matchId]) return prev;
+      const next = { ...prev };
+      delete next[matchId];
+      return next;
+    });
 
     setTournaments((prev) =>
       prev.map((tournament) =>
         tournament.id !== activeTournament.id
           ? tournament
-          : {
-              ...tournament,
-              matches: (tournament.matches || []).map((match) =>
-                match.id !== matchId
-                  ? match
-                  : {
-                      ...match,
-                      scoreA: normalizedA,
-                      scoreB: normalizedB,
-                      status: hasBoth ? "completed" : "scheduled",
-                    }
-              ),
-            }
+          : (() => {
+              const existingMatches = Array.isArray(tournament.matches)
+                ? tournament.matches
+                : [];
+              let didUpdate = false;
+              const scheduleItem = findScheduleItemByMatchId(tournament, matchId);
+              const nextMatches = existingMatches.map((match) => {
+                if (match.id !== matchId) return match;
+                didUpdate = true;
+                const previousStatus = getMatchStatusForLog(match);
+
+                const nextMatch = {
+                  ...match,
+                  teamAId:
+                    match.teamAId ||
+                    scheduleItem?.teamAId ||
+                    findTournamentTeamIdByName(tournament, match.teamA),
+                  teamBId:
+                    match.teamBId ||
+                    scheduleItem?.teamBId ||
+                    findTournamentTeamIdByName(tournament, match.teamB),
+                  [normalizedSide === "A" ? "scoreA" : "scoreB"]:
+                    normalizedValue,
+                  scoreTouched: true,
+                };
+                const progressMatch = getMatchProgressFromScore(nextMatch);
+
+                logMatchStatusChange(
+                  matchId,
+                  previousStatus,
+                  getMatchStatusForLog(progressMatch),
+                  "score_edit"
+                );
+                return progressMatch;
+              });
+
+              if (didUpdate) {
+                return {
+                  ...tournament,
+                  matches: nextMatches,
+                };
+              }
+
+              if (!scheduleItem) return tournament;
+
+              const newMatch = getMatchProgressFromScore(
+                createTournamentMatchFromScheduleItem(
+                  tournament,
+                  scheduleItem,
+                  {
+                    scoreA: normalizedSide === "A" ? normalizedValue : "",
+                    scoreB: normalizedSide === "B" ? normalizedValue : "",
+                    scoreTouched: true,
+                  }
+                )
+              );
+              logMatchStatusChange(
+                matchId,
+                "missing",
+                getMatchStatusForLog(newMatch),
+                "score_edit"
+              );
+
+              return {
+                ...tournament,
+                matches: [...nextMatches, newMatch],
+              };
+            })()
+      )
+    );
+  }
+
+  function incrementMatchScore(matchId, side, delta) {
+    if (!activeTournament) return;
+
+    const existingMatch =
+      (activeTournament.matches || []).find((match) => match.id === matchId) ||
+      findScheduleItemByMatchId(activeTournament, matchId);
+    const normalizedSide = String(side || "").toUpperCase() === "B" ? "B" : "A";
+    const currentScore = parseMatchScore(
+      normalizedSide === "A" ? existingMatch?.scoreA : existingMatch?.scoreB
+    );
+    const currentScoreValue = currentScore === null ? 0 : currentScore;
+    const nextScore = Math.max(0, currentScoreValue + Number(delta || 0));
+
+    updateMatchScore(matchId, normalizedSide, String(nextScore));
+  }
+
+  function confirmMatchCompleted(matchId) {
+    if (!activeTournament) return;
+    const existingMatch = (activeTournament.matches || []).find(
+      (match) => match.id === matchId
+    );
+    const scheduleItem = findScheduleItemByMatchId(activeTournament, matchId);
+    const currentMatch =
+      existingMatch ||
+      createTournamentMatchFromScheduleItem(activeTournament, scheduleItem);
+
+    if (!currentMatch) return;
+
+    if (!hasCompletableMatchScore(currentMatch)) {
+      setMatchFinishWarnings((prev) => ({
+        ...prev,
+        [matchId]: tournamentText.knockoutNeedsWinner,
+      }));
+
+      setTournaments((prev) =>
+        prev.map((tournament) =>
+          tournament.id !== activeTournament.id
+            ? tournament
+            : (() => {
+                let didUpdateMatch = false;
+                const nextMatches = (tournament.matches || []).map((match) => {
+                  if (match.id !== matchId) return match;
+                  didUpdateMatch = true;
+
+                  const previousStatus = getMatchStatusForLog(match);
+                  const progressMatch = markMatchNeedsWinnerFromScore(match);
+                  logMatchStatusChange(
+                    matchId,
+                    previousStatus,
+                    getMatchStatusForLog(progressMatch),
+                    "needs_winner"
+                  );
+                  return progressMatch;
+                });
+
+                if (didUpdateMatch) {
+                  return {
+                    ...tournament,
+                    matches: nextMatches,
+                  };
+                }
+
+                const currentScheduleItem =
+                  scheduleItem || findScheduleItemByMatchId(tournament, matchId);
+                const newMatch = createTournamentMatchFromScheduleItem(
+                  tournament,
+                  currentScheduleItem
+                );
+
+                if (!newMatch) return tournament;
+
+                const progressMatch = markMatchNeedsWinnerFromScore(newMatch);
+                logMatchStatusChange(
+                  matchId,
+                  "missing",
+                  getMatchStatusForLog(progressMatch),
+                  "needs_winner"
+                );
+
+                return {
+                  ...tournament,
+                  matches: [...nextMatches, progressMatch],
+                };
+              })()
+        )
+      );
+      return;
+    }
+
+    setMatchFinishWarnings((prev) => {
+      if (!prev[matchId]) return prev;
+      const next = { ...prev };
+      delete next[matchId];
+      return next;
+    });
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : (() => {
+              let completedKnockoutMatch = null;
+              let didUpdateMatch = false;
+              const nextMatches = (tournament.matches || []).map((match) => {
+                if (match.id !== matchId) return match;
+                didUpdateMatch = true;
+                if (!hasCompletableMatchScore(match)) return match;
+
+                const previousStatus = getMatchStatusForLog(match);
+                const finalizedMatch = finalizeMatchFromScore(match);
+                if (isKnockoutMatch(finalizedMatch)) {
+                  completedKnockoutMatch = finalizedMatch;
+                }
+                logMatchStatusChange(
+                  matchId,
+                  previousStatus,
+                  getMatchStatusForLog(finalizedMatch),
+                  "explicit_complete"
+                );
+                return finalizedMatch;
+              });
+              if (!didUpdateMatch) {
+                const currentScheduleItem =
+                  scheduleItem || findScheduleItemByMatchId(tournament, matchId);
+                const newMatch = createTournamentMatchFromScheduleItem(
+                  tournament,
+                  currentScheduleItem
+                );
+
+                if (newMatch && hasCompletableMatchScore(newMatch)) {
+                  const finalizedMatch = finalizeMatchFromScore(newMatch);
+                  if (isKnockoutMatch(finalizedMatch)) {
+                    completedKnockoutMatch = finalizedMatch;
+                  }
+                  logMatchStatusChange(
+                    matchId,
+                    "missing",
+                    getMatchStatusForLog(finalizedMatch),
+                    "explicit_complete"
+                  );
+                  nextMatches.push(finalizedMatch);
+                }
+              }
+              const existingKnockout = tournament.knockout || {};
+              const hasKnockoutBase = Boolean(
+                (existingKnockout.quarterFinals || []).length ||
+                  (existingKnockout.semiFinals || []).length ||
+                  existingKnockout.final ||
+                  existingKnockout.thirdPlace
+              );
+              const knockoutBase = hasKnockoutBase
+                ? existingKnockout
+                : buildManualKnockout(tournament);
+
+              return {
+                ...tournament,
+                matches: nextMatches,
+                knockout: completedKnockoutMatch
+                  ? applyCompletedKnockoutWinner(
+                      knockoutBase,
+                      completedKnockoutMatch
+                    )
+                  : tournament.knockout,
+              };
+            })()
       )
     );
   }
@@ -1749,15 +4436,16 @@ export default function App() {
       });
 
       matches.forEach((match) => {
+        if (isKnockoutMatch(match)) return;
         if (match.groupId && match.groupId !== group.id) return;
         if (!teamNames.includes(match.teamA) || !teamNames.includes(match.teamB)) return;
 
-        const scoreA = Number(match.scoreA);
-        const scoreB = Number(match.scoreB);
+        const scoreA = parseMatchScore(match.scoreA);
+        const scoreB = parseMatchScore(match.scoreB);
         const isComplete =
-          match.status === "completed" &&
-          Number.isFinite(scoreA) &&
-          Number.isFinite(scoreB);
+          isMatchCompleted(match) &&
+          scoreA !== null &&
+          scoreB !== null;
         if (!isComplete) return;
 
         const rowA = rowsByTeam[match.teamA];
@@ -1811,12 +4499,99 @@ export default function App() {
 
   const activeTournament = useMemo(() => {
     const tournament = tournaments.find((t) => t.id === activeTournamentId) || null;
-    return tournament ? applyTournamentDefaults(tournament) : null;
-  }, [tournaments, activeTournamentId]);
+    if (!tournament || !isTournamentOwnedByUsername(tournament, auth.username)) {
+      return null;
+    }
 
-  const tournamentStandings = useMemo(() => {
-    return computeTournamentStandings(activeTournament);
+    return applyTournamentDefaults(tournament);
+  }, [auth.username, tournaments, activeTournamentId]);
+
+  const publicTournamentRequestActive = Boolean(publicTournamentCode);
+  const publicTournament = publicTournamentBackend;
+
+  const setupPanelTournamentIdRef = useRef("");
+
+  useEffect(() => {
+    const nextTournamentId = activeTournament?.id || "";
+    if (setupPanelTournamentIdRef.current === nextTournamentId) return;
+
+    setupPanelTournamentIdRef.current = nextTournamentId;
+    setShowTournamentSetupPanel(true);
   }, [activeTournament]);
+
+  useEffect(() => {
+    if (!activeTournamentId) return;
+
+    const selectedTournament =
+      tournaments.find((tournament) => tournament.id === activeTournamentId) ||
+      null;
+
+    if (!isTournamentOwnedByUsername(selectedTournament, auth.username)) {
+      setActiveTournamentId("");
+    }
+  }, [activeTournamentId, auth.username, tournaments]);
+
+  useEffect(() => {
+    setMatchFinishWarnings({});
+  }, [activeTournamentId]);
+
+  useEffect(() => {
+    if (!auth.loggedIn || !auth.username || !activeTournamentId) return;
+
+    saveActiveTournamentId(auth.username, activeTournamentId);
+  }, [activeTournamentId, auth.loggedIn, auth.username]);
+
+  useEffect(() => {
+    if (!auth.loggedIn || publicTournamentRequestActive) return;
+
+    const scopedTournaments = filterTournamentsForUsername(
+      tournaments,
+      auth.username
+    );
+
+    if (!scopedTournaments.length) return;
+
+    const preferredId = getPreferredActiveTournamentId(
+      scopedTournaments,
+      auth.username,
+      activeTournamentId
+    );
+
+    if (preferredId && preferredId !== activeTournamentId) {
+      setActiveTournamentId(preferredId);
+      setShowTournamentSetupPanel(true);
+    }
+  }, [
+    activeTournamentId,
+    auth.loggedIn,
+    auth.username,
+    publicTournamentRequestActive,
+    tournaments,
+  ]);
+
+  useEffect(() => {
+    if (!activeTournament || publicTournamentRequestActive) return;
+    if (Array.isArray(activeTournament.groups) && activeTournament.groups.length) {
+      return;
+    }
+
+    const groups = buildManualGroups(activeTournament);
+    if (!groups.length) return;
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id === activeTournament.id &&
+        (!Array.isArray(tournament.groups) || !tournament.groups.length)
+          ? {
+              ...tournament,
+              groups,
+            }
+          : tournament
+      )
+    );
+  }, [activeTournament, publicTournamentRequestActive, buildManualGroups]);
+
+  const tournamentStandings = computeTournamentStandings(activeTournament);
 
   const advancingTeamsByGroup = useMemo(() => {
     if (!activeTournament || activeTournament.format !== "group-stage") return [];
@@ -1845,23 +4620,34 @@ export default function App() {
       return;
     }
 
+    const tournamentId = createStableTournamentId();
     const newTournament = {
-      id: `t-${Date.now()}`,
+      id: tournamentId,
+      tournamentId,
+      TournamentId: tournamentId,
       name,
       rules,
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      organizerUsername: auth.username || "",
+      ownerUsername: auth.username || "",
       status: "draft",
       published: false,
       teams: [],
       ...getDefaultTournamentConfig(),
     };
 
-    setTournaments((prev) => [newTournament, ...prev]);
+    setTournaments((prev) => [
+      newTournament,
+      ...filterTournamentsForUsername(prev, auth.username),
+    ]);
     setActiveTournamentId(newTournament.id);
     setNewTournamentName("");
     setNewTournamentRules("");
     setShowCreateTournamentForm(false);
+    setShowTournamentSetupPanel(true);
     setTournamentActionMessage(tournamentText.createdOk);
+    void persistTournamentNow("saveTournament", newTournament);
   }
 
   async function handleLogin() {
@@ -1911,6 +4697,23 @@ export default function App() {
         role: data?.profile?.role || "trainer",
       };
 
+      window.clearTimeout(tournamentAutosaveTimerRef.current);
+      window.clearTimeout(manualGroupEditingTimerRef.current);
+      manualGroupEditingRef.current = false;
+      deletedTournamentIdsRef.current.clear();
+      tournamentSessionUsernameRef.current = "";
+      setTournaments([]);
+      setActiveTournamentId("");
+      setActiveTournamentView("overview");
+      setShowTournamentSetupPanel(true);
+      setShowTournamentRegistration(false);
+      setTournamentActionMessage("");
+      setTournamentSyncStatus("loading");
+      setTournamentSyncMessage("");
+      setTournamentBackendReady(false);
+      setPublicTournamentBackend(null);
+      setPublicTournamentLoadStatus("idle");
+      lastTournamentBackendJsonRef.current = "[]";
       clearRoundState();
       setAuth(nextAuth);
       setSkillView(data?.profile?.settings?.skillView || "numbers");
@@ -1947,6 +4750,24 @@ export default function App() {
     setTrainerActionMessage("");
     setCreateTrainerMessage("");
     setCreatedTrainerInfo(null);
+    window.clearTimeout(tournamentAutosaveTimerRef.current);
+    window.clearTimeout(manualGroupEditingTimerRef.current);
+    manualGroupEditingRef.current = false;
+    deletedTournamentIdsRef.current.clear();
+    tournamentSessionUsernameRef.current = "";
+    setTournaments([]);
+    setActiveTournamentId("");
+    setActiveTournamentView("overview");
+    setShowTournamentSetupPanel(true);
+    setShowTournamentRegistration(false);
+    setTournamentActionMessage("");
+    setTournamentSyncStatus("local");
+    setTournamentSyncMessage("");
+    setTournamentBackendReady(false);
+    setPublicTournamentBackend(null);
+    setPublicTournamentLoadStatus("idle");
+    setPublicTournamentsMessage("");
+    lastTournamentBackendJsonRef.current = "[]";
     setPlayers([]);
     setArchivedPlayers([]);
     setPlayerActionMessage("");
@@ -2239,6 +5060,285 @@ export default function App() {
       setPlayerActionMessage(t.couldNotRestorePlayer);
     }
   }
+
+  useEffect(() => {
+    function handleUrlChange() {
+      setCurrentSearch(window.location.search);
+    }
+
+    window.addEventListener("popstate", handleUrlChange);
+    return () => window.removeEventListener("popstate", handleUrlChange);
+  }, []);
+
+  useEffect(() => {
+    if (!auth.loggedIn || !auth.username || publicTournamentRequestActive) {
+      return;
+    }
+
+    saveStoredTournaments(
+      filterTournamentsForUsername(tournaments, auth.username),
+      auth.username
+    );
+  }, [auth.loggedIn, auth.username, publicTournamentRequestActive, tournaments]);
+
+  useEffect(() => {
+    const normalizedUsername = auth.loggedIn
+      ? getTournamentStorageUsername(auth.username)
+      : "";
+
+    if (tournamentSessionUsernameRef.current !== normalizedUsername) {
+      window.clearTimeout(tournamentAutosaveTimerRef.current);
+      window.clearTimeout(manualGroupEditingTimerRef.current);
+      manualGroupEditingRef.current = false;
+      deletedTournamentIdsRef.current.clear();
+      tournamentSessionUsernameRef.current = normalizedUsername;
+
+      setTournaments([]);
+      setActiveTournamentId("");
+      setActiveTournamentView("overview");
+      setShowTournamentSetupPanel(true);
+      setShowTournamentRegistration(false);
+      setTournamentActionMessage("");
+      setTournamentSyncStatus(normalizedUsername ? "loading" : "local");
+      setTournamentSyncMessage("");
+      setTournamentBackendReady(false);
+      setPublicTournamentBackend(null);
+      setPublicTournamentLoadStatus("idle");
+      setPublicTournamentsMessage("");
+      lastTournamentBackendJsonRef.current = "[]";
+    }
+
+    if (!auth.loggedIn) {
+      setTournaments([]);
+      setActiveTournamentId("");
+      setTournamentBackendReady(false);
+      setTournamentSyncStatus("local");
+      setTournamentSyncMessage("");
+      setPublicTournamentBackend(null);
+      setPublicTournamentLoadStatus("idle");
+      setPublicTournamentsMessage("");
+      lastTournamentBackendJsonRef.current = "[]";
+      return;
+    }
+
+    void loadTournamentsFromBackend();
+  }, [auth.loggedIn, auth.password, auth.username, loadTournamentsFromBackend]);
+
+  useEffect(() => {
+    const normalizedCode = String(publicTournamentCode || "").trim();
+    if (!normalizedCode) {
+      setPublicTournamentBackend(null);
+      setPublicTournamentLoadStatus("idle");
+      return undefined;
+    }
+
+    let cancelled = false;
+    setPublicTournamentBackend(null);
+    setPublicTournamentLoadStatus("loading");
+
+    fetchPublicTournamentFromBackend(normalizedCode)
+      .then((tournament) => {
+        if (cancelled) return;
+
+        if (isTournamentPublished(tournament)) {
+          setPublicTournamentBackend(tournament);
+          setPublicTournamentLoadStatus("ready");
+          return;
+        }
+
+        setPublicTournamentLoadStatus("not-found");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+
+        console.error("Could not load public tournament from backend:", error);
+        setPublicTournamentBackend(null);
+        setPublicTournamentLoadStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchPublicTournamentFromBackend, publicTournamentCode]);
+
+  useEffect(() => {
+    if (publicTournamentRequestActive) return undefined;
+
+    let cancelled = false;
+    setPublicTournamentsStatus("loading");
+    setPublicTournamentsMessage("");
+
+    fetchPublicTournamentList()
+      .then((items) => {
+        if (cancelled) return;
+        setPublicTournaments(items);
+        setPublicTournamentsStatus("ready");
+        setPublicTournamentsMessage("");
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Could not load public tournaments:", error);
+        setPublicTournaments([]);
+        setPublicTournamentsStatus("error");
+        setPublicTournamentsMessage(
+          error?.message || tournamentText.publicListingError
+        );
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    fetchPublicTournamentList,
+    publicTournamentRequestActive,
+    tournamentText.publicListingError,
+  ]);
+
+  useEffect(() => {
+    if (!auth.loggedIn || !tournamentBackendReady || publicTournamentRequestActive) {
+      return undefined;
+    }
+
+    const autosaveUsername = auth.username;
+    const normalizedAutosaveUsername =
+      getTournamentStorageUsername(autosaveUsername);
+    const scopedTournaments = filterTournamentsForUsername(
+      tournaments,
+      autosaveUsername
+    ).filter((tournament) => {
+      const tournamentId = getTournamentIdentity(tournament);
+      return (
+        tournamentId && !deletedTournamentIdsRef.current.has(tournamentId)
+      );
+    });
+
+    if (scopedTournaments.length !== tournaments.length) {
+      setTournaments(scopedTournaments);
+      return undefined;
+    }
+
+    const serialized = JSON.stringify(scopedTournaments);
+    if (serialized === lastTournamentBackendJsonRef.current) return undefined;
+
+    window.clearTimeout(tournamentAutosaveTimerRef.current);
+    setTournamentSyncStatus("saving");
+    setTournamentSyncMessage(tournamentText.tournamentSyncSaving);
+
+    tournamentAutosaveTimerRef.current = window.setTimeout(async () => {
+      try {
+        if (
+          tournamentSessionUsernameRef.current !== normalizedAutosaveUsername
+        ) {
+          return;
+        }
+
+        for (const tournament of scopedTournaments) {
+          const tournamentId = getTournamentIdentity(tournament);
+          if (!tournamentId) {
+            continue;
+          }
+
+          if (deletedTournamentIdsRef.current.has(tournamentId)) {
+            continue;
+          }
+
+          const backendTournament = prepareTournamentForBackend(tournament);
+          const data = await callTournamentBackend("saveTournament", {
+            tournament: backendTournament,
+            tournamentId,
+            TournamentId: tournamentId,
+            id: tournamentId,
+            publicCode: backendTournament.publicCode || "",
+          });
+          const normalizedSavedTournament = normalizeTournamentApiItem(data);
+          const savedTournament =
+            normalizedSavedTournament &&
+            getTournamentIdentity(normalizedSavedTournament) === tournamentId
+              ? normalizedSavedTournament
+              : markTournamentBackendSynced(backendTournament);
+
+          if (savedTournament?.id) {
+            setTournaments((currentTournaments) => {
+              const currentScoped = filterTournamentsForUsername(
+                currentTournaments,
+                autosaveUsername
+              ).filter((currentTournament) => {
+                const currentTournamentId =
+                  getTournamentIdentity(currentTournament);
+                return (
+                  currentTournamentId &&
+                  !deletedTournamentIdsRef.current.has(currentTournamentId)
+                );
+              });
+
+              const currentSerialized = JSON.stringify(currentScoped);
+              const hasLocalChangesAfterSaveStarted =
+                currentSerialized !== serialized;
+              const hasCurrentTournament = currentScoped.some(
+                (item) => item.id === savedTournament.id
+              );
+
+              if (!hasCurrentTournament) {
+                saveStoredTournaments(currentScoped, autosaveUsername);
+                return currentScoped;
+              }
+
+              const nextTournaments = currentScoped.map((item) =>
+                item.id === savedTournament.id
+                  ? mergeTournamentServerFields(item, savedTournament)
+                  : item
+              );
+              const nextSerialized = JSON.stringify(nextTournaments);
+
+              saveStoredTournaments(nextTournaments, autosaveUsername);
+              if (!hasLocalChangesAfterSaveStarted) {
+                lastTournamentBackendJsonRef.current = nextSerialized;
+              }
+
+              return nextTournaments;
+            });
+          }
+        }
+
+        if (
+          tournamentSessionUsernameRef.current !== normalizedAutosaveUsername
+        ) {
+          return;
+        }
+
+        setTournamentSyncStatus("saved");
+        setTournamentSyncMessage(tournamentText.tournamentSyncSaved);
+      } catch (error) {
+        console.error("Could not autosave tournaments:", error);
+        setTournamentSyncStatus("error");
+        setTournamentSyncMessage(
+          error?.message || tournamentText.tournamentBackendTodo
+        );
+      }
+    }, 900);
+
+    return () => window.clearTimeout(tournamentAutosaveTimerRef.current);
+  }, [
+    auth.loggedIn,
+    auth.username,
+    callTournamentBackend,
+    publicTournamentRequestActive,
+    tournamentBackendReady,
+    tournaments,
+    tournamentText.tournamentBackendTodo,
+    tournamentText.tournamentSyncSaved,
+    tournamentText.tournamentSyncSaving,
+  ]);
+
+  useEffect(() => {
+    if (!tournamentActionMessage) return undefined;
+
+    const timeoutId = window.setTimeout(() => {
+      setTournamentActionMessage("");
+    }, 2800);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [tournamentActionMessage]);
 
   useEffect(() => {
     if (!auth.loggedIn) {
@@ -3107,22 +6207,1296 @@ const savedRound = readStorageWithTtl(
 
   const totalPlayers = sortedPlayers.length;
 
+  const publicUpcomingFilterResult = useMemo(() => {
+    function getPublicTournamentFilterReason(tournament) {
+      if (!isTournamentPublished(tournament)) return "not-published";
+      if (!isTournamentPubliclyListed(tournament)) return "not-listed";
+
+      if (publicTournamentCountryFilter !== "all") {
+        const country = String(tournament.country || "")
+          .trim()
+          .toLowerCase();
+        if (country !== publicTournamentCountryFilter) {
+          return `country:${country || "empty"}`;
+        }
+      }
+
+      if (publicTournamentTypeFilter !== "all") {
+        const hasType = getTournamentSeries(tournament).some(
+          (series) =>
+            Number(series.teamSize) === Number(publicTournamentTypeFilter)
+        );
+        if (!hasType) return `type:${publicTournamentTypeFilter}`;
+      }
+
+      const hasParsedDate = Boolean(
+        parseTournamentDateValue(
+          tournament?.endDate || tournament?.startDate || tournament?.eventDate
+        )
+      );
+      const isFinished = isTournamentFinishedForFilter(tournament);
+
+      if (publicTournamentTimeFilter === "finished") {
+        if (!hasParsedDate) return "finished-filter-invalid-or-empty-date";
+        return isFinished ? "" : "not-finished";
+      }
+
+      return isFinished ? "finished" : "";
+    }
+
+    const accepted = [];
+    const rejected = [];
+
+    publicTournaments.forEach((tournament) => {
+      const reason = getPublicTournamentFilterReason(tournament);
+      if (reason) {
+        rejected.push({
+          id: tournament.id || "",
+          name: tournament.name || tournament.publicTitle || "",
+          publicCode: tournament.publicCode || "",
+          reason,
+        });
+        return;
+      }
+
+      accepted.push(tournament);
+    });
+
+    accepted.sort((a, b) => {
+        const dateA =
+          getTournamentDateValue(a)?.getTime() || Number.MAX_SAFE_INTEGER;
+        const dateB =
+          getTournamentDateValue(b)?.getTime() || Number.MAX_SAFE_INTEGER;
+
+        return publicTournamentTimeFilter === "finished"
+          ? dateB - dateA
+          : dateA - dateB;
+      });
+
+    return {
+      items: accepted,
+      rejected,
+    };
+  }, [
+    publicTournamentCountryFilter,
+    publicTournamentTimeFilter,
+    publicTournamentTypeFilter,
+    publicTournaments,
+  ]);
+
+  const filteredPublicTournaments = publicUpcomingFilterResult.items;
+
+  function formatPublicTournamentDate(tournament) {
+    const date = getTournamentDateValue(tournament);
+    const startTime = String(tournament?.startTime || "").trim();
+
+    if (!date) return startTime || "-";
+
+    const formatted = date.toLocaleDateString(language === "no" ? "nb-NO" : "en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    return startTime ? `${formatted} ${startTime}` : formatted;
+  }
+
+  function renderPublicUpcomingTournaments() {
+    const isLoadingPublicTournaments = publicTournamentsStatus === "loading";
+    const isPublicTournamentError = publicTournamentsStatus === "error";
+
+    return (
+      <section style={styles.publicLandingSection}>
+        <div style={styles.publicLandingHeader}>
+          <div>
+            <div style={styles.publicLandingEyebrow}>
+              {tournamentText.publicPreviewTitle}
+            </div>
+            <h2 style={styles.publicLandingTitle}>
+              {tournamentText.upcomingTournamentsTitle}
+            </h2>
+            <p style={styles.publicLandingSubtitle}>
+              {tournamentText.upcomingTournamentsSubtitle}
+            </p>
+          </div>
+          <div style={styles.publicLandingFilters}>
+            <select
+              style={styles.publicLandingSelect}
+              value={publicTournamentCountryFilter}
+              onChange={(e) => setPublicTournamentCountryFilter(e.target.value)}
+            >
+              <option value="all">{tournamentText.allCountries}</option>
+              <option value="norway">{tournamentText.norway}</option>
+              <option value="denmark">{tournamentText.denmark}</option>
+            </select>
+            <select
+              style={styles.publicLandingSelect}
+              value={publicTournamentTypeFilter}
+              onChange={(e) => setPublicTournamentTypeFilter(e.target.value)}
+            >
+              <option value="all">{tournamentText.allTypes}</option>
+              <option value="4">{tournamentText.fourSide}</option>
+              <option value="5">{tournamentText.fiveSide}</option>
+            </select>
+            <select
+              style={styles.publicLandingSelect}
+              value={publicTournamentTimeFilter}
+              onChange={(e) => setPublicTournamentTimeFilter(e.target.value)}
+            >
+              <option value="upcoming">{tournamentText.upcomingLabel}</option>
+              <option value="finished">{tournamentText.finishedLabel}</option>
+            </select>
+          </div>
+        </div>
+
+        {isLoadingPublicTournaments ? (
+          <div style={styles.publicLandingState}>
+            {tournamentText.loadingPublicTournaments}
+          </div>
+        ) : isPublicTournamentError ? (
+          <div style={styles.publicLandingState}>
+            {publicTournamentsMessage || tournamentText.publicListingError}
+          </div>
+        ) : filteredPublicTournaments.length === 0 ? (
+          <div style={styles.publicLandingState}>
+            {tournamentText.noPublicTournaments}
+          </div>
+        ) : (
+          <div style={styles.publicTournamentCardGrid}>
+            {filteredPublicTournaments.map((tournament) => {
+              const series = getTournamentSeries(tournament);
+              const seriesLabels = series.length
+                ? series.map((item) =>
+                    Number(item.teamSize) === 4
+                      ? tournamentText.fourSide
+                      : Number(item.teamSize) === 5
+                        ? tournamentText.fiveSide
+                        : item.name || tournamentText.seriesLabel
+                  )
+                : [];
+              const location = [
+                tournament.locationName,
+                tournament.city,
+                tournament.country,
+              ]
+                .map((part) => String(part || "").trim())
+                .filter(Boolean)
+                .join(", ");
+              const contact = [
+                tournament.contactName,
+                tournament.contactPhone,
+                tournament.contactEmail,
+              ]
+                .map((part) => String(part || "").trim())
+                .filter(Boolean)
+                .join(" / ");
+              const themeColor =
+                String(tournament.themeColor || "").trim() || "#064e3b";
+              const accentColor =
+                String(tournament.accentColor || "").trim() || "#22c55e";
+              const cardSummary = getTournamentPublicSummary(tournament);
+              const posterImageUrl = String(tournament.posterImageUrl || "").trim();
+              const publicTitle = getTournamentPublicTitle(tournament);
+
+              return (
+                <article
+                  key={tournament.id || tournament.publicCode}
+                  style={{
+                    ...styles.publicTournamentPosterCard,
+                    borderColor: accentColor,
+                    background: `linear-gradient(145deg, ${themeColor}, #071a14 72%)`,
+                  }}
+                >
+                  {posterImageUrl && (
+                    <div
+                      style={{
+                        ...styles.publicTournamentPosterImage,
+                        backgroundImage: `url(${posterImageUrl})`,
+                      }}
+                    />
+                  )}
+
+                  <div style={styles.publicTournamentPosterBody}>
+                    <div style={styles.publicTournamentPosterTop}>
+                      <span
+                        style={{
+                          ...styles.publicTournamentPosterDate,
+                          background: accentColor,
+                        }}
+                      >
+                        {formatPublicTournamentDate(tournament)}
+                      </span>
+                      {seriesLabels.length > 0 && (
+                        <div style={styles.publicTournamentPosterBadges}>
+                          {Array.from(new Set(seriesLabels)).map((label) => (
+                            <span
+                              key={label}
+                              style={styles.publicTournamentPosterBadge}
+                            >
+                              {label}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <h3 style={styles.publicTournamentPosterTitle}>
+                      {publicTitle}
+                    </h3>
+                    {cardSummary && (
+                      <p style={styles.publicTournamentPosterSummary}>
+                        {cardSummary}
+                      </p>
+                    )}
+
+                    <div style={styles.publicTournamentPosterMetaGrid}>
+                      {location && (
+                        <div>
+                          <span>{tournamentText.locationLabel}</span>
+                          <strong>{location}</strong>
+                        </div>
+                      )}
+                      {tournament.registrationDeadline && (
+                        <div>
+                          <span>{tournamentText.registrationDeadlineLabel}</span>
+                          <strong>{tournament.registrationDeadline}</strong>
+                        </div>
+                      )}
+                      {(tournament.prizeText || tournament.feeText) && (
+                        <div>
+                          <span>{tournamentText.prizeLabel}</span>
+                          <strong>
+                            {[tournament.prizeText, tournament.feeText]
+                              .filter(Boolean)
+                              .join(" / ")}
+                          </strong>
+                        </div>
+                      )}
+                      {contact && (
+                        <div>
+                          <span>{tournamentText.contactLabel}</span>
+                          <strong>{contact}</strong>
+                        </div>
+                      )}
+                      {tournament.organizerUsername && (
+                        <div>
+                          <span>{tournamentText.organizerLabel}</span>
+                          <strong>{tournament.organizerUsername}</strong>
+                        </div>
+                      )}
+                      {tournament.maxTeams && (
+                        <div>
+                          <span>{tournamentText.maxTeamsLabel}</span>
+                          <strong>{tournament.maxTeams}</strong>
+                        </div>
+                      )}
+                    </div>
+
+                    {(tournament.breakfastInfo ||
+                      tournament.breakBallInfo ||
+                      tournament.sodduInfo) && (
+                      <div style={styles.publicTournamentPosterFood}>
+                        {[tournament.breakfastInfo, tournament.breakBallInfo, tournament.sodduInfo]
+                          .filter(Boolean)
+                          .join(" / ")}
+                      </div>
+                    )}
+
+                    <button
+                      style={styles.publicTournamentPosterButton}
+                      onClick={() => openPublicTournamentFromCard(tournament)}
+                    >
+                      {tournamentText.openTournament}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  function renderTournamentHallScheduleGrid({
+    hallScheduleBatches,
+    scheduleCourtCount,
+    limit = 12,
+    showRoundLabels = false,
+    editableScores = false,
+  }) {
+    const safeBatches = Array.isArray(hallScheduleBatches)
+      ? hallScheduleBatches
+      : [];
+    const safeCourtCount = Math.max(1, Number(scheduleCourtCount || 1));
+    const visibleBatches = safeBatches.slice(0, limit);
+    const hiddenCount = Math.max(safeBatches.length - limit, 0);
+    const scheduleLeftColumnWidth = showRoundLabels ? 104 : 84;
+    const scheduleCourtMinWidth = 140;
+
+    const renderScoreControl = (item, side) => {
+      const scoreKey = side === "A" ? "scoreA" : "scoreB";
+      const scoreValue = String(item?.[scoreKey] ?? "");
+      const teamLabel = side === "A" ? item.teamA : item.teamB;
+
+      return (
+        <div style={styles.tournamentScheduleScoreStepper}>
+          <button
+            type="button"
+            style={styles.tournamentScheduleScoreButton}
+            onClick={() => incrementMatchScore(item.id, side, -1)}
+            aria-label={`${teamLabel} -`}
+          >
+            -
+          </button>
+          <input
+            style={styles.tournamentScheduleScoreInput}
+            inputMode="numeric"
+            value={scoreValue}
+            onChange={(e) => updateMatchScore(item.id, side, e.target.value)}
+            placeholder="0"
+          />
+          <button
+            type="button"
+            style={styles.tournamentScheduleScoreButton}
+            onClick={() => incrementMatchScore(item.id, side, 1)}
+            aria-label={`${teamLabel} +`}
+          >
+            +
+          </button>
+        </div>
+      );
+    };
+
+    const renderScheduleTeamRow = (item, side) => {
+      const isSideA = side === "A";
+      const teamName = isSideA
+        ? item.teamA || item.sourceA || "-"
+        : item.teamB || item.sourceB || "-";
+      const scoreValue = String(item?.[isSideA ? "scoreA" : "scoreB"] ?? "");
+      const hasScore = hasScoreValue(scoreValue);
+
+      return (
+        <div style={styles.tournamentScheduleTeamLine}>
+          <span style={styles.tournamentScheduleTeamName}>{teamName}</span>
+          {editableScores ? (
+            renderScoreControl(item, side)
+          ) : (
+            <span style={styles.tournamentScheduleReadonlyScore}>
+              {hasScore ? scoreValue : ""}
+            </span>
+          )}
+        </div>
+      );
+    };
+
+    const renderScheduleMatchTeams = (item) => {
+      if (!item) {
+        return <strong style={styles.tournamentScheduleMatchTeams}>{tournamentText.openCourt}</strong>;
+      }
+
+      return (
+        <div style={styles.tournamentScheduleMatchTeams}>
+          {renderScheduleTeamRow(item, "A")}
+          <span style={styles.tournamentScheduleVsLabel}>
+            {tournamentText.vsLabel}
+          </span>
+          {renderScheduleTeamRow(item, "B")}
+        </div>
+      );
+    };
+
+    if (!visibleBatches.length) {
+      return (
+        <div style={styles.tournamentMutedPanel}>
+          {tournamentText.noMatchesYet}
+        </div>
+      );
+    }
+
+    return (
+      <div style={styles.tournamentScheduleWrap}>
+        <div
+          style={{
+            ...styles.tournamentScheduleGrid,
+            minWidth: `${Math.max(
+              520,
+              safeCourtCount * scheduleCourtMinWidth + scheduleLeftColumnWidth
+            )}px`,
+          }}
+        >
+          <div
+            style={{
+              ...styles.tournamentScheduleHeaderRow,
+              gridTemplateColumns: `${scheduleLeftColumnWidth}px minmax(0, 1fr)`,
+            }}
+          >
+            <div style={styles.tournamentScheduleCornerCell}>
+              {tournamentText.scheduleTimeColumn}
+            </div>
+            <div
+              style={{
+                ...styles.tournamentScheduleCourts,
+                gridTemplateColumns: `repeat(${safeCourtCount}, minmax(${scheduleCourtMinWidth}px, 1fr))`,
+              }}
+            >
+              {Array.from({ length: safeCourtCount }, (_, courtIndex) => (
+                <div
+                  key={`schedule-court-header-${courtIndex}`}
+                  style={styles.tournamentScheduleCourtHeader}
+                >
+                  {tournamentText.courtLabel} {courtIndex + 1}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {visibleBatches.map((batch) => (
+            <div
+              key={batch.id}
+              style={{
+                ...styles.tournamentScheduleRow,
+                gridTemplateColumns: `${scheduleLeftColumnWidth}px minmax(0, 1fr)`,
+              }}
+            >
+              <div style={styles.tournamentScheduleTimeCell}>
+                {showRoundLabels && (
+                  <span>
+                    {tournamentText.roundLabel || tournamentText.batchLabel}{" "}
+                    {batch.number}
+                  </span>
+                )}
+                <strong>{batch.time}</strong>
+                <small>
+                  {batch.duration} {tournamentText.minutesShort}
+                </small>
+              </div>
+              <div
+                style={{
+                  ...styles.tournamentScheduleCourts,
+                  gridTemplateColumns: `repeat(${safeCourtCount}, minmax(${scheduleCourtMinWidth}px, 1fr))`,
+                }}
+              >
+                {batch.items.map((item, courtIndex) => {
+                  const groupColor = item?.groupColor || null;
+                  const displayStatus = getMatchDisplayStatus(item);
+                  const finishWarning = editableScores && item
+                    ? matchFinishWarnings[item.id]
+                    : "";
+                  const canCompleteMatch =
+                    editableScores &&
+                    item &&
+                    !isMatchCompleted(item);
+                  const shouldShowStatusBadge =
+                    item &&
+                    (isMatchCompleted(item) ||
+                      displayStatus.status === "in_progress");
+
+                  return (
+                    <div
+                      key={`${batch.id}-court-${courtIndex}`}
+                      style={{
+                        ...styles.tournamentScheduleCourt,
+                        ...(groupColor
+                          ? {
+                              background: `linear-gradient(135deg, ${groupColor.soft}, #ffffff 78%)`,
+                              borderLeft: `4px solid ${groupColor.accent}`,
+                            }
+                          : {}),
+                      }}
+                    >
+                      {item?.stage === "knockout" && item.round && (
+                        <small style={styles.tournamentScheduleRoundLabel}>
+                          {item.round}
+                        </small>
+                      )}
+                      {renderScheduleMatchTeams(item)}
+                      {item &&
+                        (shouldShowStatusBadge ||
+                          canCompleteMatch ||
+                          finishWarning) && (
+                          <div style={styles.tournamentScheduleMetaRow}>
+                            {shouldShowStatusBadge && (
+                              <span
+                                style={{
+                                  ...styles.tournamentScheduleStatusBadge,
+                                  ...(displayStatus.status === "completed"
+                                    ? styles.tournamentScheduleStatusBadgeDone
+                                    : {}),
+                                }}
+                              >
+                                {displayStatus.label}
+                              </span>
+                            )}
+                            {canCompleteMatch && (
+                              <button
+                                type="button"
+                                style={styles.tournamentScheduleCompleteButton}
+                                onClick={() => confirmMatchCompleted(item.id)}
+                              >
+                                {tournamentText.markFinished}
+                              </button>
+                            )}
+                            {finishWarning && (
+                              <span
+                                style={styles.tournamentScheduleFinishWarning}
+                                title={tournamentText.knockoutNeedsWinner}
+                              >
+                                {finishWarning}
+                              </span>
+                            )}
+                          </div>
+                      )}
+                      {!item && <small>{tournamentText.breakLabel}</small>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+        {hiddenCount > 0 && (
+          <div style={styles.tournamentScheduleMore}>
+            +{hiddenCount} {tournamentText.moreBatchesLabel}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderPublicTournamentPage(tournament, loadStatus = "ready") {
+    const safeTournament = tournament ? applyTournamentDefaults(tournament) : null;
+    const isPublicTournamentLoading = loadStatus === "loading";
+    const groups = Array.isArray(safeTournament?.groups)
+      ? safeTournament.groups
+      : [];
+    const matches = Array.isArray(safeTournament?.matches)
+      ? safeTournament.matches
+      : [];
+    const completedPublicMatches = matches.filter(isMatchCompleted);
+    const completedMatchesCount = completedPublicMatches.length;
+    const standings =
+      safeTournament?.format === "group-stage" && completedMatchesCount > 0
+        ? computeTournamentStandings(safeTournament)
+        : [];
+    const publicSchedule = safeTournament
+      ? buildTournamentHallSchedule(safeTournament)
+      : { batches: [], courtCount: 1 };
+    const knockout = safeTournament?.knockout || {};
+    const knockoutStages = safeTournament
+      ? [
+          {
+            key: "quarterFinals",
+            label: tournamentText.firstKnockoutLabel,
+            matches: knockout.quarterFinals || [],
+          },
+          {
+            key: "semiFinals",
+            label: tournamentText.semiFinals,
+            matches: knockout.semiFinals || [],
+          },
+          {
+            key: "final",
+            label: tournamentText.final,
+            matches: knockout.final ? [knockout.final] : [],
+          },
+          {
+            key: "thirdPlace",
+            label: tournamentText.thirdPlace,
+            matches: knockout.thirdPlace ? [knockout.thirdPlace] : [],
+          },
+        ].filter((stage) => stage.matches.length > 0)
+      : [];
+    const hasGroups = groups.length > 0;
+    const hasKnockout = knockoutStages.length > 0;
+    const teamCount = groups.reduce(
+      (sum, group) =>
+        sum +
+        (group.teams || []).filter((team) => String(team.name || "").trim())
+          .length,
+      0
+    );
+    const publicSeries = getTournamentSeries(safeTournament);
+    const publicSeriesLabels = publicSeries.map((series) =>
+      Number(series.teamSize) === 4
+        ? tournamentText.fourSide
+        : Number(series.teamSize) === 5
+          ? tournamentText.fiveSide
+          : series.name || tournamentText.seriesLabel
+    );
+    const publicLocation = [
+      safeTournament?.locationName,
+      safeTournament?.city,
+      safeTournament?.country,
+    ]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(", ");
+    const allKnockoutMatches = knockoutStages.flatMap((stage) => stage.matches);
+
+    const findPublicKnockoutMatch = (label) =>
+      allKnockoutMatches.find(
+        (match) => match?.label === label || match?.id === label
+      );
+
+    const resolvePublicSource = (source, depth = 0) => {
+      const raw = String(source || "").trim();
+      if (!raw || depth > 8) return raw;
+
+      const groupPosition = raw.match(/^([A-Z])([12])$/);
+      if (groupPosition) {
+        const [, groupCode, position] = groupPosition;
+        const groupIndex = groups.findIndex((group) => group.code === groupCode);
+        const group = groups[groupIndex];
+        const standing = standings.find((item) => item.groupId === group?.id);
+        const hasCompletedGroupMatch = matches.some(
+          (match) =>
+            match.groupId === group?.id &&
+            isMatchCompleted(match)
+        );
+
+        if (!standing || !hasCompletedGroupMatch) return raw;
+        return position === "1"
+          ? standing.rows?.[0]?.teamName || raw
+          : standing.rows?.[1]?.teamName || raw;
+      }
+
+      const winnerMatch = raw.match(/^Winner (QF\d+|SF\d+)$/);
+      if (winnerMatch) {
+        const match = findPublicKnockoutMatch(winnerMatch[1]);
+        return match?.winnerSource
+          ? resolvePublicSource(match.winnerSource, depth + 1)
+          : raw;
+      }
+
+      const loserMatch = raw.match(/^Loser (QF\d+|SF\d+)$/);
+      if (loserMatch) {
+        const match = findPublicKnockoutMatch(loserMatch[1]);
+        return match?.loserSource
+          ? resolvePublicSource(match.loserSource, depth + 1)
+          : raw;
+      }
+
+      return raw;
+    };
+
+    const renderPublicKnockoutMatch = (match) => {
+      const sourceA = match.sourceA || match.teamA;
+      const sourceB = match.sourceB || match.teamB;
+      const teamA = resolvePublicSource(sourceA);
+      const teamB = resolvePublicSource(sourceB);
+      const winner = match.winnerSource
+        ? resolvePublicSource(match.winnerSource)
+        : "";
+
+      return (
+        <div key={match.id} style={styles.publicTournamentBracketMatch}>
+          <div style={styles.publicTournamentMatchLabel}>
+            {match.label || match.id}
+          </div>
+          {[sourceA, sourceB].map((source, index) => {
+            const resolved = index === 0 ? teamA : teamB;
+            const isWinner = winner && winner === resolved;
+            const sourceGroupCode = getTournamentSourceGroupCode(source);
+            const sourceGroupColor = sourceGroupCode
+              ? getTournamentGroupColor(sourceGroupCode)
+              : null;
+
+            return (
+              <div
+                key={`${match.id}-${source || index}`}
+                style={{
+                  ...styles.publicTournamentBracketLine,
+                  ...(isWinner ? styles.publicTournamentBracketLineWinner : {}),
+                }}
+              >
+                <span
+                  style={
+                    sourceGroupColor
+                      ? {
+                          ...styles.publicTournamentSourceBadge,
+                          background: sourceGroupColor.publicSoft,
+                          borderColor: sourceGroupColor.publicBorder,
+                          color: sourceGroupColor.publicText,
+                        }
+                      : styles.publicTournamentSourceBadge
+                  }
+                >
+                  {source || "-"}
+                </span>
+                <strong>{resolved || "-"}</strong>
+              </div>
+            );
+          })}
+        </div>
+      );
+    };
+
+    return (
+      <div style={styles.publicTournamentPage}>
+        <main style={styles.publicTournamentShell}>
+          <div style={styles.publicTournamentTopbar}>
+            <button
+              style={styles.publicTournamentBackButton}
+              onClick={openAppFromPublicTournament}
+            >
+              {tournamentText.openApp}
+            </button>
+          </div>
+
+          {!safeTournament ? (
+            <section style={styles.publicTournamentEmpty}>
+              <div style={styles.publicTournamentStatusPill}>
+                {tournamentText.publicPreviewTitle}
+              </div>
+              <h1 style={styles.publicTournamentEmptyTitle}>
+                {isPublicTournamentLoading
+                  ? tournamentText.loadingTournament
+                  : tournamentText.publicNotFound}
+              </h1>
+              {!isPublicTournamentLoading && (
+                <>
+                  <p style={styles.publicTournamentMuted}>
+                    {tournamentText.backendPublicRequired}
+                  </p>
+                  <p style={styles.publicTournamentMuted}>
+                    {loadStatus === "error"
+                      ? tournamentText.tournamentBackendTodo
+                      : tournamentText.backendPublicLinkPending}
+                  </p>
+                </>
+              )}
+            </section>
+          ) : (
+            <>
+              <section style={styles.publicTournamentHero}>
+                <div style={styles.publicTournamentHeroTop}>
+                  <span style={styles.publicTournamentStatusPill}>
+                    {tournamentText.publicLinkReadonly}
+                  </span>
+                </div>
+
+                <h1 style={styles.publicTournamentTitle}>
+                  {getTournamentPublicTitle(safeTournament)}
+                </h1>
+                {String(safeTournament.rules || "").trim() && (
+                  <p style={styles.publicTournamentDescription}>
+                    {safeTournament.rules}
+                  </p>
+                )}
+                {getTournamentPublicSummary(safeTournament) && (
+                  <p style={styles.publicTournamentDescription}>
+                    {getTournamentPublicSummary(safeTournament)}
+                  </p>
+                )}
+
+                <div style={styles.publicTournamentSummaryGrid}>
+                  {[
+                    [tournamentText.dateLabel, formatPublicTournamentDate(safeTournament)],
+                    [tournamentText.locationLabel, publicLocation],
+                    [
+                      tournamentText.seriesLabel,
+                      Array.from(new Set(publicSeriesLabels)).join(" / "),
+                    ],
+                    [tournamentText.prizeLabel, safeTournament.prizeText],
+                    [
+                      tournamentText.registrationDeadlineLabel,
+                      safeTournament.registrationDeadline,
+                    ],
+                    [tournamentText.teamsLabel, teamCount],
+                    [
+                      tournamentText.matchStatusCompleted,
+                      completedMatchesCount,
+                    ],
+                  ].filter(([, value]) => String(value || "").trim()).map(([label, value]) => (
+                    <div key={label} style={styles.publicTournamentSummaryCard}>
+                      <span>{label}</span>
+                      <strong>{value}</strong>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              {standings.length > 0 && (
+                <section style={styles.publicTournamentSection}>
+                  <div style={styles.publicTournamentSectionHeader}>
+                    <span>{tournamentText.standingsTitle}</span>
+                    <strong>{standings.length}</strong>
+                  </div>
+                  <div style={styles.publicTournamentStandingsGrid}>
+                    {standings.map((group, groupIndex) => {
+                      const sourceGroup =
+                        groups.find((item) => item.id === group.groupId) || {};
+                      const groupCode =
+                        sourceGroup.code || getTournamentGroupCode(groupIndex);
+                      const groupColor = getTournamentGroupColor(groupCode);
+
+                      return (
+                        <article
+                          key={`public-standings-${group.groupId}`}
+                          style={{
+                            ...styles.publicTournamentStandingsCard,
+                            background: `linear-gradient(135deg, ${groupColor.publicSoft}, #0d241c 72%)`,
+                            borderColor: groupColor.publicBorder,
+                            borderLeft: `5px solid ${groupColor.publicText}`,
+                            borderTopColor: groupColor.publicText,
+                          }}
+                        >
+                          <div style={styles.publicTournamentStandingsHeader}>
+                            <h2 style={styles.publicTournamentGroupTitle}>
+                              {group.groupName}
+                            </h2>
+                            <span
+                              style={{
+                                ...styles.publicTournamentGroupCode,
+                                background: groupColor.publicSoft,
+                                borderColor: groupColor.publicBorder,
+                                color: groupColor.publicText,
+                              }}
+                            >
+                              {groupCode}
+                            </span>
+                          </div>
+                          <div style={styles.publicTournamentTableWrap}>
+                            <table style={styles.publicTournamentTable}>
+                              <thead>
+                                <tr>
+                                  <th style={styles.publicTournamentTableHead}>
+                                    {tournamentText.teamLabel}
+                                  </th>
+                                  <th style={styles.publicTournamentTableHead}>
+                                    {tournamentText.playedShort}
+                                  </th>
+                                  <th style={styles.publicTournamentTableHead}>
+                                    {tournamentText.winsShort}
+                                  </th>
+                                  <th style={styles.publicTournamentTableHead}>
+                                    {tournamentText.drawsShort}
+                                  </th>
+                                  <th style={styles.publicTournamentTableHead}>
+                                    {tournamentText.lossesShort}
+                                  </th>
+                                  <th style={styles.publicTournamentTableHead}>
+                                    {tournamentText.pointsShort}
+                                  </th>
+                                  <th style={styles.publicTournamentTableHead}>
+                                    {tournamentText.scoreDiffShort}
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {group.rows.map((row) => (
+                                  <tr
+                                    key={`public-row-${group.groupId}-${row.teamName}`}
+                                  >
+                                    <td style={styles.publicTournamentTableCell}>
+                                      {row.teamName}
+                                    </td>
+                                    <td style={styles.publicTournamentTableCell}>
+                                      {row.played}
+                                    </td>
+                                    <td style={styles.publicTournamentTableCell}>
+                                      {row.wins}
+                                    </td>
+                                    <td style={styles.publicTournamentTableCell}>
+                                      {row.draws}
+                                    </td>
+                                    <td style={styles.publicTournamentTableCell}>
+                                      {row.losses}
+                                    </td>
+                                    <td style={styles.publicTournamentTableCell}>
+                                      {row.points}
+                                    </td>
+                                    <td style={styles.publicTournamentTableCell}>
+                                      {row.scoreDiff}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {publicSchedule.batches.length > 0 && (
+                <section style={styles.publicTournamentSection}>
+                  <div style={styles.publicTournamentSectionHeader}>
+                    <span>{tournamentText.scheduleTitle}</span>
+                    <strong>
+                      {publicSchedule.batches.length}{" "}
+                      {tournamentText.batchesLabel}
+                    </strong>
+                  </div>
+                  {renderTournamentHallScheduleGrid({
+                    hallScheduleBatches: publicSchedule.batches,
+                    scheduleCourtCount: publicSchedule.courtCount,
+                    limit: 18,
+                    showRoundLabels:
+                      shouldShowTournamentRoundLabels(safeTournament),
+                  })}
+                </section>
+              )}
+
+              {false && hasGroups && (
+                <section style={styles.publicTournamentSection}>
+                  <div style={styles.publicTournamentSectionHeader}>
+                    <span>{tournamentText.groupStagePreview}</span>
+                    <strong>{groups.length}</strong>
+                  </div>
+                  <div style={styles.publicTournamentGroupGrid}>
+                    {groups.map((group, groupIndex) => {
+                      const groupCode =
+                        group.code || getTournamentGroupCode(groupIndex);
+                      const groupColor = getTournamentGroupColor(groupCode);
+
+                      return (
+                        <article
+                          key={group.id || group.code || groupIndex}
+                          style={{
+                            ...styles.publicTournamentGroupCard,
+                            background: groupColor.publicSoft,
+                            borderColor: groupColor.publicBorder,
+                          }}
+                        >
+                          <div style={styles.publicTournamentGroupHeader}>
+                            <h2 style={styles.publicTournamentGroupTitle}>
+                              {group.name ||
+                                `${tournamentText.groupStagePreview} ${
+                                  groupIndex + 1
+                                }`}
+                            </h2>
+                            <span
+                              style={{
+                                ...styles.publicTournamentGroupCode,
+                                background: groupColor.publicSoft,
+                                borderColor: groupColor.publicBorder,
+                                color: groupColor.publicText,
+                              }}
+                            >
+                              {groupCode}
+                            </span>
+                          </div>
+
+                          <div style={styles.publicTournamentTeamList}>
+                            {(group.teams || []).map((team, teamIndex) => (
+                              <div
+                                key={team.id || `${group.id}-${teamIndex}`}
+                                style={styles.publicTournamentTeamRow}
+                              >
+                                <span
+                                  style={{
+                                    ...styles.publicTournamentSlotBadge,
+                                    background: groupColor.publicSoft,
+                                    borderColor: groupColor.publicBorder,
+                                    color: groupColor.publicText,
+                                  }}
+                                >
+                                  {team.slot || `${groupCode}${teamIndex + 1}`}
+                                </span>
+                                <strong>
+                                  {String(team.name || "").trim() ||
+                                    (language === "no" ? "Ledig" : "TBD")}
+                                </strong>
+                              </div>
+                            ))}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {hasKnockout && (
+                <section style={styles.publicTournamentSection}>
+                  <div style={styles.publicTournamentSectionHeader}>
+                    <span>{tournamentText.knockoutPreview}</span>
+                    <strong>{allKnockoutMatches.length}</strong>
+                  </div>
+                  <div style={styles.publicTournamentBracketGrid}>
+                    {knockoutStages.map((stage) => (
+                      <div key={stage.key} style={styles.publicTournamentBracketStage}>
+                        <div style={styles.publicTournamentBracketTitle}>
+                          {stage.label}
+                        </div>
+                        {stage.matches.map(renderPublicKnockoutMatch)}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {completedPublicMatches.length > 0 && (
+                <section style={styles.publicTournamentSection}>
+                  <div style={styles.publicTournamentSectionHeader}>
+                    <span>{tournamentText.matchStatusCompleted}</span>
+                    <strong>{completedPublicMatches.length}</strong>
+                  </div>
+                  <div style={styles.publicTournamentMatchGrid}>
+                    {completedPublicMatches.map((match, index) => {
+                      const hasScore =
+                        hasScoreValue(match.scoreA) || hasScoreValue(match.scoreB);
+                      const matchGroupIndex = groups.findIndex(
+                        (group) =>
+                          group.id === match.groupId ||
+                          group.name === match.groupName
+                      );
+                      const matchGroup = groups[matchGroupIndex];
+                      const matchGroupCode =
+                        matchGroup?.code ||
+                        (matchGroupIndex >= 0
+                          ? getTournamentGroupCode(matchGroupIndex)
+                          : "");
+                      const matchGroupColor = matchGroupCode
+                        ? getTournamentGroupColor(matchGroupCode)
+                        : null;
+
+                      return (
+                        <article
+                          key={match.id || `${match.teamA}-${match.teamB}-${index}`}
+                          style={{
+                            ...styles.publicTournamentMatchCard,
+                            ...(matchGroupColor
+                              ? {
+                                  background: matchGroupColor.publicSoft,
+                                  borderColor: matchGroupColor.publicBorder,
+                                }
+                              : {}),
+                          }}
+                        >
+                          <div style={styles.publicTournamentMatchTop}>
+                            <span>
+                              {match.groupName ||
+                                match.stage ||
+                                `${tournamentText.matchLabel} ${index + 1}`}
+                            </span>
+                            <strong>
+                              {getMatchDisplayStatus(match).label}
+                            </strong>
+                          </div>
+                          <div style={styles.publicTournamentTeams}>
+                            {match.teamA} vs {match.teamB}
+                          </div>
+                          <div style={styles.publicTournamentScore}>
+                            {hasScore
+                              ? `${getMatchScoreDisplayValue(match.scoreA)} - ${getMatchScoreDisplayValue(match.scoreB)}`
+                              : "vs"}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {hasGroups && (
+                <section style={styles.publicTournamentSection}>
+                  <div style={styles.publicTournamentSectionHeader}>
+                    <span>{tournamentText.groupDrawTitle}</span>
+                    <strong>{groups.length}</strong>
+                  </div>
+                  <div style={styles.publicTournamentGroupGrid}>
+                    {groups.map((group, groupIndex) => {
+                      const groupCode =
+                        group.code || getTournamentGroupCode(groupIndex);
+                      const groupColor = getTournamentGroupColor(groupCode);
+
+                      return (
+                        <article
+                          key={group.id || group.code || groupIndex}
+                          style={{
+                            ...styles.publicTournamentGroupCard,
+                            background: `linear-gradient(135deg, ${groupColor.publicSoft}, #0d241c 72%)`,
+                            borderColor: groupColor.publicBorder,
+                            borderLeft: `4px solid ${groupColor.publicText}`,
+                          }}
+                        >
+                          <div style={styles.publicTournamentGroupHeader}>
+                            <h2 style={styles.publicTournamentGroupTitle}>
+                              {group.name ||
+                                `${tournamentText.groupLabel} ${groupCode}`}
+                            </h2>
+                            <span
+                              style={{
+                                ...styles.publicTournamentGroupCode,
+                                background: groupColor.publicSoft,
+                                borderColor: groupColor.publicBorder,
+                                color: groupColor.publicText,
+                              }}
+                            >
+                              {groupCode}
+                            </span>
+                          </div>
+
+                          <div style={styles.publicTournamentTeamList}>
+                            {(group.teams || []).map((team, teamIndex) => (
+                              <div
+                                key={team.id || `${group.id}-${teamIndex}`}
+                                style={styles.publicTournamentTeamRow}
+                              >
+                                <span
+                                  style={{
+                                    ...styles.publicTournamentSlotBadge,
+                                    background: groupColor.publicSoft,
+                                    borderColor: groupColor.publicBorder,
+                                    color: groupColor.publicText,
+                                  }}
+                                >
+                                  {team.slot || `${groupCode}${teamIndex + 1}`}
+                                </span>
+                                <strong>
+                                  {String(team.name || "").trim() || "-"}
+                                </strong>
+                              </div>
+                            ))}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {false && standings.length > 0 && (
+                <section style={styles.publicTournamentSection}>
+                  <div style={styles.publicTournamentSectionHeader}>
+                    <span>{tournamentText.standingsTitle}</span>
+                    <strong>{standings.length}</strong>
+                  </div>
+                  <div style={styles.publicTournamentStandingsGrid}>
+                    {standings.map((group, groupIndex) => {
+                      const sourceGroup =
+                        groups.find((item) => item.id === group.groupId) || {};
+                      const groupCode =
+                        sourceGroup.code || getTournamentGroupCode(groupIndex);
+                      const groupColor = getTournamentGroupColor(groupCode);
+
+                      return (
+                        <article
+                          key={`public-standings-${group.groupId}`}
+                          style={{
+                            ...styles.publicTournamentStandingsCard,
+                            background: groupColor.publicSoft,
+                            borderColor: groupColor.publicBorder,
+                            borderTopColor: groupColor.publicBorder,
+                          }}
+                        >
+                          <div style={styles.publicTournamentStandingsHeader}>
+                            <h2 style={styles.publicTournamentGroupTitle}>
+                              {group.groupName}
+                            </h2>
+                            <span
+                              style={{
+                                ...styles.publicTournamentGroupCode,
+                                background: groupColor.publicSoft,
+                                borderColor: groupColor.publicBorder,
+                                color: groupColor.publicText,
+                              }}
+                            >
+                              {groupCode}
+                            </span>
+                          </div>
+                        <div style={styles.publicTournamentTableWrap}>
+                          <table style={styles.publicTournamentTable}>
+                            <thead>
+                              <tr>
+                                <th style={styles.publicTournamentTableHead}>
+                                  {tournamentText.teamLabel}
+                                </th>
+                                <th style={styles.publicTournamentTableHead}>
+                                  {tournamentText.playedShort}
+                                </th>
+                                <th style={styles.publicTournamentTableHead}>
+                                  {tournamentText.winsShort}
+                                </th>
+                                <th style={styles.publicTournamentTableHead}>
+                                  {tournamentText.drawsShort}
+                                </th>
+                                <th style={styles.publicTournamentTableHead}>
+                                  {tournamentText.lossesShort}
+                                </th>
+                                <th style={styles.publicTournamentTableHead}>
+                                  {tournamentText.pointsShort}
+                                </th>
+                                <th style={styles.publicTournamentTableHead}>
+                                  {tournamentText.scoreDiffShort}
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {group.rows.map((row) => (
+                                <tr key={`public-row-${group.groupId}-${row.teamName}`}>
+                                  <td style={styles.publicTournamentTableCell}>
+                                    {row.teamName}
+                                  </td>
+                                  <td style={styles.publicTournamentTableCell}>
+                                    {row.played}
+                                  </td>
+                                  <td style={styles.publicTournamentTableCell}>
+                                    {row.wins}
+                                  </td>
+                                  <td style={styles.publicTournamentTableCell}>
+                                    {row.draws}
+                                  </td>
+                                  <td style={styles.publicTournamentTableCell}>
+                                    {row.losses}
+                                  </td>
+                                  <td style={styles.publicTournamentTableCell}>
+                                    {row.points}
+                                  </td>
+                                  <td style={styles.publicTournamentTableCell}>
+                                    {row.scoreDiff}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </article>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+            </>
+          )}
+        </main>
+      </div>
+    );
+  }
+
   function renderTournamentDashboard() {
+    const visiblePrivateTournaments = filterTournamentsForUsername(
+      tournaments,
+      auth.username
+    ).filter((tournament) => getTournamentIdentity(tournament));
+    const isTournamentListLoading =
+      auth.loggedIn &&
+      tournamentSyncStatus === "loading" &&
+      !tournamentBackendReady &&
+      visiblePrivateTournaments.length === 0;
+    const showTournamentCleanupTools =
+      typeof process !== "undefined" &&
+      process.env?.NODE_ENV !== "production";
     const dashboardTabs = [
-      { id: "overview", label: "Overview" },
-      { id: "groups", label: "Groups" },
-      { id: "bracket", label: "Bracket" },
-      { id: "matches", label: "Matches" },
-      { id: "table", label: "Table" },
-      { id: "sharing", label: "Sharing" },
+      { id: "overview", label: tournamentText.overviewTab },
+      { id: "groups", label: tournamentText.groupsTab },
+      { id: "bracket", label: tournamentText.bracketTab },
+      { id: "matches", label: tournamentText.matchesTitle },
+      { id: "table", label: tournamentText.tableTab },
+      { id: "sharing", label: tournamentText.sharingTab },
+      { id: "promotion", label: tournamentText.promotionTab },
     ];
 
     const tournamentTeams = Array.isArray(activeTournament?.teams)
       ? activeTournament.teams
       : [];
-    const tournamentGroups = Array.isArray(activeTournament?.groups)
-      ? activeTournament.groups
-      : [];
+    const shouldShowTournamentSetupPanel =
+      !activeTournament || showTournamentSetupPanel;
     const groupSlotTeams = getFilledGroupTeams(activeTournament);
     const dashboardTeams = groupSlotTeams.length ? groupSlotTeams : tournamentTeams;
     const tournamentMatches = Array.isArray(activeTournament?.matches)
@@ -3132,20 +7506,73 @@ const savedRound = readStorageWithTtl(
       (sum, team) => sum + (Array.isArray(team.players) ? team.players.length : 0),
       0
     );
-    const completedMatchesCount = tournamentMatches.filter(
-      (match) => match.status === "completed"
+    const completedMatchesCount =
+      tournamentMatches.filter(isMatchCompleted).length;
+    const startedMatchesCount = tournamentMatches.filter(
+      (match) => getMatchDisplayStatus(match).status === "in_progress"
     ).length;
-    const scheduledMatchesCount = Math.max(
-      tournamentMatches.length - completedMatchesCount,
-      0
-    );
+    const scheduledMatchesCount = tournamentMatches.filter(
+      (match) => getMatchDisplayStatus(match).status === "scheduled"
+    ).length;
     const nextMatch =
-      tournamentMatches.find((match) => match.status !== "completed") ||
+      tournamentMatches.find(
+        (match) => !isMatchCompleted(match)
+      ) ||
       tournamentMatches[0] ||
       null;
-    const isPublished = Boolean(
-      activeTournament?.published || activeTournament?.status === "published"
+    const isPublished = isTournamentPublished(activeTournament);
+    const isPromotionListed = isTournamentPubliclyListed(activeTournament);
+    const isPromotionVisibleOnUpcoming = Boolean(
+      isPromotionListed &&
+        activeTournament?.publicCode &&
+        publicTournaments.some(
+          (tournament) =>
+            String(tournament.publicCode || "") ===
+              String(activeTournament.publicCode || "") ||
+            String(tournament.id || "") === String(activeTournament.id || "")
+        )
     );
+    const isBackendPublished = hasTournamentBackendPublicSync(activeTournament);
+    const publicUrl = getPublicTournamentUrl(activeTournament);
+    const publicCode = activeTournament?.publicCode || "-";
+    const promotionPreviewTitle = getTournamentPublicTitle(activeTournament);
+    const promotionPreviewSummary = getTournamentPublicSummary(activeTournament);
+    const promotionPreviewLocation = [
+      activeTournament?.locationName,
+      activeTournament?.city,
+      activeTournament?.country,
+    ]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(", ");
+    const promotionPreviewContact = [
+      activeTournament?.contactName,
+      activeTournament?.contactPhone,
+      activeTournament?.contactEmail,
+    ]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(" / ");
+    const promotionPreviewSeriesLabels = Array.from(
+      new Set(
+        getTournamentSeries(activeTournament)
+          .map((series) =>
+            Number(series.teamSize) === 4
+              ? tournamentText.fourSide
+              : Number(series.teamSize) === 5
+                ? tournamentText.fiveSide
+                : series.name || tournamentText.seriesLabel
+          )
+          .filter(Boolean)
+      )
+    );
+    const promotionPreviewPoster = String(
+      activeTournament?.posterImageUrl || ""
+    ).trim();
+    const promotionPreviewTheme =
+      String(activeTournament?.themeColor || "").trim() || "#064e3b";
+    const promotionPreviewAccent =
+      String(activeTournament?.accentColor || "").trim() || "#22c55e";
     const formatLabel =
       {
         "group-stage": tournamentText.formatGroupStage,
@@ -3154,6 +7581,15 @@ const savedRound = readStorageWithTtl(
       }[activeTournament?.format] ||
       activeTournament?.format ||
       "-";
+    const tournamentSyncLabel =
+      tournamentSyncStatus === "error"
+        ? tournamentSyncMessage || tournamentText.tournamentSyncError
+        : {
+            loading: tournamentText.tournamentSyncLoading,
+            saving: tournamentText.tournamentSyncSaving,
+            saved: tournamentText.tournamentSyncSaved,
+            local: tournamentText.tournamentSyncLocal,
+          }[tournamentSyncStatus] || tournamentText.tournamentSyncLocal;
     const configuredTotalTeams = Math.max(
       2,
       Number(activeTournament?.totalTeams || 10)
@@ -3187,7 +7623,7 @@ const savedRound = readStorageWithTtl(
       Number(activeTournament?.breakMinutes || 0)
     );
     const manualPreviewGroups = activeTournament
-      ? buildManualGroups(activeTournament)
+      ? getTournamentGroupsForDisplay(activeTournament)
       : [];
     const storedKnockout = activeTournament?.knockout || {};
     const hasStoredKnockout = Boolean(
@@ -3219,19 +7655,19 @@ const savedRound = readStorageWithTtl(
 
     const statCards = [
       {
-        label: language === "no" ? "Sloter" : "Slots",
+        label: tournamentText.slotsLabel,
         value: `${filledSlotCount}/${configuredTotalTeams}`,
-        note: language === "no" ? "Manuell trekning" : "Manual draw",
+        note: tournamentText.manualDrawLabel,
         accent: "#2563eb",
       },
       {
-        label: language === "no" ? "Grupper" : "Groups",
+        label: tournamentText.groupsTab,
         value: manualPreviewGroups.length,
-        note: `${configuredTeamsPerGroup} ${language === "no" ? "lag per gruppe" : "teams per group"}`,
+        note: `${configuredTeamsPerGroup} ${tournamentText.teamsPerGroupLabel}`,
         accent: "#0f766e",
       },
       {
-        label: language === "no" ? "Baner" : "Courts",
+        label: tournamentText.courtsLabel,
         value: scheduleCourtCount,
         note: `${activeTournament?.startTime || "09:00"} start`,
         accent: "#7c3aed",
@@ -3239,7 +7675,7 @@ const savedRound = readStorageWithTtl(
       {
         label: tournamentText.matchesTitle,
         value: `${completedMatchesCount}/${tournamentMatches.length}`,
-        note: tournamentText.matchStatusCompleted,
+        note: `${scheduledMatchesCount} ${tournamentText.matchStatusScheduled}`,
         accent: "#ea580c",
       },
     ];
@@ -3265,7 +7701,8 @@ const savedRound = readStorageWithTtl(
         if (!group) return raw;
         const hasCompletedGroupMatch = tournamentMatches.some(
           (match) =>
-            match.groupId === group.groupId && match.status === "completed"
+            match.groupId === group.groupId &&
+            isMatchCompleted(match)
         );
         if (!hasCompletedGroupMatch) return raw;
         return position === "1" ? group.winner : group.runnerUp;
@@ -3320,6 +7757,10 @@ const savedRound = readStorageWithTtl(
             [match.sourceB || match.teamB, teamB],
           ].map(([source, label]) => {
             const isWinner = winner && winner === label;
+            const sourceGroupCode = getTournamentSourceGroupCode(source);
+            const sourceGroupColor = sourceGroupCode
+              ? getTournamentGroupColor(sourceGroupCode)
+              : null;
 
             return (
               <button
@@ -3339,7 +7780,20 @@ const savedRound = readStorageWithTtl(
                   )
                 }
               >
-                <span>{source}</span>
+                <span
+                  style={
+                    sourceGroupColor
+                      ? {
+                          ...styles.tournamentSourceBadge,
+                          background: sourceGroupColor.soft,
+                          borderColor: sourceGroupColor.border,
+                          color: sourceGroupColor.text,
+                        }
+                      : styles.tournamentSourceBadge
+                  }
+                >
+                  {source}
+                </span>
                 <strong>{label}</strong>
               </button>
             );
@@ -3373,25 +7827,45 @@ const savedRound = readStorageWithTtl(
           {[
             [match.sourceA || match.teamA, teamA],
             [match.sourceB || match.teamB, teamB],
-          ].map(([source, label]) => (
-            <div
-              key={`preview-${match.id}-${source}`}
-              style={{
-                ...styles.tournamentBracketLine,
-                cursor: "default",
-                ...(isFinal
-                  ? {
-                      background: "rgba(255,255,255,0.08)",
-                      borderColor: "rgba(255,255,255,0.16)",
-                      color: "#fff",
-                    }
-                  : {}),
-              }}
-            >
-              <span>{source}</span>
-              <strong>{label || source}</strong>
-            </div>
-          ))}
+          ].map(([source, label]) => {
+            const sourceGroupCode = getTournamentSourceGroupCode(source);
+            const sourceGroupColor = sourceGroupCode
+              ? getTournamentGroupColor(sourceGroupCode)
+              : null;
+
+            return (
+              <div
+                key={`preview-${match.id}-${source}`}
+                style={{
+                  ...styles.tournamentBracketLine,
+                  cursor: "default",
+                  ...(isFinal
+                    ? {
+                        background: "rgba(255,255,255,0.08)",
+                        borderColor: "rgba(255,255,255,0.16)",
+                        color: "#fff",
+                      }
+                    : {}),
+                }}
+              >
+                <span
+                  style={
+                    sourceGroupColor
+                      ? {
+                          ...styles.tournamentSourceBadge,
+                          background: sourceGroupColor.soft,
+                          borderColor: sourceGroupColor.border,
+                          color: sourceGroupColor.text,
+                        }
+                      : styles.tournamentSourceBadge
+                  }
+                >
+                  {source}
+                </span>
+                <strong>{label || source}</strong>
+              </div>
+            );
+          })}
         </div>
       );
     };
@@ -3414,32 +7888,175 @@ const savedRound = readStorageWithTtl(
         "0"
       )}`;
     };
-    const scheduleGroupMatches = manualPreviewGroups.flatMap((group) => {
-      const groupTeams = (group.teams || []).map((team) => ({
-        slot: team.slot,
+    const buildRoundRobinRounds = (group) => {
+      const groupTeams = (group.teams || []).map((team, index) => ({
+        id: team.id || "",
+        slot: team.slot || `${group.code}${index + 1}`,
         label: getPreviewTeamName(team),
       }));
-      const matches = [];
 
-      for (let i = 0; i < groupTeams.length; i += 1) {
-        for (let j = i + 1; j < groupTeams.length; j += 1) {
-          matches.push({
-            id: `schedule-${group.id}-${i}-${j}`,
-            stage: "group",
-            round: group.name,
-            teamA: groupTeams[i].label,
-            teamB: groupTeams[j].label,
+      if (groupTeams.length < 2) return [];
+
+      const rotation =
+        groupTeams.length % 2 === 0 ? [...groupTeams] : [...groupTeams, null];
+      const rounds = [];
+      const roundCount = rotation.length - 1;
+      const half = rotation.length / 2;
+
+      for (let roundIndex = 0; roundIndex < roundCount; roundIndex += 1) {
+        const roundMatches = [];
+
+        for (let pairIndex = 0; pairIndex < half; pairIndex += 1) {
+          const first = rotation[pairIndex];
+          const second = rotation[rotation.length - 1 - pairIndex];
+          if (!first || !second) continue;
+
+          const shouldFlip = roundIndex % 2 === 1;
+          roundMatches.push({
+            teamAId: shouldFlip ? second.id : first.id,
+            teamBId: shouldFlip ? first.id : second.id,
+            teamA: shouldFlip ? second.label : first.label,
+            teamB: shouldFlip ? first.label : second.label,
+            sourceA: shouldFlip ? second.slot : first.slot,
+            sourceB: shouldFlip ? first.slot : second.slot,
           });
         }
+
+        rounds.push(roundMatches);
+        rotation.splice(1, 0, rotation.pop());
       }
 
-      return matches;
-    });
+      return rounds;
+    };
+    const matchLookup = getTournamentMatchLookup(activeTournament);
+
+    const groupScheduleQueues = manualPreviewGroups
+      .map((group, groupIndex) => {
+        const groupCode = group.code || getTournamentGroupCode(groupIndex);
+        const groupColor = getTournamentGroupColor(groupCode);
+        const queue = buildRoundRobinRounds({
+          ...group,
+          code: groupCode,
+        }).flatMap((roundMatches, roundIndex) =>
+          roundMatches.map((match, matchIndex) => ({
+            id: `schedule-${group.id}-${roundIndex}-${matchIndex}`,
+            stage: "group",
+            groupId: group.id,
+            groupName: group.name,
+            groupCode,
+            groupColor,
+            round: `${group.name} R${roundIndex + 1}`,
+            teamAId: match.teamAId,
+            teamBId: match.teamBId,
+            teamA: match.teamA,
+            teamB: match.teamB,
+            sourceA: match.sourceA,
+            sourceB: match.sourceB,
+          }))
+        );
+
+        return {
+          groupId: group.id,
+          groupCode,
+          queue,
+        };
+      })
+      .filter((groupQueue) => groupQueue.queue.length > 0);
+
+    const balancedGroupBatches = [];
+    let groupRotationStart = 0;
+    const pickNextScheduleMatch = (
+      queues,
+      rotationStart,
+      usedGroups,
+      usedTeams,
+      batchItems,
+      allowSameGroup,
+      allowTeamRepeat
+    ) => {
+      for (let offset = 0; offset < queues.length; offset += 1) {
+        const queueIndex = (rotationStart + offset) % queues.length;
+        const groupQueue = queues[queueIndex];
+        if (!groupQueue.queue.length) continue;
+        if (!allowSameGroup && usedGroups.has(groupQueue.groupId)) continue;
+
+        const matchIndex = groupQueue.queue.findIndex(
+          (match) =>
+            allowTeamRepeat ||
+            (!usedTeams.has(match.teamA) && !usedTeams.has(match.teamB))
+        );
+        if (matchIndex === -1) continue;
+
+        const [match] = groupQueue.queue.splice(matchIndex, 1);
+        batchItems.push(match);
+        usedGroups.add(groupQueue.groupId);
+        usedTeams.add(match.teamA);
+        usedTeams.add(match.teamB);
+        return true;
+      }
+
+      return false;
+    };
+
+    while (groupScheduleQueues.some((groupQueue) => groupQueue.queue.length)) {
+      const batchItems = [];
+      const usedGroups = new Set();
+      const usedTeams = new Set();
+
+      while (batchItems.length < scheduleCourtCount) {
+        if (
+          pickNextScheduleMatch(
+            groupScheduleQueues,
+            groupRotationStart,
+            usedGroups,
+            usedTeams,
+            batchItems,
+            false,
+            false
+          )
+        ) {
+          continue;
+        }
+        if (
+          pickNextScheduleMatch(
+            groupScheduleQueues,
+            groupRotationStart,
+            usedGroups,
+            usedTeams,
+            batchItems,
+            true,
+            false
+          )
+        ) {
+          continue;
+        }
+        if (
+          pickNextScheduleMatch(
+            groupScheduleQueues,
+            groupRotationStart,
+            usedGroups,
+            usedTeams,
+            batchItems,
+            true,
+            true
+          )
+        ) {
+          continue;
+        }
+        break;
+      }
+
+      if (!batchItems.length) break;
+      balancedGroupBatches.push(batchItems);
+      groupRotationStart =
+        (groupRotationStart + 1) % Math.max(1, groupScheduleQueues.length);
+    }
+
     const scheduleKnockoutMatches = [
       ...(knockoutPreview.quarterFinals || []).map((match) => ({
         ...match,
         stage: "knockout",
-        round: language === "no" ? "Forste utslag" : "First Knockout",
+        round: tournamentText.firstKnockoutLabel,
       })),
       ...(knockoutPreview.semiFinals || []).map((match) => ({
         ...match,
@@ -3461,108 +8078,82 @@ const savedRound = readStorageWithTtl(
           }
         : null,
     ].filter(Boolean);
-    const scheduleItems = [
-      ...scheduleGroupMatches,
-      ...scheduleKnockoutMatches.map((match) => ({
+    const knockoutScheduleItems = scheduleKnockoutMatches.map((match) => ({
         id: `schedule-${match.id}`,
         stage: "knockout",
         round: match.round,
         teamA: match.sourceA || match.teamA,
         teamB: match.sourceB || match.teamB,
+      }));
+    const knockoutScheduleBatches = [];
+
+    for (
+      let index = 0;
+      index < knockoutScheduleItems.length;
+      index += scheduleCourtCount
+    ) {
+      knockoutScheduleBatches.push(
+        knockoutScheduleItems.slice(index, index + scheduleCourtCount)
+      );
+    }
+
+    const scheduleBatches = [
+      ...balancedGroupBatches.map((items) => ({
+        stage: "group",
+        items,
+      })),
+      ...knockoutScheduleBatches.map((items) => ({
+        stage: "knockout",
+        items,
       })),
     ];
     const hallScheduleBatches = [];
     let scheduleCursor = parseScheduleStart(activeTournament?.startTime);
 
-    for (
-      let index = 0, batchNumber = 1;
-      index < scheduleItems.length;
-      index += scheduleCourtCount, batchNumber += 1
-    ) {
-      const batchItems = scheduleItems.slice(index, index + scheduleCourtCount);
-      const isPlayoffBatch = batchItems.some(
-        (item) => item.stage === "knockout"
-      );
+    scheduleBatches.forEach((scheduleBatch, index) => {
+      const isPlayoffBatch = scheduleBatch.stage === "knockout";
       const duration = isPlayoffBatch
         ? schedulePlayoffMinutes
         : scheduleGroupMinutes;
 
       hallScheduleBatches.push({
-        id: `schedule-batch-${batchNumber}`,
-        number: batchNumber,
+        id: `schedule-batch-${index + 1}`,
+        number: index + 1,
         time: formatScheduleTime(scheduleCursor),
         duration,
         items: Array.from(
           { length: scheduleCourtCount },
-          (_, courtIndex) => batchItems[courtIndex] || null
+          (_, courtIndex) => {
+            const scheduleItem = scheduleBatch.items[courtIndex];
+            if (!scheduleItem) return null;
+
+            return mergeScheduleItemWithSavedMatch(
+              {
+                ...scheduleItem,
+                scheduleBatch: index + 1,
+                scheduleCourt: courtIndex + 1,
+                scheduleOrder: index * scheduleCourtCount + courtIndex,
+                manualOrder:
+                  scheduleItem.manualOrder ??
+                  index * scheduleCourtCount + courtIndex,
+              },
+              matchLookup
+            );
+          }
         ),
       });
 
       scheduleCursor += duration + scheduleBreakMinutes;
-    }
+    });
 
     const renderHallSchedulePreview = (limit = 12) => {
-      const visibleBatches = hallScheduleBatches.slice(0, limit);
-      const hiddenCount = Math.max(hallScheduleBatches.length - limit, 0);
-
-      return (
-        <div style={styles.tournamentScheduleWrap}>
-          <div
-            style={{
-              ...styles.tournamentScheduleGrid,
-              minWidth: `${Math.max(620, scheduleCourtCount * 180 + 140)}px`,
-            }}
-          >
-            {visibleBatches.map((batch) => (
-              <div key={batch.id} style={styles.tournamentScheduleRow}>
-                <div style={styles.tournamentScheduleTimeCell}>
-                  <span>
-                    {language === "no" ? "Runde" : "Batch"} {batch.number}
-                  </span>
-                  <strong>{batch.time}</strong>
-                  <small>{batch.duration} min</small>
-                </div>
-                <div
-                  style={{
-                    ...styles.tournamentScheduleCourts,
-                    gridTemplateColumns: `repeat(${scheduleCourtCount}, minmax(150px, 1fr))`,
-                  }}
-                >
-                  {batch.items.map((item, courtIndex) => (
-                    <div
-                      key={`${batch.id}-court-${courtIndex}`}
-                      style={styles.tournamentScheduleCourt}
-                    >
-                      <span>
-                        {language === "no" ? "Bane" : "Court"} {courtIndex + 1}
-                      </span>
-                      <strong>
-                        {item
-                          ? `${item.teamA} vs ${item.teamB}`
-                          : language === "no"
-                            ? "Ledig bane"
-                            : "Open court"}
-                      </strong>
-                      <small>
-                        {item
-                          ? item.round
-                          : language === "no"
-                            ? "Pause"
-                            : "Break"}
-                      </small>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-          {hiddenCount > 0 && (
-            <div style={styles.tournamentScheduleMore}>
-              +{hiddenCount} {language === "no" ? "flere runder" : "more batches"}
-            </div>
-          )}
-        </div>
-      );
+      return renderTournamentHallScheduleGrid({
+        hallScheduleBatches,
+        scheduleCourtCount,
+        limit,
+        showRoundLabels: shouldShowTournamentRoundLabels(activeTournament),
+        editableScores: true,
+      });
     };
 
     return (
@@ -3573,25 +8164,31 @@ const savedRound = readStorageWithTtl(
           <div
             style={{
               ...styles.tournamentDashboardShell,
+              ...(!shouldShowTournamentSetupPanel
+                ? styles.tournamentDashboardShellCollapsed
+                : {}),
               ...(isMobile ? styles.tournamentDashboardShellMobile : {}),
             }}
           >
+            {shouldShowTournamentSetupPanel && (
             <aside style={styles.tournamentSetupPanel}>
               <div style={styles.tournamentPanelHeader}>
                 <div>
                   <div style={styles.tournamentEyebrow}>
-                    {language === "no" ? "Kontrollpanel" : "Control Panel"}
+                    {tournamentText.controlPanelLabel}
                   </div>
                   <div style={styles.tournamentPanelTitle}>
-                    {language === "no" ? "Turneringsoppsett" : "Tournament Setup"}
+                    {tournamentText.tournamentSetupTitle}
                   </div>
                 </div>
 
                 <button
-                  style={styles.secondaryButtonCompact}
+                  style={styles.tournamentNewButton}
                   onClick={() => setShowCreateTournamentForm((prev) => !prev)}
                 >
-                  {showCreateTournamentForm ? t.close : tournamentText.newTournament}
+                  {showCreateTournamentForm
+                    ? t.close
+                    : tournamentText.newLabel}
                 </button>
               </div>
 
@@ -3629,11 +8226,12 @@ const savedRound = readStorageWithTtl(
                 </div>
 
                 <div style={styles.tournamentList}>
-                  {tournaments.length === 0 ? (
+                  {visiblePrivateTournaments.length === 0 ? (
                     <div style={styles.emptyText}>{tournamentText.emptyList}</div>
                   ) : (
-                    tournaments.map((item) => {
+                    visiblePrivateTournaments.map((item) => {
                       const isActive = item.id === activeTournamentId;
+                      const safeItem = applyTournamentDefaults(item);
 
                       return (
                         <button
@@ -3644,13 +8242,22 @@ const savedRound = readStorageWithTtl(
                           }}
                           onClick={() => {
                             setActiveTournamentId(item.id);
+                            setShowTournamentSetupPanel(true);
                             setTournamentActionMessage("");
+                            void loadSingleTournamentFromBackend(item.id);
                           }}
                         >
                           <span style={styles.tournamentListItemTitle}>
                             {item.name}
                           </span>
-                          <span style={styles.tournamentListItemMeta}>
+                          <span
+                            style={{
+                              ...styles.tournamentListStatusBadge,
+                              ...(isTournamentPublished(safeItem)
+                                ? styles.tournamentListStatusBadgeLive
+                                : {}),
+                            }}
+                          >
                             {getTournamentStatusLabel(item)}
                           </span>
                         </button>
@@ -3658,13 +8265,22 @@ const savedRound = readStorageWithTtl(
                     })
                   )}
                 </div>
+
+                {showTournamentCleanupTools && (
+                  <button
+                    style={styles.secondaryButtonCompact}
+                    onClick={cleanupMyDraftTournaments}
+                  >
+                    {tournamentText.cleanupDraftTournaments}
+                  </button>
+                )}
               </div>
 
               {activeTournament && (
                 <>
                   <div style={styles.tournamentSetupBlock}>
                     <div style={styles.tournamentBlockTitle}>
-                      {tournamentText.informationSection}
+                      {tournamentText.editTournamentTitle}
                     </div>
 
                     <div style={styles.settingsLabel}>
@@ -3690,10 +8306,6 @@ const savedRound = readStorageWithTtl(
                     />
 
                     <div style={styles.tournamentInlineActions}>
-                      <div style={styles.tournamentStatusBadge}>
-                        {getTournamentStatusLabel(activeTournament)}
-                      </div>
-
                       {isPublished ? (
                         <button
                           style={styles.secondaryButtonCompact}
@@ -3707,6 +8319,14 @@ const savedRound = readStorageWithTtl(
                           onClick={publishTournament}
                         >
                           {tournamentText.publish}
+                        </button>
+                      )}
+                      {!isPublished && (
+                        <button
+                          style={styles.dangerButtonCompact}
+                          onClick={deleteActiveTournament}
+                        >
+                          {tournamentText.deleteTournament}
                         </button>
                       )}
                     </div>
@@ -3746,7 +8366,7 @@ const savedRound = readStorageWithTtl(
                     >
                       <div>
                         <div style={styles.settingsLabel}>
-                          {language === "no" ? "Totalt antall lag" : "Total Teams"}
+                          {tournamentText.totalTeamsLabel}
                         </div>
                         <input
                           style={styles.input}
@@ -3807,27 +8427,34 @@ const savedRound = readStorageWithTtl(
 
                       <div>
                         <div style={styles.settingsLabel}>
-                          {language === "no" ? "Lag per gruppe" : "Teams per Group"}
+                          {tournamentText.teamsPerGroupLabel}
                         </div>
                         <input
                           style={styles.input}
                           type="number"
                           min={1}
                           value={activeTournament.teamsPerGroup}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            const nextTeamsPerGroup = Math.max(
+                              1,
+                              Number(e.target.value) || 1
+                            );
+                            const nextGroupCount = Math.max(
+                              1,
+                              Number(activeTournament.groupCount || 2)
+                            );
+
                             updateActiveTournament({
-                              teamsPerGroup: Math.max(
-                                1,
-                                Number(e.target.value) || 1
-                              ),
-                            })
-                          }
+                              teamsPerGroup: nextTeamsPerGroup,
+                              totalTeams: nextGroupCount * nextTeamsPerGroup,
+                            });
+                          }}
                         />
                       </div>
 
                       <div>
                         <div style={styles.settingsLabel}>
-                          {language === "no" ? "Kvalifiserte" : "Qualifiers"}
+                          {tournamentText.qualifiersLabel}
                         </div>
                         <input
                           style={styles.input}
@@ -3838,6 +8465,16 @@ const savedRound = readStorageWithTtl(
                           readOnly
                         />
                       </div>
+                    </div>
+
+                    <div style={styles.tournamentInlineActions}>
+                      <button
+                        type="button"
+                        style={styles.secondaryButtonCompact}
+                        onClick={resizeManualGroupsFromFormat}
+                      >
+                        {tournamentText.buildUpdateSlots}
+                      </button>
                     </div>
 
                     <label style={styles.tournamentCheckRow}>
@@ -3863,7 +8500,7 @@ const savedRound = readStorageWithTtl(
                     >
                       <div>
                         <div style={styles.settingsLabel}>
-                          {language === "no" ? "Starttid" : "Start Time"}
+                          {tournamentText.startTimeLabel}
                         </div>
                         <input
                           style={styles.input}
@@ -3877,7 +8514,7 @@ const savedRound = readStorageWithTtl(
 
                       <div>
                         <div style={styles.settingsLabel}>
-                          {language === "no" ? "Antall baner" : "Courts"}
+                          {tournamentText.courtsLabel}
                         </div>
                         <input
                           style={styles.input}
@@ -3897,7 +8534,7 @@ const savedRound = readStorageWithTtl(
 
                       <div>
                         <div style={styles.settingsLabel}>
-                          {language === "no" ? "Gruppe min" : "Group Min"}
+                          {tournamentText.groupMinutesLabel}
                         </div>
                         <input
                           style={styles.input}
@@ -3917,7 +8554,7 @@ const savedRound = readStorageWithTtl(
 
                       <div>
                         <div style={styles.settingsLabel}>
-                          {language === "no" ? "Sluttspill min" : "Playoff Min"}
+                          {tournamentText.playoffMinutesLabel}
                         </div>
                         <input
                           style={styles.input}
@@ -3937,7 +8574,7 @@ const savedRound = readStorageWithTtl(
 
                       <div>
                         <div style={styles.settingsLabel}>
-                          {language === "no" ? "Pause min" : "Break Min"}
+                          {tournamentText.breakMinutesLabel}
                         </div>
                         <input
                           style={styles.input}
@@ -3956,13 +8593,27 @@ const savedRound = readStorageWithTtl(
                       </div>
                     </div>
 
+                    <label style={styles.tournamentCheckRow}>
+                      <input
+                        type="checkbox"
+                        checked={shouldShowTournamentRoundLabels(
+                          activeTournament
+                        )}
+                        onChange={(e) =>
+                          updateActiveTournament({
+                            displaySettings: {
+                              ...(activeTournament.displaySettings || {}),
+                              showRoundLabels: e.target.checked,
+                              showRoundNumbers: e.target.checked,
+                              showRoundTitles: e.target.checked,
+                            },
+                          })
+                        }
+                      />
+                      <span>{tournamentText.showRoundLabels}</span>
+                    </label>
+
                     <div style={styles.tournamentInlineActions}>
-                      <button
-                        style={styles.secondaryButtonCompact}
-                        onClick={generateTournamentGroups}
-                      >
-                        {language === "no" ? "Bygg gruppesloter" : "Build Group Slots"}
-                      </button>
                       <button
                         style={styles.secondaryButtonCompact}
                         onClick={generateTournamentKnockout}
@@ -3976,12 +8627,10 @@ const savedRound = readStorageWithTtl(
                     <div style={styles.tournamentSectionHeader}>
                       <div>
                         <div style={styles.tournamentBlockTitle}>
-                          {language === "no" ? "Manuell gruppeinndata" : "Manual Group Entry"}
+                          {tournamentText.manualGroupEntryTitle}
                         </div>
                         <div style={styles.tournamentSidebarNote}>
-                          {language === "no"
-                            ? "Fyll slotene i samme rekkefolge som papirtrekket."
-                            : "Fill slots in the exact paper-draw order."}
+                          {tournamentText.manualGroupEntryHint}
                         </div>
                       </div>
                       <div style={styles.tournamentStatusBadge}>
@@ -3990,51 +8639,52 @@ const savedRound = readStorageWithTtl(
                     </div>
 
                     <div style={styles.tournamentSidebarSlotList}>
-                      {manualPreviewGroups.map((group) => {
-                        const isEditableGroup = tournamentGroups.some(
-                          (item) => item.id === group.id
-                        );
+                      {manualPreviewGroups.map((group, groupIndex) => {
+                        const groupColor = getTournamentGroupColor(group.code);
 
                         return (
                           <div
                             key={`sidebar-${group.id}`}
-                            style={styles.tournamentSidebarGroup}
+                            style={{
+                              ...styles.tournamentSidebarGroup,
+                              background: groupColor.soft,
+                              borderColor: groupColor.border,
+                            }}
                           >
                             <div style={styles.tournamentSidebarGroupHeader}>
                               <strong>{group.name}</strong>
                               <span>
                                 {(group.teams || []).length}{" "}
-                                {language === "no" ? "sloter" : "slots"}
+                                {tournamentText.slotsLabel}
                               </span>
                             </div>
-                            {(group.teams || []).map((team, index) => (
+                            {(group.teams || []).map((team, slotIndex) => (
                               <div
-                                key={`sidebar-${group.id}-${team.id}`}
+                                key={`${activeTournament.id}-sidebar-${groupIndex}-${slotIndex}`}
                                 style={styles.tournamentSidebarSlotRow}
                               >
-                                <span style={styles.tournamentTeamSeed}>
-                                  {team.slot || `${group.code}${index + 1}`}
+                                <span
+                                  style={{
+                                    ...styles.tournamentTeamSeed,
+                                    background: groupColor.soft,
+                                    borderColor: groupColor.border,
+                                    color: groupColor.text,
+                                  }}
+                                >
+                                  {team.slot || `${group.code}${slotIndex + 1}`}
                                 </span>
                                 <input
                                   style={styles.tournamentSlotInput}
                                   value={team.name || ""}
-                                  disabled={!isEditableGroup}
                                   onChange={(e) =>
                                     updateManualGroupSlot(
-                                      group.id,
-                                      team.id,
+                                      groupIndex,
+                                      slotIndex,
                                       e.target.value
                                     )
                                   }
-                                  placeholder={
-                                    isEditableGroup
-                                      ? language === "no"
-                                        ? "Lagnavn"
-                                        : "Team name"
-                                      : language === "no"
-                                        ? "Bygg sloter"
-                                        : "Build slots"
-                                  }
+                                  placeholder=""
+                                  aria-label={team.slot || `${group.code}${slotIndex + 1}`}
                                 />
                               </div>
                             ))}
@@ -4042,273 +8692,228 @@ const savedRound = readStorageWithTtl(
                         );
                       })}
                     </div>
-
-                    <button
-                      style={styles.primaryButtonSmall}
-                      onClick={generateTournamentGroups}
-                    >
-                      {language === "no" ? "Bygg / oppdater sloter" : "Build / Update Slots"}
-                    </button>
                   </div>
 
-                  <div style={styles.tournamentSetupBlock}>
-                    <div style={styles.tournamentBlockTitle}>
-                      {tournamentText.settingsSection}
-                    </div>
+                  <button
+                    style={styles.tournamentRegistrationToggle}
+                    onClick={() => setShowTournamentRegistration((prev) => !prev)}
+                  >
+                    {showTournamentRegistration
+                      ? tournamentText.closeRegistration
+                      : tournamentText.openRegistration}
+                  </button>
 
-                    <div style={styles.tournamentCheckboxGrid}>
-                      {[
-                        ["showScores", tournamentText.showScores],
-                        ["showDates", tournamentText.showDates],
-                        ["showLocations", tournamentText.showLocations],
-                        ["showRoundTitles", tournamentText.showRoundTitles],
-                      ].map(([key, label]) => (
-                        <label key={key} style={styles.tournamentCheckRow}>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(
-                              activeTournament.displaySettings?.[key]
-                            )}
-                            onChange={(e) =>
-                              updateActiveTournamentDisplaySetting(
-                                key,
-                                e.target.checked
-                              )
-                            }
-                          />
-                          <span>{label}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
+                  {showTournamentRegistration && (
+                    <div style={styles.tournamentSetupBlock}>
+                      <div style={styles.tournamentBlockTitle}>
+                        {tournamentText.registrationTitle}
+                      </div>
 
-                  <div style={styles.tournamentSetupBlock}>
-                    <div style={styles.tournamentBlockTitle}>
-                      {language === "no" ? "Registrering" : "Registration"}
-                    </div>
-
-                    <div
-                      style={{
-                        ...styles.tournamentRegistrationGrid,
-                        ...(isMobile ? styles.tournamentFieldGridMobile : {}),
-                      }}
-                    >
-                      <input
-                        style={styles.input}
-                        value={newTournamentTeamName}
-                        onChange={(e) =>
-                          setNewTournamentTeamName(e.target.value)
-                        }
-                        placeholder={language === "no" ? "Lagnavn" : "Team name"}
-                      />
-                      <input
-                        style={styles.input}
-                        value={newTournamentTeamClub}
-                        onChange={(e) =>
-                          setNewTournamentTeamClub(e.target.value)
-                        }
-                        placeholder={language === "no" ? "Klubb" : "Club"}
-                      />
-                      <button
-                        style={styles.primaryButtonSmall}
-                        onClick={addTournamentTeam}
+                      <div
+                        style={{
+                          ...styles.tournamentRegistrationGrid,
+                          ...(isMobile ? styles.tournamentFieldGridMobile : {}),
+                        }}
                       >
-                        {tournamentText.addTeamButton}
-                      </button>
-                    </div>
+                        <input
+                          style={styles.input}
+                          value={newTournamentTeamName}
+                          onChange={(e) =>
+                            setNewTournamentTeamName(e.target.value)
+                          }
+                          placeholder={tournamentText.teamNamePlaceholder}
+                        />
+                        <input
+                          style={styles.input}
+                          value={newTournamentTeamClub}
+                          onChange={(e) =>
+                            setNewTournamentTeamClub(e.target.value)
+                          }
+                          placeholder={tournamentText.clubPlaceholder}
+                        />
+                        <button
+                          style={styles.primaryButtonSmall}
+                          onClick={addTournamentTeam}
+                        >
+                          {tournamentText.addTeamButton}
+                        </button>
+                      </div>
 
-                    <div style={styles.tournamentTeamList}>
-                      {tournamentTeams.length > 0 ? (
-                        tournamentTeams.map((team) => (
-                          <div key={team.id} style={styles.tournamentTeamRow}>
-                            <div style={styles.tournamentTeamRowTop}>
-                              <div style={styles.tournamentTeamIdentity}>
-                                {editingTournamentTeamId === team.id ? (
-                                  <input
-                                    style={styles.input}
-                                    value={editingTournamentTeamName}
-                                    onChange={(e) =>
-                                      setEditingTournamentTeamName(
-                                        e.target.value
-                                      )
-                                    }
-                                    placeholder={
-                                      language === "no" ? "Lagnavn" : "Team name"
-                                    }
-                                  />
-                                ) : (
-                                  <div style={styles.tournamentTeamName}>
-                                    {team.name}
+                      <div style={styles.tournamentTeamList}>
+                        {tournamentTeams.length > 0 ? (
+                          tournamentTeams.map((team) => (
+                            <div key={team.id} style={styles.tournamentTeamRow}>
+                              <div style={styles.tournamentTeamRowTop}>
+                                <div style={styles.tournamentTeamIdentity}>
+                                  {editingTournamentTeamId === team.id ? (
+                                    <input
+                                      style={styles.input}
+                                      value={editingTournamentTeamName}
+                                      onChange={(e) =>
+                                        setEditingTournamentTeamName(
+                                          e.target.value
+                                        )
+                                      }
+                                      placeholder={tournamentText.teamNamePlaceholder}
+                                    />
+                                  ) : (
+                                    <div style={styles.tournamentTeamName}>
+                                      {team.name}
+                                    </div>
+                                  )}
+                                  <div style={styles.tournamentTeamMeta}>
+                                    {team.club ? `${team.club} - ` : ""}
+                                    {team.locked
+                                      ? tournamentText.lockedLabel
+                                      : tournamentText.openLabel}
                                   </div>
-                                )}
-                                <div style={styles.tournamentTeamMeta}>
-                                  {team.club ? `${team.club} - ` : ""}
-                                  {team.locked
-                                    ? language === "no"
-                                      ? "Last"
-                                      : "Locked"
-                                    : language === "no"
-                                      ? "Apen"
-                                      : "Open"}
+                                </div>
+
+                                <div style={styles.tournamentTeamActions}>
+                                  {editingTournamentTeamId === team.id ? (
+                                    <>
+                                      <button
+                                        style={styles.smallPrimaryButton}
+                                        onClick={() =>
+                                          saveTournamentTeamName(team.id)
+                                        }
+                                      >
+                                        {tournamentText.saveTeam}
+                                      </button>
+                                      <button
+                                        style={styles.secondaryButtonCompact}
+                                        onClick={() => {
+                                          setEditingTournamentTeamId("");
+                                          setEditingTournamentTeamName("");
+                                        }}
+                                      >
+                                        {tournamentText.cancelEdit}
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <button
+                                        style={styles.secondaryButtonCompact}
+                                        onClick={() =>
+                                          toggleTournamentTeamLock(team.id)
+                                        }
+                                      >
+                                        {team.locked
+                                          ? tournamentText.unlockTeam
+                                          : tournamentText.lockTeam}
+                                      </button>
+                                      <button
+                                        style={styles.secondaryButtonCompact}
+                                        onClick={() =>
+                                          startEditTournamentTeam(team)
+                                        }
+                                      >
+                                        {tournamentText.editTeam}
+                                      </button>
+                                      <button
+                                        style={styles.secondaryButtonCompact}
+                                        onClick={() =>
+                                          deleteTournamentTeam(team.id)
+                                        }
+                                      >
+                                        {tournamentText.deleteTeam}
+                                      </button>
+                                    </>
+                                  )}
                                 </div>
                               </div>
 
-                              <div style={styles.tournamentTeamActions}>
-                                {editingTournamentTeamId === team.id ? (
-                                  <>
-                                    <button
-                                      style={styles.smallPrimaryButton}
-                                      onClick={() =>
-                                        saveTournamentTeamName(team.id)
-                                      }
-                                    >
-                                      {tournamentText.saveTeam}
-                                    </button>
-                                    <button
-                                      style={styles.secondaryButtonCompact}
-                                      onClick={() => {
-                                        setEditingTournamentTeamId("");
-                                        setEditingTournamentTeamName("");
-                                      }}
-                                    >
-                                      {tournamentText.cancelEdit}
-                                    </button>
-                                  </>
-                                ) : (
-                                  <>
-                                    <button
-                                      style={styles.secondaryButtonCompact}
-                                      onClick={() =>
-                                        toggleTournamentTeamLock(team.id)
-                                      }
-                                    >
-                                      {team.locked
-                                        ? tournamentText.unlockTeam
-                                        : tournamentText.lockTeam}
-                                    </button>
-                                    <button
-                                      style={styles.secondaryButtonCompact}
-                                      onClick={() =>
-                                        startEditTournamentTeam(team)
-                                      }
-                                    >
-                                      {tournamentText.editTeam}
-                                    </button>
-                                    <button
-                                      style={styles.secondaryButtonCompact}
-                                      onClick={() =>
-                                        deleteTournamentTeam(team.id)
-                                      }
-                                    >
-                                      {tournamentText.deleteTeam}
-                                    </button>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-
-                            <div
-                              style={{
-                                ...styles.tournamentPlayerRegister,
-                                ...(isMobile
-                                  ? styles.tournamentFieldGridMobile
-                                  : {}),
-                              }}
-                            >
-                              <input
-                                style={styles.input}
-                                value={newTournamentPlayerNames[team.id] || ""}
-                                onChange={(e) =>
-                                  setNewTournamentPlayerNames((prev) => ({
-                                    ...prev,
-                                    [team.id]: e.target.value,
-                                  }))
-                                }
-                                placeholder={
-                                  language === "no" ? "Spillernavn" : "Player name"
-                                }
-                              />
-                              <button
-                                style={styles.primaryButtonSmall}
-                                onClick={() => addTournamentPlayer(team.id)}
+                              <div
+                                style={{
+                                  ...styles.tournamentPlayerRegister,
+                                  ...(isMobile
+                                    ? styles.tournamentFieldGridMobile
+                                    : {}),
+                                }}
                               >
-                                {tournamentText.addPlayerButton}
-                              </button>
+                                <input
+                                  style={styles.input}
+                                  value={newTournamentPlayerNames[team.id] || ""}
+                                  onChange={(e) =>
+                                    setNewTournamentPlayerNames((prev) => ({
+                                      ...prev,
+                                      [team.id]: e.target.value,
+                                    }))
+                                  }
+                                  placeholder={
+                                    tournamentText.playerNamePlaceholder
+                                  }
+                                />
+                                <button
+                                  style={styles.primaryButtonSmall}
+                                  onClick={() => addTournamentPlayer(team.id)}
+                                >
+                                  {tournamentText.addPlayerButton}
+                                </button>
+                              </div>
                             </div>
-
-                            <div style={styles.tournamentPlayerList}>
-                              {Array.isArray(team.players) &&
-                              team.players.length > 0 ? (
-                                team.players.map((player) => (
-                                  <div
-                                    key={player.id || player.name}
-                                    style={styles.tournamentPlayerPill}
-                                  >
-                                    <span>{player.name}</span>
-                                    <span style={styles.tournamentPlayerMeta}>
-                                      {player.registeredBy}
-                                    </span>
-                                  </div>
-                                ))
-                              ) : (
-                                <div style={styles.tournamentMutedText}>
-                                  {tournamentText.noPlayersYet}
-                                </div>
-                              )}
-                            </div>
+                          ))
+                        ) : (
+                          <div style={styles.tournamentMutedText}>
+                            {tournamentText.noTeamsYet}
                           </div>
-                        ))
-                      ) : (
-                        <div style={styles.tournamentMutedText}>
-                          {tournamentText.noTeamsYet}
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
-                  </div>
+                  )}
+
                 </>
               )}
             </aside>
+            )}
 
             <main style={styles.tournamentMainPanel}>
               {activeTournament ? (
                 <>
                   <div style={styles.tournamentHero}>
                     <div style={styles.tournamentHeroText}>
-                      <div style={styles.tournamentEyebrow}>
-                        {language === "no" ? "Turneringsdashboard" : "Tournament Dashboard"}
-                      </div>
                       <h2 style={styles.tournamentHeroTitle}>
                         {activeTournament.name}
                       </h2>
                       <div style={styles.tournamentHeroMeta}>
-                        {formatLabel} - {getTournamentStatusLabel(activeTournament)}
-                      </div>
-                      <p style={styles.tournamentHeroRules}>
-                        {activeTournament.rules || tournamentText.noRules}
-                      </p>
-                    </div>
-
-                    <div style={styles.tournamentHeroActions}>
-                      <div style={styles.tournamentHeroBadge}>
-                        {isPublished
-                          ? tournamentText.published
-                          : tournamentText.unpublished}
-                      </div>
-                      {isPublished ? (
-                        <button
-                          style={styles.tournamentLightButton}
-                          onClick={unpublishTournament}
+                        <span style={styles.tournamentHeroChip}>{formatLabel}</span>
+                        <span style={styles.tournamentHeroBadge}>
+                          {isPublished
+                            ? tournamentText.published
+                            : tournamentText.unpublished}
+                        </span>
+                        <span
+                          style={{
+                            ...styles.tournamentSyncBadge,
+                            ...(tournamentSyncStatus === "error"
+                              ? styles.tournamentSyncBadgeError
+                              : {}),
+                            ...(tournamentSyncStatus === "local"
+                              ? styles.tournamentSyncBadgeLocal
+                              : {}),
+                          }}
+                          title={tournamentSyncMessage}
                         >
-                          {tournamentText.unpublish}
-                        </button>
-                      ) : (
-                        <button
-                          style={styles.tournamentLightButton}
-                          onClick={publishTournament}
-                        >
-                          {tournamentText.publish}
-                        </button>
+                          {tournamentSyncLabel}
+                        </span>
+                      </div>
+                      {String(activeTournament.rules || "").trim() && (
+                        <p style={styles.tournamentHeroRules}>
+                          {activeTournament.rules}
+                        </p>
                       )}
+                    </div>
+                    <div style={styles.tournamentHeroActions}>
+                      <button
+                        style={styles.tournamentLightButton}
+                        onClick={() =>
+                          setShowTournamentSetupPanel((prev) => !prev)
+                        }
+                      >
+                        {shouldShowTournamentSetupPanel
+                          ? tournamentText.hideSetup
+                          : tournamentText.editSetup}
+                      </button>
                     </div>
                   </div>
 
@@ -4343,7 +8948,9 @@ const savedRound = readStorageWithTtl(
                             ? styles.tournamentSubTabActive
                             : {}),
                         }}
-                        onClick={() => setActiveTournamentView(tab.id)}
+                        onClick={() => {
+                          setActiveTournamentView(tab.id);
+                        }}
                       >
                         {tab.label}
                       </button>
@@ -4352,6 +8959,199 @@ const savedRound = readStorageWithTtl(
 
                   <div style={styles.tournamentWorkspace}>
                     {activeTournamentView === "overview" && (
+                      <div
+                        style={{
+                          ...styles.tournamentOverviewGrid,
+                          ...(isMobile ? styles.tournamentTwoColumnMobile : {}),
+                        }}
+                      >
+                        <div style={styles.tournamentSurface}>
+                          <div style={styles.tournamentSectionHeader}>
+                            <div>
+                              <div style={styles.tournamentEyebrow}>
+                                {tournamentText.groupsTab}
+                              </div>
+                              <div style={styles.tournamentSectionTitle}>
+                                {tournamentText.groupDrawTitle}
+                              </div>
+                            </div>
+                            <div style={styles.tournamentStatusBadge}>
+                              {filledSlotCount}/{configuredTotalTeams}
+                            </div>
+                          </div>
+
+                          {manualPreviewGroups.length > 0 ? (
+                            <div style={styles.tournamentCompactGroupGrid}>
+                              {manualPreviewGroups.map((group, groupIndex) => {
+                                const groupCode =
+                                  group.code || getTournamentGroupCode(groupIndex);
+                                const groupColor =
+                                  getTournamentGroupColor(groupCode);
+                                const filledTeams = (group.teams || []).filter(
+                                  (team) => String(team.name || "").trim()
+                                );
+
+                                return (
+                                  <div
+                                    key={`overview-group-${group.id}`}
+                                    style={{
+                                      ...styles.tournamentCompactGroupCard,
+                                      background: groupColor.soft,
+                                      borderColor: groupColor.border,
+                                    }}
+                                  >
+                                    <div style={styles.tournamentGroupHeader}>
+                                      <div style={styles.tournamentMiniTitle}>
+                                        {group.name}
+                                      </div>
+                                      <span
+                                        style={{
+                                          ...styles.tournamentTeamSeed,
+                                          background: groupColor.soft,
+                                          borderColor: groupColor.border,
+                                          color: groupColor.text,
+                                        }}
+                                      >
+                                        {groupCode}
+                                      </span>
+                                    </div>
+                                    <div style={styles.tournamentMutedText}>
+                                      {filledTeams.length}/
+                                      {(group.teams || []).length}{" "}
+                                      {tournamentText.slotsLabel}
+                                    </div>
+                                    <div style={styles.tournamentSnapshotList}>
+                                      {(group.teams || []).map((team, index) => (
+                                          <div
+                                            key={`overview-group-${group.id}-${team.id}`}
+                                            style={styles.tournamentSnapshotRow}
+                                          >
+                                            <span
+                                              style={{
+                                                ...styles.tournamentTeamSeed,
+                                                background: groupColor.soft,
+                                                borderColor: groupColor.border,
+                                                color: groupColor.text,
+                                              }}
+                                            >
+                                              {team.slot ||
+                                                `${groupCode}${index + 1}`}
+                                            </span>
+                                            <strong>
+                                              {String(team.name || "").trim() || "-"}
+                                            </strong>
+                                          </div>
+                                        ))}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div style={styles.tournamentMutedPanel}>
+                              {tournamentText.noGroupsYet}
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={styles.tournamentPreviewBracketCard}>
+                          <div style={styles.tournamentSectionHeader}>
+                            <div>
+                              <div style={styles.tournamentEyebrow}>
+                                {tournamentText.knockoutLabel}
+                              </div>
+                              <div
+                                style={{
+                                  ...styles.tournamentMiniTitle,
+                                  color: "#fff",
+                                }}
+                              >
+                                {tournamentText.knockoutPreview}
+                              </div>
+                            </div>
+                            <div style={styles.tournamentStatusBadge}>
+                              {tournamentText.topQualifiersLabel}
+                            </div>
+                          </div>
+
+                          <div style={styles.tournamentPreviewMatchList}>
+                            {previewFirstRound.slice(0, 4).map((match) => (
+                              <div
+                                key={`overview-compact-ko-${match.id}`}
+                                style={styles.tournamentPreviewMatchRow}
+                              >
+                                <span>{match.label}</span>
+                                <strong>
+                                  {match.sourceA || match.teamA} vs{" "}
+                                  {match.sourceB || match.teamB}
+                                </strong>
+                              </div>
+                            ))}
+                            {knockoutPreview.final && (
+                              <div style={styles.tournamentPreviewMatchRow}>
+                                <span>{tournamentText.final}</span>
+                                <strong>
+                                  {knockoutPreview.final.sourceA ||
+                                    knockoutPreview.final.teamA}{" "}
+                                  vs{" "}
+                                  {knockoutPreview.final.sourceB ||
+                                    knockoutPreview.final.teamB}
+                                </strong>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div style={styles.tournamentSurface}>
+                          <div style={styles.tournamentSectionHeader}>
+                            <div>
+                              <div style={styles.tournamentEyebrow}>
+                                {tournamentText.nextLabel}
+                              </div>
+                              <div style={styles.tournamentSectionTitle}>
+                                {tournamentText.nextMatchesTitle}
+                              </div>
+                            </div>
+                            <div style={styles.tournamentStatusBadge}>
+                              {scheduledMatchesCount}{" "}
+                              {tournamentText.matchStatusScheduled}
+                            </div>
+                          </div>
+
+                          {tournamentMatches.length > 0 ? (
+                            <div style={styles.tournamentSnapshotList}>
+                              {tournamentMatches
+                                .filter(
+                                  (match) =>
+                                    getMatchDisplayStatus(match).status !==
+                                    "completed"
+                                )
+                                .slice(0, 3)
+                                .map((match) => (
+                                  <div
+                                    key={`overview-next-${match.id}`}
+                                    style={styles.tournamentSnapshotRow}
+                                  >
+                                    <span>
+                                      {match.teamA} vs {match.teamB}
+                                    </span>
+                                    <strong>
+                                      {match.groupName ||
+                                        tournamentText.matchStatusScheduled}
+                                    </strong>
+                                  </div>
+                                ))}
+                            </div>
+                          ) : (
+                            <div style={styles.tournamentMutedPanel}>
+                              {tournamentText.noMatchesYet}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {false && activeTournamentView === "overview" && (
                       <div
                         style={{
                           ...styles.tournamentOverviewGrid,
@@ -4444,10 +9244,7 @@ const savedRound = readStorageWithTtl(
                                           {team.slot || `${group.code}${index + 1}`}
                                         </span>
                                         <strong>
-                                          {String(team.name || "").trim() ||
-                                            (language === "no"
-                                              ? "Tom slot"
-                                              : "Empty slot")}
+                                          {String(team.name || "").trim() || "-"}
                                         </strong>
                                       </div>
                                     ))}
@@ -4548,14 +9345,11 @@ const savedRound = readStorageWithTtl(
                                 {language === "no" ? "Hallplan" : "Hall Schedule"}
                               </div>
                               <div style={styles.tournamentSectionTitle}>
-                                {language === "no"
-                                  ? "Runder, baner og tidspunkter"
-                                  : "Batches, Courts and Times"}
+                                {tournamentText.scheduleOverviewTitle}
                               </div>
                             </div>
                             <div style={styles.tournamentStatusBadge}>
-                              {scheduleCourtCount}{" "}
-                              {language === "no" ? "baner" : "courts"}
+                              {scheduleCourtCount} {tournamentText.courtsLabel}
                             </div>
                           </div>
                           {renderHallSchedulePreview(12)}
@@ -4684,9 +9478,7 @@ const savedRound = readStorageWithTtl(
                                     {match.teamA} vs {match.teamB}
                                   </span>
                                   <strong>
-                                    {match.status === "completed"
-                                      ? tournamentText.matchStatusCompleted
-                                      : tournamentText.matchStatusScheduled}
+                                    {getMatchDisplayStatus(match).label}
                                   </strong>
                                 </div>
                               ))}
@@ -4705,18 +9497,15 @@ const savedRound = readStorageWithTtl(
                         <div style={styles.tournamentSectionHeader}>
                           <div>
                             <div style={styles.tournamentEyebrow}>
-                              {language === "no" ? "Grupper" : "Groups"}
+                              {tournamentText.groupsTab}
                             </div>
                             <div style={styles.tournamentSectionTitle}>
                               {tournamentText.groupStagePreview}
                             </div>
                           </div>
-                          <button
-                            style={styles.primaryButtonSmall}
-                            onClick={generateTournamentGroups}
-                          >
-                            {tournamentText.generateGroups}
-                          </button>
+                          <div style={styles.tournamentStatusBadge}>
+                            {filledSlotCount}/{configuredTotalTeams}
+                          </div>
                         </div>
 
                         {manualPreviewGroups.length > 0 ? (
@@ -4725,16 +9514,18 @@ const savedRound = readStorageWithTtl(
                               ...styles.tournamentGroupGrid,
                               ...(isMobile ? styles.tournamentGroupGridMobile : {}),
                             }}
-                          >
-                            {manualPreviewGroups.map((group) => {
-                              const isEditableGroup = tournamentGroups.some(
-                                (item) => item.id === group.id
-                              );
+                        >
+                          {manualPreviewGroups.map((group, groupIndex) => {
+                              const groupColor = getTournamentGroupColor(group.code);
 
                               return (
                                 <div
                                   key={group.id}
-                                  style={styles.tournamentGroupCard}
+                                  style={{
+                                    ...styles.tournamentGroupCard,
+                                    background: groupColor.soft,
+                                    borderColor: groupColor.border,
+                                  }}
                                 >
                                   <div style={styles.tournamentGroupHeader}>
                                     <div>
@@ -4742,12 +9533,15 @@ const savedRound = readStorageWithTtl(
                                         {group.name}
                                       </div>
                                       <div style={styles.tournamentMutedText}>
-                                        {language === "no"
-                                          ? "Manuell papirrekkefolge"
-                                          : "Manual paper-draw order"}
+                                        {tournamentText.manualPaperOrderLabel}
                                       </div>
                                     </div>
-                                    <div style={styles.tournamentGroupCount}>
+                                    <div
+                                      style={{
+                                        ...styles.tournamentGroupCount,
+                                        background: groupColor.accent,
+                                      }}
+                                    >
                                       {Array.isArray(group.teams)
                                         ? group.teams.length
                                         : 0}
@@ -4756,42 +9550,37 @@ const savedRound = readStorageWithTtl(
                                   {Array.isArray(group.teams) &&
                                   group.teams.length > 0 ? (
                                     <div style={styles.tournamentSnapshotList}>
-                                      {group.teams.map((team, index) => (
+                                      {group.teams.map((team, slotIndex) => (
                                         <div
-                                          key={`${group.id}-${team.id}`}
+                                          key={`${activeTournament.id}-group-${groupIndex}-${slotIndex}`}
                                           style={styles.tournamentGroupTeamRow}
                                         >
-                                          <span style={styles.tournamentTeamSeed}>
-                                            {team.slot || `${group.code}${index + 1}`}
+                                          <span
+                                            style={{
+                                              ...styles.tournamentTeamSeed,
+                                              background: groupColor.soft,
+                                              borderColor: groupColor.border,
+                                              color: groupColor.text,
+                                            }}
+                                          >
+                                            {team.slot || `${group.code}${slotIndex + 1}`}
                                           </span>
                                           <input
                                             style={styles.tournamentSlotInput}
                                             value={team.name || ""}
-                                            disabled={!isEditableGroup}
                                             onChange={(e) =>
                                               updateManualGroupSlot(
-                                                group.id,
-                                                team.id,
+                                                groupIndex,
+                                                slotIndex,
                                                 e.target.value
                                               )
                                             }
-                                            placeholder={
-                                              isEditableGroup
-                                                ? language === "no"
-                                                  ? "Skriv lagnavn"
-                                                  : "Enter team name"
-                                                : language === "no"
-                                                  ? "Bygg sloter for a redigere"
-                                                  : "Build slots to edit"
+                                            placeholder=""
+                                            aria-label={
+                                              team.slot || `${group.code}${slotIndex + 1}`
                                             }
                                           />
-                                          <strong>
-                                            {isEditableGroup
-                                              ? team.club || "-"
-                                              : language === "no"
-                                                ? "Forhandsvisning"
-                                                : "Preview"}
-                                          </strong>
+                                          <strong>{team.club || "-"}</strong>
                                         </div>
                                       ))}
                                     </div>
@@ -4817,7 +9606,7 @@ const savedRound = readStorageWithTtl(
                         <div style={styles.tournamentSectionHeader}>
                           <div>
                             <div style={styles.tournamentEyebrow}>
-                              {language === "no" ? "Sluttspill" : "Knockout"}
+                              {tournamentText.knockoutLabel}
                             </div>
                             <div style={styles.tournamentSectionTitle}>
                               {tournamentText.knockoutPreview}
@@ -4842,7 +9631,7 @@ const savedRound = readStorageWithTtl(
                             {(displayKnockout.quarterFinals || []).length > 0 && (
                               <div style={styles.tournamentBracketStage}>
                                 <div style={styles.tournamentBracketStageTitle}>
-                                  {language === "no" ? "Første utslag" : "First Knockout"}
+                                  {tournamentText.firstKnockoutLabel}
                                 </div>
                                 {displayKnockout.quarterFinals.map((match) =>
                                   hasStoredKnockout
@@ -4909,7 +9698,7 @@ const savedRound = readStorageWithTtl(
                         <div style={styles.tournamentSectionHeader}>
                           <div>
                             <div style={styles.tournamentEyebrow}>
-                              {language === "no" ? "Kampstyring" : "Match Management"}
+                              {tournamentText.matchManagementLabel}
                             </div>
                             <div style={styles.tournamentSectionTitle}>
                               {tournamentText.matchesTitle}
@@ -4927,79 +9716,34 @@ const savedRound = readStorageWithTtl(
                           <div style={styles.tournamentSectionHeader}>
                             <div>
                               <div style={styles.tournamentMiniTitle}>
-                                {language === "no"
-                                  ? "Hallplan for oppsettet"
-                                  : "Hall Schedule Preview"}
+                                {tournamentText.scheduleTitle}
                               </div>
                               <div style={styles.tournamentMutedText}>
-                                {language === "no"
-                                  ? "Basert pa starttid, baner, kamplengde og pauser."
-                                  : "Based on start time, courts, match duration and breaks."}
+                                {tournamentText.scheduleSubtitle}
                               </div>
                             </div>
                             <div style={styles.tournamentStatusBadge}>
                               {hallScheduleBatches.length}{" "}
-                              {language === "no" ? "runder" : "batches"}
+                              {tournamentText.batchesLabel}
                             </div>
                           </div>
                           {renderHallSchedulePreview(18)}
                         </div>
 
                         {tournamentMatches.length > 0 ? (
-                          <div style={styles.tournamentMatchList}>
-                            {tournamentMatches.map((match, index) => (
-                              <div key={match.id} style={styles.tournamentMatchCard}>
-                                <div style={styles.tournamentMatchHeader}>
-                                  <div>
-                                    <div style={styles.tournamentMatchKicker}>
-                                      {language === "no" ? "Kamp" : "Match"} {index + 1}
-                                    </div>
-                                    <div style={styles.tournamentMatchTitle}>
-                                      {match.teamA} vs {match.teamB}
-                                    </div>
-                                  </div>
-                                  <div
-                                    style={{
-                                      ...styles.tournamentMatchStatus,
-                                      ...(match.status === "completed"
-                                        ? styles.tournamentMatchStatusDone
-                                        : {}),
-                                    }}
-                                  >
-                                    {match.status === "completed"
-                                      ? tournamentText.matchStatusCompleted
-                                      : tournamentText.matchStatusScheduled}
-                                  </div>
-                                </div>
-                                <div style={styles.tournamentScoreRow}>
-                                  <input
-                                    style={styles.tournamentScoreInput}
-                                    value={match.scoreA}
-                                    onChange={(e) =>
-                                      updateTournamentMatchScore(
-                                        match.id,
-                                        e.target.value,
-                                        match.scoreB
-                                      )
-                                    }
-                                    placeholder="0"
-                                  />
-                                  <span style={styles.tournamentScoreDivider}>-</span>
-                                  <input
-                                    style={styles.tournamentScoreInput}
-                                    value={match.scoreB}
-                                    onChange={(e) =>
-                                      updateTournamentMatchScore(
-                                        match.id,
-                                        match.scoreA,
-                                        e.target.value
-                                      )
-                                    }
-                                    placeholder="0"
-                                  />
-                                </div>
-                              </div>
-                            ))}
+                          <div style={styles.tournamentMatchSummaryGrid}>
+                            <div style={styles.tournamentInfoTile}>
+                              <span>{tournamentText.matchStatusCompleted}</span>
+                              <strong>{completedMatchesCount}</strong>
+                            </div>
+                            <div style={styles.tournamentInfoTile}>
+                              <span>{tournamentText.matchStatusStarted}</span>
+                              <strong>{startedMatchesCount}</strong>
+                            </div>
+                            <div style={styles.tournamentInfoTile}>
+                              <span>{tournamentText.matchStatusScheduled}</span>
+                              <strong>{scheduledMatchesCount}</strong>
+                            </div>
                           </div>
                         ) : (
                           <div style={styles.tournamentMutedPanel}>
@@ -5014,14 +9758,14 @@ const savedRound = readStorageWithTtl(
                         <div style={styles.tournamentSectionHeader}>
                           <div>
                             <div style={styles.tournamentEyebrow}>
-                              {language === "no" ? "Resultater" : "Standings"}
+                              {tournamentText.tableTab}
                             </div>
                             <div style={styles.tournamentSectionTitle}>
                               {tournamentText.standingsTitle}
                             </div>
                           </div>
                           <div style={styles.tournamentStatusBadge}>
-                            {tournamentStandings.length} {language === "no" ? "grupper" : "groups"}
+                            {tournamentStandings.length} {tournamentText.groupsLabel}
                           </div>
                         </div>
 
@@ -5029,19 +9773,50 @@ const savedRound = readStorageWithTtl(
                         Array.isArray(tournamentStandings) &&
                         tournamentStandings.length > 0 ? (
                           <div style={styles.tournamentStandingsList}>
-                            {tournamentStandings.map((group) => (
+                            {tournamentStandings.map((group, groupIndex) => {
+                              const sourceGroup =
+                                (activeTournament.groups || []).find(
+                                  (item) => item.id === group.groupId
+                                ) || {};
+                              const groupCode =
+                                sourceGroup.code ||
+                                getTournamentGroupCode(groupIndex);
+                              const groupColor =
+                                getTournamentGroupColor(groupCode);
+
+                              return (
                               <div
                                 key={`standings-${group.groupId}`}
-                                style={styles.tournamentStandingsCard}
+                                style={{
+                                  ...styles.tournamentStandingsCard,
+                                  background: `linear-gradient(135deg, ${groupColor.soft}, #ffffff 72%)`,
+                                  borderColor: groupColor.border,
+                                  borderTop: `4px solid ${groupColor.accent}`,
+                                  borderLeft: `6px solid ${groupColor.accent}`,
+                                }}
                               >
-                                <div style={styles.tournamentMiniTitle}>
-                                  {group.groupName}
+                                <div style={styles.tournamentStandingsHeader}>
+                                  <div style={styles.tournamentMiniTitle}>
+                                    {group.groupName}
+                                  </div>
+                                  <span
+                                    style={{
+                                      ...styles.tournamentTeamSeed,
+                                      background: groupColor.soft,
+                                      borderColor: groupColor.border,
+                                      color: groupColor.text,
+                                    }}
+                                  >
+                                    {groupCode}
+                                  </span>
                                 </div>
                                 <div style={styles.tournamentTableWrap}>
                                   <table style={styles.tournamentTable}>
                                     <thead>
                                       <tr>
-                                        <th style={styles.tournamentTableHead}>Team</th>
+                                        <th style={styles.tournamentTableHead}>
+                                          {tournamentText.teamLabel}
+                                        </th>
                                         <th style={styles.tournamentTableHead}>
                                           {tournamentText.playedShort}
                                         </th>
@@ -5090,7 +9865,8 @@ const savedRound = readStorageWithTtl(
                                   </table>
                                 </div>
                               </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         ) : (
                           <div style={styles.tournamentMutedPanel}>
@@ -5108,40 +9884,46 @@ const savedRound = readStorageWithTtl(
                               {language === "no" ? "Publisering" : "Publishing"}
                             </div>
                             <div style={styles.tournamentSectionTitle}>
-                              {tournamentText.publicPreviewTitle}
+                              {tournamentText.publicTournamentLink}
                             </div>
                             <div style={styles.tournamentMutedText}>
                               {tournamentText.publicPreviewSubtitle}
                             </div>
                           </div>
                           <div style={styles.tournamentStatusBadge}>
-                            {isPublished
+                            {isBackendPublished
                               ? tournamentText.published
                               : tournamentText.unpublished}
                           </div>
                         </div>
 
+                        <div style={styles.tournamentShareInfoBox}>
+                          {isBackendPublished
+                            ? tournamentText.backendPublicLinkReady
+                            : tournamentText.backendPublicLinkPending}
+                        </div>
+
                         <div
                           style={{
                             ...styles.tournamentShareState,
-                            ...(isPublished ? styles.tournamentShareStateLive : {}),
+                            ...(isBackendPublished
+                              ? styles.tournamentShareStateLive
+                              : {}),
                           }}
                         >
                           <div>
                             <div style={styles.tournamentShareTitle}>
-                              {isPublished
+                              {isBackendPublished
                                 ? tournamentText.published
                                 : tournamentText.unpublished}
                             </div>
                             <div style={styles.tournamentMutedText}>
-                              {isPublished
-                                ? tournamentText.publicPreviewSubtitle
-                                : language === "no"
-                                  ? "Offentlig lagliste vises kun etter publisering."
-                                  : "Public roster appears only after publishing."}
+                              {isBackendPublished
+                                ? tournamentText.publicLinkReadonly
+                                : tournamentText.publicLinkUnavailable}
                             </div>
                           </div>
-                          {isPublished ? (
+                          {isBackendPublished ? (
                             <button
                               style={styles.secondaryButtonCompact}
                               onClick={unpublishTournament}
@@ -5158,63 +9940,523 @@ const savedRound = readStorageWithTtl(
                           )}
                         </div>
 
-                        {isPublished ? (
-                          <div style={styles.tournamentPublicRoster}>
-                            <div style={styles.tournamentPublicHeader}>
-                              <strong>{activeTournament.name}</strong>
-                              <span>
-                                {activeTournament.rules || tournamentText.noRules}
-                              </span>
+                        {isBackendPublished ? (
+                          <div style={styles.tournamentShareTools}>
+                            <div style={styles.tournamentShareCodeCard}>
+                              <span>{tournamentText.publicCodeLabel}</span>
+                              <strong>{publicCode}</strong>
                             </div>
-
-                            {dashboardTeams.length > 0 ? (
-                              <div style={styles.tournamentGroupGrid}>
-                                {dashboardTeams.map((team) => (
-                                  <div
-                                    key={`preview-${team.id}`}
-                                    style={styles.tournamentMiniCard}
-                                  >
-                                    <div style={styles.tournamentMiniTitle}>
-                                      {team.name}
-                                      {team.club ? ` (${team.club})` : ""}
-                                    </div>
-                                    {Array.isArray(team.players) &&
-                                    team.players.length > 0 ? (
-                                      <div style={styles.tournamentSnapshotList}>
-                                        {team.players.map((player) => (
-                                          <div
-                                            key={`preview-${team.id}-${
-                                              player.id || player.name
-                                            }`}
-                                            style={styles.tournamentSnapshotRow}
-                                          >
-                                            <span>{player.name}</span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div style={styles.tournamentMutedText}>
-                                        {tournamentText.noPlayersInPreview}
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div style={styles.tournamentMutedText}>
-                                {tournamentText.noTeamsInPreview}
-                              </div>
-                            )}
+                            <div style={styles.tournamentShareUrlLabel}>
+                              {tournamentText.publicTournamentLink}
+                            </div>
+                            <div
+                              style={{
+                                ...styles.tournamentShareUrlRow,
+                                ...(isMobile
+                                  ? styles.tournamentFieldGridMobile
+                                  : {}),
+                              }}
+                            >
+                              <input
+                                style={styles.tournamentShareInput}
+                                value={publicUrl}
+                                readOnly
+                              />
+                              <button
+                                style={styles.primaryButtonSmall}
+                                onClick={copyActiveTournamentPublicUrl}
+                              >
+                                {tournamentText.copyLink}
+                              </button>
+                              <button
+                                style={styles.secondaryButtonCompact}
+                                onClick={openActiveTournamentPublicPreview}
+                              >
+                                {tournamentText.openPublicPreview}
+                              </button>
+                            </div>
+                            <div style={styles.tournamentMutedText}>
+                              {tournamentText.publicLinkReadonly}
+                            </div>
                           </div>
                         ) : (
+                          <div style={styles.tournamentShareLockedCard}>
+                            <div style={styles.tournamentShareTitle}>
+                              {isPublished
+                                ? tournamentText.backendPublicLinkPending
+                                : tournamentText.publicLinkUnavailable}
+                            </div>
+                            <div style={styles.tournamentMutedText}>
+                              {tournamentText.backendPublicRequired}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {activeTournamentView === "promotion" && (
+                      <div style={styles.tournamentSurface}>
+                        <div style={styles.tournamentSectionHeader}>
+                          <div>
+                            <div style={styles.tournamentEyebrow}>
+                              {tournamentText.promotionTab}
+                            </div>
+                            <div style={styles.tournamentSectionTitle}>
+                              {tournamentText.marketingTitle}
+                            </div>
+                            <div style={styles.tournamentMutedText}>
+                              {tournamentText.marketingSubtitle}
+                            </div>
+                          </div>
+                          <div style={styles.tournamentPromotionHeaderActions}>
+                            {isPromotionVisibleOnUpcoming && (
+                              <span style={styles.tournamentPromotionVisibleBadge}>
+                                {tournamentText.promotionVisibleBadge}
+                              </span>
+                            )}
+                            <label style={styles.tournamentCheckRow}>
+                              <input
+                                type="checkbox"
+                                checked={isPromotionListed}
+                                onChange={(e) =>
+                                  updateActiveTournament({
+                                    publicListingEnabled: e.target.checked,
+                                    listPublicly: e.target.checked,
+                                    publicListed: e.target.checked,
+                                    visibility: e.target.checked
+                                      ? "public"
+                                      : isPublished
+                                        ? "unlisted"
+                                        : activeTournament.visibility || "",
+                                  })
+                                }
+                              />
+                              <span>{tournamentText.listPublicLabel}</span>
+                            </label>
+                          </div>
+                        </div>
+
+                        {isPublished && !isPromotionVisibleOnUpcoming && (
+                          <div style={styles.tournamentPromotionNotice}>
+                            {tournamentText.promotionDirectLinkOnly}
+                          </div>
+                        )}
+
+                        <div style={styles.tournamentPromotionActionRow}>
+                          <button
+                            style={styles.primaryButton}
+                            onClick={publishTournamentPromotion}
+                          >
+                            {tournamentText.publishPromotion}
+                          </button>
+                          <button
+                            style={styles.secondaryButton}
+                            onClick={hideTournamentPromotion}
+                          >
+                            {tournamentText.hidePromotion}
+                          </button>
+                        </div>
+
+                        <div style={styles.tournamentPromotionPreviewWrap}>
+                          <div style={styles.tournamentMiniTitle}>
+                            {tournamentText.promotionPreviewTitle}
+                          </div>
+                          <article
+                            style={{
+                              ...styles.tournamentPromotionPreviewCard,
+                              borderColor: promotionPreviewAccent,
+                              background: `linear-gradient(145deg, ${promotionPreviewTheme}, #071a14 74%)`,
+                            }}
+                          >
+                            {promotionPreviewPoster && (
+                              <div
+                                style={{
+                                  ...styles.tournamentPromotionPreviewImage,
+                                  backgroundImage: `url(${promotionPreviewPoster})`,
+                                }}
+                              />
+                            )}
+                            <div style={styles.tournamentPromotionPreviewBody}>
+                              <div style={styles.tournamentPromotionPreviewTop}>
+                                <span
+                                  style={{
+                                    ...styles.tournamentPromotionPreviewDate,
+                                    background: promotionPreviewAccent,
+                                  }}
+                                >
+                                  {formatPublicTournamentDate(activeTournament)}
+                                </span>
+                                {promotionPreviewSeriesLabels.length > 0 && (
+                                  <div style={styles.publicTournamentPosterBadges}>
+                                    {promotionPreviewSeriesLabels.map((label) => (
+                                      <span
+                                        key={label}
+                                        style={styles.publicTournamentPosterBadge}
+                                      >
+                                        {label}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+
+                              <h3 style={styles.tournamentPromotionPreviewTitle}>
+                                {promotionPreviewTitle}
+                              </h3>
+                              {promotionPreviewSummary && (
+                                <p style={styles.tournamentPromotionPreviewSummary}>
+                                  {promotionPreviewSummary}
+                                </p>
+                              )}
+
+                              <div style={styles.tournamentPromotionPreviewMeta}>
+                                {promotionPreviewLocation && (
+                                  <div>
+                                    <span>{tournamentText.locationLabel}</span>
+                                    <strong>{promotionPreviewLocation}</strong>
+                                  </div>
+                                )}
+                                {activeTournament.registrationDeadline && (
+                                  <div>
+                                    <span>
+                                      {tournamentText.registrationDeadlineLabel}
+                                    </span>
+                                    <strong>
+                                      {activeTournament.registrationDeadline}
+                                    </strong>
+                                  </div>
+                                )}
+                                {(activeTournament.prizeText ||
+                                  activeTournament.feeText) && (
+                                  <div>
+                                    <span>{tournamentText.prizeLabel}</span>
+                                    <strong>
+                                      {[
+                                        activeTournament.prizeText,
+                                        activeTournament.feeText,
+                                      ]
+                                        .filter(Boolean)
+                                        .join(" / ")}
+                                    </strong>
+                                  </div>
+                                )}
+                                {promotionPreviewContact && (
+                                  <div>
+                                    <span>{tournamentText.contactLabel}</span>
+                                    <strong>{promotionPreviewContact}</strong>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </article>
+                        </div>
+
+                        <div
+                          style={{
+                            ...styles.tournamentFieldGrid,
+                            ...(isMobile ? styles.tournamentFieldGridMobile : {}),
+                          }}
+                        >
+                          {[
+                            ["publicTitle", tournamentText.publicTitleLabel, "text"],
+                            ["country", tournamentText.countryLabel, "text"],
+                            ["city", tournamentText.cityLabel, "text"],
+                            ["locationName", tournamentText.venueLabel, "text"],
+                            ["address", tournamentText.addressLabel, "text"],
+                            ["startDate", tournamentText.dateLabel, "date"],
+                            ["endDate", tournamentText.endDateLabel, "date"],
+                            [
+                              "registrationDeadline",
+                              tournamentText.registrationDeadlineLabel,
+                              "date",
+                            ],
+                            ["startTime", tournamentText.startTimeLabel, "time"],
+                            ["contactName", tournamentText.contactNameLabel, "text"],
+                            ["contactPhone", tournamentText.contactPhoneLabel, "text"],
+                            ["contactEmail", tournamentText.contactEmailLabel, "email"],
+                            ["prizeText", tournamentText.prizeLabel, "text"],
+                            ["feeText", tournamentText.feeLabel, "text"],
+                            ["maxTeams", tournamentText.maxTeamsLabel, "number"],
+                            [
+                              "posterImageUrl",
+                              tournamentText.posterImageUrlLabel,
+                              "url",
+                            ],
+                            ["themeColor", tournamentText.themeColorLabel, "color"],
+                            ["accentColor", tournamentText.accentColorLabel, "color"],
+                          ].map(([field, label, type]) => (
+                            <div key={field}>
+                              <div style={styles.settingsLabel}>{label}</div>
+                              <input
+                                style={styles.input}
+                                type={type}
+                                value={activeTournament[field] || ""}
+                                onChange={(e) =>
+                                  updateActiveTournament({
+                                    [field]:
+                                      type === "number"
+                                        ? e.target.value
+                                        : e.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+                          ))}
+                        </div>
+
+                        <div style={styles.tournamentSetupDivider} />
+
+                        <div>
+                          <div style={styles.settingsLabel}>
+                            {tournamentText.publicSummaryLabel}
+                          </div>
+                          <textarea
+                            style={styles.textarea}
+                            value={activeTournament.publicSummary || ""}
+                            onChange={(e) =>
+                              updateActiveTournament({
+                                publicSummary: e.target.value,
+                              })
+                            }
+                          />
+                        </div>
+
+                        <div
+                          style={{
+                            ...styles.tournamentFieldGrid,
+                            ...(isMobile ? styles.tournamentFieldGridMobile : {}),
+                          }}
+                        >
+                          {[
+                            ["breakfastInfo", tournamentText.breakfastLabel],
+                            ["breakBallInfo", tournamentText.breakBallLabel],
+                            ["sodduInfo", tournamentText.sodduLabel],
+                          ].map(([field, label]) => (
+                            <div key={field}>
+                              <div style={styles.settingsLabel}>{label}</div>
+                              <input
+                                style={styles.input}
+                                value={activeTournament[field] || ""}
+                                onChange={(e) =>
+                                  updateActiveTournament({
+                                    [field]: e.target.value,
+                                  })
+                                }
+                              />
+                            </div>
+                          ))}
+                        </div>
+
+                        <div style={styles.tournamentSetupDivider} />
+
+                        <div style={styles.tournamentSectionHeader}>
+                          <div>
+                            <div style={styles.tournamentMiniTitle}>
+                              {tournamentText.seriesLabel}
+                            </div>
+                            <div style={styles.tournamentMutedText}>
+                              {tournamentText.bothSeriesLabel}
+                            </div>
+                          </div>
+                          <button
+                            style={styles.primaryButtonSmall}
+                            onClick={addTournamentSeries}
+                          >
+                            {tournamentText.addSeries}
+                          </button>
+                        </div>
+
+                        {(activeTournament.series || []).length === 0 ? (
                           <div style={styles.tournamentMutedPanel}>
-                            {tournamentText.unpublished}
+                            {tournamentText.noTeamsYet}
+                          </div>
+                        ) : (
+                          <div style={styles.tournamentMarketingSeriesList}>
+                            {(activeTournament.series || []).map((series) => (
+                              <div
+                                key={series.id}
+                                style={styles.tournamentMarketingSeriesCard}
+                              >
+                                <div
+                                  style={{
+                                    ...styles.tournamentFieldGrid,
+                                    ...(isMobile
+                                      ? styles.tournamentFieldGridMobile
+                                      : {}),
+                                  }}
+                                >
+                                  <div>
+                                    <div style={styles.settingsLabel}>
+                                      {tournamentText.seriesNameLabel}
+                                    </div>
+                                    <input
+                                      style={styles.input}
+                                      value={series.name || ""}
+                                      onChange={(e) =>
+                                        updateTournamentSeries(series.id, {
+                                          name: e.target.value,
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                  <div>
+                                    <div style={styles.settingsLabel}>
+                                      {tournamentText.teamSizeLabel}
+                                    </div>
+                                    <select
+                                      style={styles.select}
+                                      value={String(series.teamSize || 4)}
+                                      onChange={(e) =>
+                                        updateTournamentSeries(series.id, {
+                                          teamSize: Number(e.target.value),
+                                        })
+                                      }
+                                    >
+                                      <option value="4">
+                                        {tournamentText.fourSide}
+                                      </option>
+                                      <option value="5">
+                                        {tournamentText.fiveSide}
+                                      </option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <div style={styles.settingsLabel}>
+                                      {tournamentText.formatLabel}
+                                    </div>
+                                    <select
+                                      style={styles.select}
+                                      value={series.format || "group-stage"}
+                                      onChange={(e) =>
+                                        updateTournamentSeries(series.id, {
+                                          format: e.target.value,
+                                        })
+                                      }
+                                    >
+                                      <option value="group-stage">
+                                        {tournamentText.formatGroupStage}
+                                      </option>
+                                      <option value="knockout">
+                                        {tournamentText.knockoutLabel}
+                                      </option>
+                                      <option value="setup">
+                                        {tournamentText.tournamentSetupTitle}
+                                      </option>
+                                      <option value="other">
+                                        {tournamentText.otherClub || "Other"}
+                                      </option>
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <div style={styles.settingsLabel}>
+                                      {tournamentText.maxTeamsLabel}
+                                    </div>
+                                    <input
+                                      style={styles.input}
+                                      type="number"
+                                      value={series.maxTeams || ""}
+                                      onChange={(e) =>
+                                        updateTournamentSeries(series.id, {
+                                          maxTeams: e.target.value,
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                  <div>
+                                    <div style={styles.settingsLabel}>
+                                      {tournamentText.minimumTeamsLabel}
+                                    </div>
+                                    <input
+                                      style={styles.input}
+                                      type="number"
+                                      value={series.minimumTeams || ""}
+                                      onChange={(e) =>
+                                        updateTournamentSeries(series.id, {
+                                          minimumTeams: e.target.value,
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                  <div>
+                                    <div style={styles.settingsLabel}>
+                                      {tournamentText.startTimeLabel}
+                                    </div>
+                                    <input
+                                      style={styles.input}
+                                      type="time"
+                                      value={series.startTime || ""}
+                                      onChange={(e) =>
+                                        updateTournamentSeries(series.id, {
+                                          startTime: e.target.value,
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                  <div>
+                                    <div style={styles.settingsLabel}>
+                                      {tournamentText.prizeLabel}
+                                    </div>
+                                    <input
+                                      style={styles.input}
+                                      value={series.prizeText || ""}
+                                      onChange={(e) =>
+                                        updateTournamentSeries(series.id, {
+                                          prizeText: e.target.value,
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                  <div>
+                                    <div style={styles.settingsLabel}>
+                                      {tournamentText.feeLabel}
+                                    </div>
+                                    <input
+                                      style={styles.input}
+                                      value={series.feeText || ""}
+                                      onChange={(e) =>
+                                        updateTournamentSeries(series.id, {
+                                          feeText: e.target.value,
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <div style={styles.settingsLabel}>
+                                    {tournamentText.notesLabel}
+                                  </div>
+                                  <textarea
+                                    style={styles.textarea}
+                                    value={series.notes || ""}
+                                    onChange={(e) =>
+                                      updateTournamentSeries(series.id, {
+                                        notes: e.target.value,
+                                      })
+                                    }
+                                  />
+                                </div>
+
+                                <button
+                                  style={styles.dangerButtonCompact}
+                                  onClick={() =>
+                                    removeTournamentSeries(series.id)
+                                  }
+                                >
+                                  {tournamentText.removeSeries}
+                                </button>
+                              </div>
+                            ))}
                           </div>
                         )}
                       </div>
                     )}
                   </div>
                 </>
+              ) : isTournamentListLoading ? (
+                <div style={styles.tournamentMutedPanel}>
+                  {tournamentText.tournamentSyncLoading}
+                </div>
               ) : (
                 <div style={styles.tournamentEmptyState}>
                   <div style={styles.tournamentPanelTitle}>
@@ -5230,6 +10472,10 @@ const savedRound = readStorageWithTtl(
         )}
       </div>
     );
+  }
+
+  if (publicTournamentRequestActive) {
+    return renderPublicTournamentPage(publicTournament, publicTournamentLoadStatus);
   }
 
   return (
@@ -5252,7 +10498,6 @@ const savedRound = readStorageWithTtl(
                       <div style={styles.profileCompactName}>
                         {auth.username}
                       </div>
-                      <div style={styles.profileCompactRole}>{auth.role}</div>
                     </div>
 
                     <div style={styles.profileCompactLanguageRow}>
@@ -5324,6 +10569,8 @@ const savedRound = readStorageWithTtl(
 
           {loginMessage && <div style={styles.loginMessage}>{loginMessage}</div>}
         </div>
+
+        {!auth.loggedIn && renderPublicUpcomingTournaments()}
 
         {auth.loggedIn && auth.role === "admin" && (
           <div style={styles.adminCard}>
@@ -5636,7 +10883,24 @@ const savedRound = readStorageWithTtl(
               ...styles.tabButton,
               ...(activeTab === "tournament" ? styles.tabButtonActive : {}),
             }}
-            onClick={() => setActiveTab("tournament")}
+            onClick={() => {
+              setActiveTab("tournament");
+              setShowTournamentSetupPanel(true);
+
+              const scopedTournaments = filterTournamentsForUsername(
+                tournaments,
+                auth.username
+              );
+              const preferredId = getPreferredActiveTournamentId(
+                scopedTournaments,
+                auth.username,
+                activeTournamentId
+              );
+
+              if (preferredId && preferredId !== activeTournamentId) {
+                setActiveTournamentId(preferredId);
+              }
+            }}
         >
             {tournamentText.tabTitle}
           </button>
@@ -6506,7 +11770,7 @@ const savedRound = readStorageWithTtl(
         )}
 
         {activeTab === "tournament" && renderTournamentDashboard()}
-        
+
       {editingPlayer && (
         <div style={styles.modalOverlay} onClick={closeEditPlayer}>
           <div style={styles.modalCard} onClick={(e) => e.stopPropagation()}>
@@ -7217,6 +12481,17 @@ const styles = {
     fontSize: "12px",
   },
 
+  dangerButtonCompact: {
+    border: "1px solid #fecaca",
+    borderRadius: "10px",
+    padding: "8px 10px",
+    background: "#fee2e2",
+    color: "#991b1b",
+    fontWeight: "700",
+    cursor: "pointer",
+    fontSize: "12px",
+  },
+
   profileCompactLanguageRow: {
     display: "flex",
     gap: "4px",
@@ -7304,6 +12579,732 @@ const styles = {
     resize: "vertical",
   },
 
+  publicLandingSection: {
+    display: "grid",
+    gap: "18px",
+    padding: "20px",
+    borderRadius: "24px",
+    background: "#052e24",
+    border: "1px solid rgba(34,197,94,0.24)",
+    boxShadow: "0 18px 42px rgba(6,78,59,0.18)",
+    minWidth: 0,
+  },
+
+  publicLandingHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "16px",
+    alignItems: "flex-end",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+
+  publicLandingEyebrow: {
+    color: "#86efac",
+    fontSize: "11px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+
+  publicLandingTitle: {
+    margin: "4px 0 0",
+    color: "#fff",
+    fontSize: "clamp(24px, 5vw, 42px)",
+    lineHeight: 1.05,
+    fontWeight: "950",
+    overflowWrap: "anywhere",
+  },
+
+  publicLandingSubtitle: {
+    margin: "8px 0 0",
+    color: "#bbf7d0",
+    fontSize: "14px",
+    lineHeight: 1.55,
+    maxWidth: "620px",
+    fontWeight: "650",
+  },
+
+  publicLandingFilters: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+  },
+
+  publicLandingSelect: {
+    border: "1px solid rgba(187,247,208,0.28)",
+    borderRadius: "999px",
+    padding: "9px 12px",
+    background: "rgba(255,255,255,0.08)",
+    color: "#ecfdf5",
+    fontSize: "12px",
+    fontWeight: "800",
+  },
+
+  publicLandingState: {
+    padding: "20px",
+    borderRadius: "18px",
+    background: "rgba(255,255,255,0.08)",
+    border: "1px dashed rgba(187,247,208,0.24)",
+    color: "#d1fae5",
+    fontSize: "13px",
+    fontWeight: "800",
+    textAlign: "center",
+  },
+
+  publicTournamentCardGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+    gap: "14px",
+    minWidth: 0,
+  },
+
+  publicTournamentPosterCard: {
+    display: "grid",
+    gridTemplateRows: "auto minmax(0, 1fr)",
+    overflow: "hidden",
+    borderRadius: "22px",
+    border: "1px solid rgba(134,239,172,0.34)",
+    color: "#fff",
+    minWidth: 0,
+    boxShadow: "0 18px 34px rgba(2,6,23,0.24)",
+  },
+
+  publicTournamentPosterImage: {
+    minHeight: "150px",
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    borderBottom: "1px solid rgba(255,255,255,0.12)",
+  },
+
+  publicTournamentPosterBody: {
+    display: "grid",
+    gap: "13px",
+    padding: "17px",
+    minWidth: 0,
+  },
+
+  publicTournamentPosterTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "8px",
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+
+  publicTournamentPosterDate: {
+    borderRadius: "999px",
+    padding: "7px 10px",
+    color: "#052e16",
+    fontSize: "11px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+  },
+
+  publicTournamentPosterBadges: {
+    display: "flex",
+    gap: "6px",
+    flexWrap: "wrap",
+  },
+
+  publicTournamentPosterBadge: {
+    borderRadius: "999px",
+    padding: "6px 8px",
+    background: "rgba(255,255,255,0.10)",
+    border: "1px solid rgba(255,255,255,0.14)",
+    color: "#d1fae5",
+    fontSize: "10px",
+    fontWeight: "900",
+  },
+
+  publicTournamentPosterTitle: {
+    margin: 0,
+    color: "#fff",
+    fontSize: "24px",
+    lineHeight: 1.05,
+    fontWeight: "950",
+    overflowWrap: "anywhere",
+  },
+
+  publicTournamentPosterSummary: {
+    margin: 0,
+    color: "#d1fae5",
+    fontSize: "13px",
+    lineHeight: 1.55,
+    fontWeight: "650",
+  },
+
+  publicTournamentPosterMetaGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 130px), 1fr))",
+    gap: "9px",
+    minWidth: 0,
+  },
+
+  publicTournamentPosterFood: {
+    borderRadius: "14px",
+    padding: "10px 12px",
+    background: "rgba(255,255,255,0.08)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    color: "#fef3c7",
+    fontSize: "12px",
+    fontWeight: "850",
+  },
+
+  publicTournamentPosterButton: {
+    border: "none",
+    borderRadius: "14px",
+    padding: "12px 14px",
+    background: "#fff",
+    color: "#052e16",
+    fontSize: "13px",
+    fontWeight: "950",
+    cursor: "pointer",
+  },
+
+  tournamentPromotionHeaderActions: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: "10px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+
+  tournamentPromotionVisibleBadge: {
+    borderRadius: "999px",
+    padding: "7px 10px",
+    background: "#dcfce7",
+    color: "#166534",
+    border: "1px solid #bbf7d0",
+    fontSize: "11px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+  },
+
+  tournamentPromotionNotice: {
+    padding: "13px 14px",
+    borderRadius: "16px",
+    background: "#fffbeb",
+    border: "1px solid #fde68a",
+    color: "#92400e",
+    fontSize: "13px",
+    fontWeight: "850",
+    lineHeight: 1.45,
+  },
+
+  tournamentPromotionActionRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    flexWrap: "wrap",
+  },
+
+  tournamentPromotionPreviewWrap: {
+    display: "grid",
+    gap: "10px",
+    padding: "15px",
+    borderRadius: "18px",
+    background: "#f8fafc",
+    border: "1px solid #dbe3ef",
+    minWidth: 0,
+  },
+
+  tournamentPromotionPreviewCard: {
+    borderRadius: "20px",
+    overflow: "hidden",
+    border: "1px solid #22c55e",
+    color: "#fff",
+    display: "grid",
+    minWidth: 0,
+    boxShadow: "0 16px 28px rgba(2,6,23,0.18)",
+  },
+
+  tournamentPromotionPreviewImage: {
+    minHeight: "120px",
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    borderBottom: "1px solid rgba(255,255,255,0.12)",
+  },
+
+  tournamentPromotionPreviewBody: {
+    display: "grid",
+    gap: "12px",
+    padding: "16px",
+    minWidth: 0,
+  },
+
+  tournamentPromotionPreviewTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "8px",
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+
+  tournamentPromotionPreviewDate: {
+    borderRadius: "999px",
+    padding: "7px 10px",
+    color: "#052e16",
+    fontSize: "11px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+  },
+
+  tournamentPromotionPreviewTitle: {
+    margin: 0,
+    color: "#fff",
+    fontSize: "22px",
+    lineHeight: 1.08,
+    fontWeight: "950",
+    overflowWrap: "anywhere",
+  },
+
+  tournamentPromotionPreviewSummary: {
+    margin: 0,
+    color: "#d1fae5",
+    fontSize: "13px",
+    lineHeight: 1.5,
+    fontWeight: "650",
+  },
+
+  tournamentPromotionPreviewMeta: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 130px), 1fr))",
+    gap: "9px",
+    minWidth: 0,
+  },
+
+  tournamentMarketingSeriesList: {
+    display: "grid",
+    gap: "14px",
+    minWidth: 0,
+  },
+
+  tournamentMarketingSeriesCard: {
+    display: "grid",
+    gap: "13px",
+    padding: "15px",
+    borderRadius: "18px",
+    background: "#fff",
+    border: "1px solid #dbe3ef",
+    minWidth: 0,
+  },
+
+  publicTournamentPage: {
+    minHeight: "100vh",
+    background: "#04130f",
+    color: "#f8fafc",
+    padding: "18px",
+    boxSizing: "border-box",
+  },
+
+  publicTournamentShell: {
+    width: "min(1120px, 100%)",
+    margin: "0 auto",
+    display: "grid",
+    gap: "18px",
+  },
+
+  publicTournamentTopbar: {
+    display: "flex",
+    justifyContent: "flex-end",
+  },
+
+  publicTournamentBackButton: {
+    border: "1px solid rgba(255,255,255,0.18)",
+    borderRadius: "999px",
+    padding: "10px 14px",
+    background: "rgba(255,255,255,0.08)",
+    color: "#f8fafc",
+    fontSize: "13px",
+    fontWeight: "900",
+    cursor: "pointer",
+  },
+
+  publicTournamentEmpty: {
+    display: "grid",
+    gap: "14px",
+    justifyItems: "center",
+    textAlign: "center",
+    padding: "64px 20px",
+    borderRadius: "22px",
+    background: "#0b1f18",
+    border: "1px solid rgba(110,231,183,0.22)",
+    boxShadow: "0 24px 60px rgba(0,0,0,0.28)",
+  },
+
+  publicTournamentStatusPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "999px",
+    padding: "7px 11px",
+    background: "rgba(34,197,94,0.18)",
+    color: "#86efac",
+    border: "1px solid rgba(134,239,172,0.28)",
+    fontSize: "11px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+
+  publicTournamentCodePill: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "999px",
+    padding: "7px 11px",
+    background: "rgba(15,23,42,0.72)",
+    color: "#d1fae5",
+    border: "1px solid rgba(209,250,229,0.22)",
+    fontSize: "11px",
+    fontWeight: "900",
+    overflowWrap: "anywhere",
+  },
+
+  publicTournamentEmptyTitle: {
+    margin: 0,
+    color: "#fff",
+    fontSize: "clamp(28px, 7vw, 54px)",
+    lineHeight: 1,
+    fontWeight: "900",
+  },
+
+  publicTournamentMuted: {
+    margin: 0,
+    color: "#a7f3d0",
+    fontSize: "14px",
+    lineHeight: 1.6,
+    fontWeight: "700",
+  },
+
+  publicTournamentHero: {
+    display: "grid",
+    gap: "12px",
+    padding: "20px",
+    borderRadius: "20px",
+    background: "#0b1f18",
+    border: "1px solid rgba(110,231,183,0.24)",
+    boxShadow: "0 24px 60px rgba(0,0,0,0.28)",
+    minWidth: 0,
+  },
+
+  publicTournamentHeroTop: {
+    display: "flex",
+    gap: "8px",
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+
+  publicTournamentTitle: {
+    margin: 0,
+    color: "#fff",
+    fontSize: "clamp(30px, 7vw, 56px)",
+    lineHeight: 1,
+    fontWeight: "900",
+    overflowWrap: "anywhere",
+  },
+
+  publicTournamentDescription: {
+    margin: 0,
+    maxWidth: "760px",
+    color: "#d1fae5",
+    fontSize: "15px",
+    lineHeight: 1.7,
+    fontWeight: "650",
+  },
+
+  publicTournamentSummaryGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 120px), 150px))",
+    gap: "8px",
+    minWidth: 0,
+  },
+
+  publicTournamentSummaryCard: {
+    display: "grid",
+    gap: "4px",
+    minHeight: "56px",
+    padding: "10px 12px",
+    borderRadius: "13px",
+    background: "rgba(255,255,255,0.08)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    minWidth: 0,
+  },
+
+  publicTournamentSection: {
+    display: "grid",
+    gap: "14px",
+    padding: "18px",
+    borderRadius: "22px",
+    background: "#071a14",
+    border: "1px solid rgba(110,231,183,0.18)",
+    minWidth: 0,
+  },
+
+  publicTournamentSectionHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "12px",
+    alignItems: "center",
+    flexWrap: "wrap",
+    color: "#ecfdf5",
+    fontSize: "15px",
+    fontWeight: "900",
+  },
+
+  publicTournamentGroupGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
+    gap: "12px",
+    minWidth: 0,
+  },
+
+  publicTournamentGroupCard: {
+    display: "grid",
+    gap: "12px",
+    padding: "15px",
+    borderRadius: "18px",
+    background: "#0d241c",
+    border: "1px solid rgba(134,239,172,0.18)",
+    minWidth: 0,
+  },
+
+  publicTournamentGroupHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "10px",
+    alignItems: "center",
+    color: "#fff",
+    minWidth: 0,
+  },
+
+  publicTournamentGroupTitle: {
+    margin: 0,
+    color: "#fff",
+    fontSize: "15px",
+    fontWeight: "900",
+    overflowWrap: "anywhere",
+  },
+
+  publicTournamentGroupCode: {
+    minWidth: "34px",
+    height: "30px",
+    borderRadius: "999px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid rgba(255,255,255,0.14)",
+    fontSize: "12px",
+    fontWeight: "900",
+  },
+
+  publicTournamentTeamList: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+
+  publicTournamentTeamRow: {
+    display: "grid",
+    gridTemplateColumns: "44px minmax(0, 1fr)",
+    alignItems: "center",
+    gap: "8px",
+    padding: "10px",
+    borderRadius: "13px",
+    background: "rgba(255,255,255,0.07)",
+    border: "1px solid rgba(255,255,255,0.09)",
+    color: "#d1fae5",
+    fontSize: "12px",
+    fontWeight: "800",
+    minWidth: 0,
+  },
+
+  publicTournamentSlotBadge: {
+    minWidth: "34px",
+    height: "26px",
+    borderRadius: "9px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    border: "1px solid rgba(255,255,255,0.12)",
+    fontSize: "11px",
+    fontWeight: "900",
+  },
+
+  publicTournamentBracketGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 230px), 1fr))",
+    gap: "12px",
+    minWidth: 0,
+  },
+
+  publicTournamentBracketStage: {
+    display: "grid",
+    gap: "10px",
+    alignContent: "start",
+    minWidth: 0,
+  },
+
+  publicTournamentBracketTitle: {
+    color: "#86efac",
+    fontSize: "11px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+
+  publicTournamentBracketMatch: {
+    display: "grid",
+    gap: "8px",
+    padding: "13px",
+    borderRadius: "16px",
+    background: "#0d241c",
+    border: "1px solid rgba(134,239,172,0.18)",
+    minWidth: 0,
+  },
+
+  publicTournamentMatchLabel: {
+    color: "#ecfdf5",
+    fontSize: "12px",
+    fontWeight: "900",
+  },
+
+  publicTournamentBracketLine: {
+    display: "grid",
+    gap: "3px",
+    padding: "10px",
+    borderRadius: "12px",
+    background: "rgba(255,255,255,0.07)",
+    border: "1px solid rgba(255,255,255,0.10)",
+    color: "#d1fae5",
+    fontSize: "12px",
+    fontWeight: "800",
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
+
+  publicTournamentSourceBadge: {
+    justifySelf: "start",
+    borderRadius: "999px",
+    padding: "4px 7px",
+    border: "1px solid rgba(255,255,255,0.12)",
+    color: "#d1fae5",
+    fontSize: "10px",
+    fontWeight: "900",
+  },
+
+  publicTournamentBracketLineWinner: {
+    background: "rgba(34,197,94,0.22)",
+    borderColor: "rgba(134,239,172,0.48)",
+    color: "#fff",
+  },
+
+  publicTournamentMatchGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 230px), 1fr))",
+    gap: "12px",
+    minWidth: 0,
+  },
+
+  publicTournamentMatchCard: {
+    display: "grid",
+    gap: "10px",
+    padding: "14px",
+    borderRadius: "17px",
+    background: "#0d241c",
+    border: "1px solid rgba(134,239,172,0.18)",
+    minWidth: 0,
+  },
+
+  publicTournamentMatchTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "8px",
+    flexWrap: "wrap",
+    color: "#86efac",
+    fontSize: "11px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+
+  publicTournamentTeams: {
+    color: "#fff",
+    fontSize: "15px",
+    fontWeight: "900",
+    overflowWrap: "anywhere",
+  },
+
+  publicTournamentScore: {
+    justifySelf: "start",
+    borderRadius: "999px",
+    padding: "6px 10px",
+    background: "rgba(34,197,94,0.18)",
+    color: "#bbf7d0",
+    fontSize: "12px",
+    fontWeight: "900",
+  },
+
+  publicTournamentStandingsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
+    gap: "12px",
+    minWidth: 0,
+  },
+
+  publicTournamentStandingsCard: {
+    display: "grid",
+    gap: "12px",
+    padding: "15px",
+    borderRadius: "18px",
+    background: "#0d241c",
+    border: "1px solid rgba(134,239,172,0.18)",
+    borderTop: "4px solid rgba(134,239,172,0.30)",
+    borderLeft: "5px solid rgba(134,239,172,0.30)",
+    minWidth: 0,
+  },
+
+  publicTournamentStandingsHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "10px",
+    alignItems: "center",
+    minWidth: 0,
+  },
+
+  publicTournamentTableWrap: {
+    overflowX: "auto",
+    WebkitOverflowScrolling: "touch",
+    minWidth: 0,
+  },
+
+  publicTournamentTable: {
+    width: "100%",
+    minWidth: "520px",
+    borderCollapse: "collapse",
+    color: "#d1fae5",
+    fontSize: "12px",
+    textAlign: "center",
+  },
+
+  publicTournamentTableHead: {
+    padding: "9px 8px",
+    color: "#86efac",
+    fontSize: "11px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+    borderBottom: "1px solid rgba(134,239,172,0.20)",
+  },
+
+  publicTournamentTableCell: {
+    padding: "10px 8px",
+    borderBottom: "1px solid rgba(255,255,255,0.08)",
+    fontWeight: "800",
+  },
+
   tournamentDashboardSection: {
     display: "grid",
     gap: "20px",
@@ -7331,6 +13332,10 @@ const styles = {
     boxSizing: "border-box",
   },
 
+  tournamentDashboardShellCollapsed: {
+    gridTemplateColumns: "minmax(0, 1fr)",
+  },
+
   tournamentDashboardShellMobile: {
     gridTemplateColumns: "minmax(0, 1fr)",
     gap: "16px",
@@ -7353,7 +13358,7 @@ const styles = {
   tournamentPanelHeader: {
     display: "flex",
     justifyContent: "space-between",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: "14px",
     paddingBottom: "2px",
   },
@@ -7386,13 +13391,32 @@ const styles = {
   },
 
   tournamentMessage: {
-    padding: "9px 10px",
+    position: "fixed",
+    right: "18px",
+    bottom: "18px",
+    zIndex: 50,
+    maxWidth: "min(360px, calc(100vw - 36px))",
+    padding: "11px 13px",
     background: "#eef2ff",
     border: "1px solid #c7d2fe",
-    borderRadius: "10px",
+    borderRadius: "14px",
     color: "#1e3a8a",
     fontSize: "12px",
-    fontWeight: "700",
+    fontWeight: "800",
+    boxShadow: "0 18px 34px rgba(15,23,42,0.18)",
+  },
+
+  tournamentNewButton: {
+    border: "1px solid rgba(255,255,255,0.18)",
+    borderRadius: "14px",
+    padding: "11px 16px",
+    background: "#22c55e",
+    color: "#052e16",
+    fontSize: "13px",
+    fontWeight: "900",
+    cursor: "pointer",
+    minWidth: "78px",
+    boxShadow: "0 10px 20px rgba(34,197,94,0.22)",
   },
 
   tournamentBlockTitle: {
@@ -7419,7 +13443,9 @@ const styles = {
     cursor: "pointer",
     textAlign: "left",
     display: "grid",
-    gap: "4px",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: "10px",
   },
 
   tournamentListItemActive: {
@@ -7438,6 +13464,37 @@ const styles = {
     fontSize: "11px",
     color: "#6b7280",
     fontWeight: "700",
+  },
+
+  tournamentListStatusBadge: {
+    borderRadius: "999px",
+    padding: "5px 8px",
+    background: "#f1f5f9",
+    color: "#475569",
+    fontSize: "10px",
+    fontWeight: "900",
+    whiteSpace: "nowrap",
+  },
+
+  tournamentListStatusBadgeLive: {
+    background: "#dcfce7",
+    color: "#166534",
+  },
+
+  tournamentListItemStats: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    marginTop: "4px",
+  },
+
+  tournamentListItemStatsChip: {
+    borderRadius: "999px",
+    padding: "4px 7px",
+    background: "#eef2ff",
+    color: "#334155",
+    fontSize: "10px",
+    fontWeight: "800",
   },
 
   tournamentStatusBadge: {
@@ -7540,6 +13597,18 @@ const styles = {
     gap: "8px",
     alignItems: "center",
     minWidth: 0,
+  },
+
+  tournamentRegistrationToggle: {
+    border: "1px solid rgba(255,255,255,0.18)",
+    borderRadius: "12px",
+    padding: "10px 12px",
+    background: "rgba(255,255,255,0.08)",
+    color: "#e5e7eb",
+    fontSize: "12px",
+    fontWeight: "900",
+    cursor: "pointer",
+    justifySelf: "start",
   },
 
   tournamentTeamList: {
@@ -7670,10 +13739,23 @@ const styles = {
   },
 
   tournamentHeroMeta: {
-    marginTop: "6px",
+    marginTop: "10px",
     fontSize: "12px",
     color: "#cbd5e1",
     fontWeight: "700",
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "8px",
+    alignItems: "center",
+  },
+
+  tournamentHeroChip: {
+    borderRadius: "999px",
+    padding: "8px 12px",
+    background: "rgba(255,255,255,0.10)",
+    color: "#dbeafe",
+    fontSize: "11px",
+    fontWeight: "900",
   },
 
   tournamentHeroRules: {
@@ -7698,6 +13780,28 @@ const styles = {
     color: "#fff",
     fontSize: "11px",
     fontWeight: "800",
+  },
+
+  tournamentSyncBadge: {
+    borderRadius: "999px",
+    padding: "8px 12px",
+    background: "rgba(22,163,74,0.22)",
+    color: "#bbf7d0",
+    border: "1px solid rgba(187,247,208,0.28)",
+    fontSize: "11px",
+    fontWeight: "900",
+  },
+
+  tournamentSyncBadgeError: {
+    background: "rgba(220,38,38,0.22)",
+    color: "#fecaca",
+    borderColor: "rgba(254,202,202,0.38)",
+  },
+
+  tournamentSyncBadgeLocal: {
+    background: "rgba(234,179,8,0.20)",
+    color: "#fef3c7",
+    borderColor: "rgba(254,243,199,0.34)",
   },
 
   tournamentLightButton: {
@@ -7863,6 +13967,24 @@ const styles = {
     display: "grid",
     gap: "8px",
     minHeight: "78px",
+  },
+
+  tournamentCompactGroupGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+    gap: "12px",
+    minWidth: 0,
+  },
+
+  tournamentCompactGroupCard: {
+    display: "grid",
+    gap: "10px",
+    borderRadius: "16px",
+    padding: "14px",
+    background: "#fff",
+    border: "1px solid #dbe3ef",
+    minWidth: 0,
+    boxSizing: "border-box",
   },
 
   tournamentSurface: {
@@ -8064,21 +14186,53 @@ const styles = {
     minWidth: 0,
   },
 
+  tournamentScheduleHeaderRow: {
+    display: "grid",
+    gridTemplateColumns: "84px minmax(0, 1fr)",
+    borderBottom: "1px solid #dbe3ef",
+    minWidth: 0,
+  },
+
+  tournamentScheduleCornerCell: {
+    display: "flex",
+    alignItems: "center",
+    padding: "9px 10px",
+    background: "#020617",
+    color: "#dbeafe",
+    fontSize: "10px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+    minWidth: 0,
+  },
+
+  tournamentScheduleCourtHeader: {
+    padding: "9px 10px",
+    background: "#0f172a",
+    color: "#fff",
+    fontSize: "10px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+    textAlign: "center",
+    minWidth: 0,
+  },
+
   tournamentScheduleRow: {
     display: "grid",
-    gridTemplateColumns: "124px minmax(0, 1fr)",
+    gridTemplateColumns: "84px minmax(0, 1fr)",
     borderBottom: "1px solid #e2e8f0",
     minWidth: 0,
   },
 
   tournamentScheduleTimeCell: {
     display: "grid",
-    gap: "4px",
+    gap: "3px",
     alignContent: "center",
-    padding: "13px 12px",
+    padding: "9px 10px",
     background: "#0f172a",
     color: "#fff",
-    fontSize: "11px",
+    fontSize: "10px",
     fontWeight: "800",
     minWidth: 0,
   },
@@ -8092,15 +14246,160 @@ const styles = {
 
   tournamentScheduleCourt: {
     display: "grid",
-    gap: "6px",
-    minHeight: "82px",
-    padding: "13px",
+    gap: "5px",
+    minHeight: "62px",
+    padding: "9px 10px",
     background: "#f8fafc",
     color: "#111827",
     fontSize: "12px",
     fontWeight: "800",
     minWidth: 0,
     overflowWrap: "anywhere",
+  },
+
+  tournamentScheduleCourtTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+    flexWrap: "wrap",
+  },
+
+  tournamentScheduleGroupBadge: {
+    justifySelf: "start",
+    borderRadius: "999px",
+    padding: "4px 7px",
+    border: "1px solid #dbe3ef",
+    fontSize: "10px",
+    fontWeight: "900",
+  },
+
+  tournamentScheduleRoundLabel: {
+    color: "#64748b",
+    fontWeight: "800",
+  },
+
+  tournamentScheduleMatchTeams: {
+    display: "grid",
+    gap: "1px",
+    color: "#111827",
+    lineHeight: 1.18,
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
+
+  tournamentScheduleTeamLine: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: "8px",
+    minWidth: 0,
+  },
+
+  tournamentScheduleTeamName: {
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
+
+  tournamentScheduleReadonlyScore: {
+    minWidth: "22px",
+    color: "#111827",
+    fontSize: "12px",
+    fontWeight: "900",
+    textAlign: "right",
+  },
+
+  tournamentScheduleVsLabel: {
+    color: "#64748b",
+    fontSize: "10px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+
+  tournamentScheduleStatusBadge: {
+    justifySelf: "start",
+    borderRadius: "999px",
+    padding: "4px 7px",
+    background: "#fef3c7",
+    color: "#92400e",
+    fontSize: "10px",
+    fontWeight: "900",
+  },
+
+  tournamentScheduleStatusBadgeDone: {
+    background: "#dcfce7",
+    color: "#166534",
+  },
+
+  tournamentScheduleCompleteButton: {
+    border: "1px solid #334155",
+    borderRadius: "8px",
+    padding: "4px 7px",
+    background: "#fff",
+    color: "#0f172a",
+    fontSize: "10px",
+    fontWeight: "900",
+    lineHeight: 1.1,
+    cursor: "pointer",
+    boxShadow: "0 1px 0 rgba(15,23,42,0.08)",
+  },
+
+  tournamentScheduleMetaRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "5px",
+    flexWrap: "wrap",
+    minHeight: "18px",
+  },
+
+  tournamentScheduleScoreStepper: {
+    display: "grid",
+    gridTemplateColumns: "18px 26px 18px",
+    gap: 0,
+    alignItems: "center",
+    border: "1px solid #cbd5e1",
+    borderRadius: "999px",
+    overflow: "hidden",
+    background: "#fff",
+    minWidth: 0,
+  },
+
+  tournamentScheduleScoreButton: {
+    width: "18px",
+    height: "22px",
+    border: "none",
+    borderRadius: 0,
+    background: "#f8fafc",
+    color: "#0f172a",
+    fontSize: "11px",
+    fontWeight: "900",
+    cursor: "pointer",
+    lineHeight: 1,
+    padding: 0,
+  },
+
+  tournamentScheduleScoreInput: {
+    width: "26px",
+    minWidth: 0,
+    height: "22px",
+    boxSizing: "border-box",
+    border: "none",
+    borderLeft: "1px solid #e2e8f0",
+    borderRight: "1px solid #e2e8f0",
+    borderRadius: 0,
+    background: "#fff",
+    color: "#111827",
+    fontSize: "11px",
+    fontWeight: "900",
+    textAlign: "center",
+    padding: "0 2px",
+  },
+
+  tournamentScheduleFinishWarning: {
+    color: "#b45309",
+    fontSize: "10px",
+    fontWeight: "900",
+    lineHeight: 1.25,
   },
 
   tournamentScheduleMore: {
@@ -8188,6 +14487,7 @@ const styles = {
     minWidth: "34px",
     height: "26px",
     borderRadius: "9px",
+    border: "1px solid transparent",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -8290,6 +14590,17 @@ const styles = {
     cursor: "pointer",
     minWidth: 0,
     overflowWrap: "anywhere",
+  },
+
+  tournamentSourceBadge: {
+    justifySelf: "start",
+    borderRadius: "999px",
+    padding: "4px 7px",
+    border: "1px solid #dbeafe",
+    color: "#1d4ed8",
+    background: "#eff6ff",
+    fontSize: "10px",
+    fontWeight: "900",
   },
 
   tournamentBracketLineWinner: {
@@ -8471,6 +14782,80 @@ const styles = {
     border: "1px solid #e2e8f0",
     minWidth: 0,
     overflowWrap: "anywhere",
+  },
+
+  tournamentShareTools: {
+    display: "grid",
+    gap: "14px",
+    minWidth: 0,
+  },
+
+  tournamentShareCodeCard: {
+    display: "grid",
+    gap: "5px",
+    padding: "15px",
+    borderRadius: "16px",
+    background: "#0f172a",
+    color: "#fff",
+    border: "1px solid #1f2937",
+    minWidth: 0,
+  },
+
+  tournamentShareUrlRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto auto",
+    gap: "9px",
+    alignItems: "center",
+    minWidth: 0,
+  },
+
+  tournamentShareUrlLabel: {
+    color: "#111827",
+    fontSize: "12px",
+    fontWeight: "900",
+  },
+
+  tournamentShareInput: {
+    width: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+    border: "1px solid #d1d5db",
+    borderRadius: "12px",
+    padding: "11px 12px",
+    background: "#fff",
+    color: "#111827",
+    fontSize: "12px",
+    fontWeight: "700",
+  },
+
+  tournamentShareLockedCard: {
+    display: "grid",
+    gap: "8px",
+    padding: "18px",
+    borderRadius: "18px",
+    background: "#fff7ed",
+    border: "1px solid #fed7aa",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  tournamentStandingsHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "10px",
+    alignItems: "center",
+    minWidth: 0,
+  },
+
+  tournamentShareInfoBox: {
+    padding: "14px 15px",
+    borderRadius: "16px",
+    background: "#fff7ed",
+    border: "1px solid #fed7aa",
+    color: "#9a3412",
+    fontSize: "13px",
+    fontWeight: "800",
+    lineHeight: 1.45,
   },
 
   tournamentShareState: {
