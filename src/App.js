@@ -355,6 +355,116 @@ function getLanguageStorageKey(username) {
   return `volleyball-language-${String(username || "guest").trim()}`;
 }
 
+const USER_ACCESS_STORAGE_KEY = "volleyball-user-module-access";
+
+function readAccessBoolean(value, fallback = false) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  const normalized = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "on"].includes(normalized)) return true;
+  if (["false", "0", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
+function getUserAccessStorageUsername(username) {
+  return String(username || "").trim().toLowerCase();
+}
+
+function normalizeUserAccess(user = {}) {
+  const access = user.access || {};
+  const roleAdmin = String(user.role || "").toLowerCase() === "admin";
+  const admin =
+    roleAdmin ||
+    readAccessBoolean(
+      access.admin ?? user.canAdmin ?? user.isAdmin ?? user.admin,
+      false
+    );
+  const hasTeamBuilderValue =
+    access.teamBuilder !== undefined || user.canUseTeamBuilder !== undefined;
+  const hasTournamentsValue =
+    access.tournaments !== undefined || user.canUseTournaments !== undefined;
+
+  return {
+    teamBuilder: admin
+      ? true
+      : readAccessBoolean(
+          access.teamBuilder ?? user.canUseTeamBuilder,
+          hasTeamBuilderValue ? false : true
+        ),
+    tournaments: admin
+      ? true
+      : readAccessBoolean(
+          access.tournaments ?? user.canUseTournaments,
+          hasTournamentsValue ? false : false
+        ),
+    admin,
+  };
+}
+
+function isAdminUser(user) {
+  return normalizeUserAccess(user).admin;
+}
+
+function canUseTeamBuilder(user) {
+  return normalizeUserAccess(user).teamBuilder;
+}
+
+function canUseTournaments(user) {
+  return normalizeUserAccess(user).tournaments;
+}
+
+function readStoredUserAccessOverrides() {
+  if (typeof window === "undefined") return {};
+
+  try {
+    const parsed = JSON.parse(
+      localStorage.getItem(USER_ACCESS_STORAGE_KEY) || "{}"
+    );
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function saveStoredUserAccessOverrides(overrides) {
+  if (typeof window === "undefined") return;
+
+  try {
+    localStorage.setItem(USER_ACCESS_STORAGE_KEY, JSON.stringify(overrides));
+  } catch (error) {
+    console.error("Could not save user access overrides:", error);
+  }
+}
+
+function applyUserAccessOverride(user, overrides = {}) {
+  const storageUsername = getUserAccessStorageUsername(user?.username);
+  const override = storageUsername ? overrides[storageUsername] || {} : {};
+  const access = normalizeUserAccess({
+    ...user,
+    access: {
+      ...(user?.access || {}),
+      ...override,
+    },
+    canUseTeamBuilder:
+      override.teamBuilder ?? user?.canUseTeamBuilder,
+    canUseTournaments:
+      override.tournaments ?? user?.canUseTournaments,
+    admin: override.admin ?? user?.admin,
+    isAdmin: override.admin ?? user?.isAdmin,
+  });
+
+  return {
+    ...user,
+    access,
+    canUseTeamBuilder: access.teamBuilder,
+    canUseTournaments: access.tournaments,
+    isAdmin: access.admin,
+  };
+}
+
 const TRANSLATIONS = {
   en: {
     trainer: "Trainer",
@@ -452,6 +562,15 @@ const TRANSLATIONS = {
     openTrainerSheet: "Open trainer sheet",
     trainerUsersTitle: "Trainer Users",
     trainerUsersSubtitle: "Admin can activate, deactivate, reset passwords and archive trainers",
+    adminAccessTitle: "Module access",
+    adminAccessSubtitle: "Choose which app modules each user can open.",
+    accessTeamBuilder: "Team Builder",
+    accessTournaments: "Tournaments",
+    accessAdmin: "Admin",
+    accessOn: "ON",
+    accessOff: "OFF",
+    accessSaved: "Access updated.",
+    noModuleAccess: "Your account does not have access yet.",
     noActiveTrainers: "No active trainers yet.",
     archivedTrainersSubtitle: "Archived trainers can be restored later",
     noArchivedTrainers: "No archived trainers.",
@@ -504,7 +623,7 @@ const TRANSLATIONS = {
     landingChipPublicPage: "Public page",
     landingChipGroupKnockout: "Group + knockout",
     landingChipOrganizerTools: "Organizer tools",
-    landingUpcomingTitle: "Upcoming volleyball tournaments",
+    landingUpcomingTitle: "Upcoming tournaments",
     landingOpenTournament: "View details",
     landingNoPublicTournaments: "No public tournaments yet.",
     landingPublishedAppear: "Published tournaments will appear here.",
@@ -523,6 +642,19 @@ const TRANSLATIONS = {
     landingControlSchedulePreview: "Mini schedule",
     landingControlCourtCount: "3 courts",
     landingControlMatchCount: "12 matches",
+    landingShowcaseKicker: "Product preview",
+    landingShowcaseSubtitle: "Team Builder + Tournaments",
+    landingShowcaseCreateTeams: "Create teams",
+    landingShowcaseBuildTournaments: "Build tournaments",
+    landingShowcaseLiveSchedule: "Live schedule",
+    landingShowcasePublicLive: "Public live view",
+    landingShowcaseStandingsFinals: "Standings & finals",
+    landingShowcaseCustomTheme: "Custom public theme",
+    landingShowcasePlayerPool: "Player pool",
+    landingShowcaseGeneratedTeams: "Generated teams",
+    landingShowcaseClasses: "Classes",
+    landingShowcasePublicPage: "Public page",
+    landingShowcaseFinished: "Finished",
     teamBuilder: "Team Builder",
   },
   no: {
@@ -621,6 +753,15 @@ const TRANSLATIONS = {
     openTrainerSheet: "Åpne trenerark",
     trainerUsersTitle: "Trenere",
     trainerUsersSubtitle: "Admin kan aktivere, deaktivere, tilbakestille passord og arkivere trenere",
+    adminAccessTitle: "Modultilgang",
+    adminAccessSubtitle: "Velg hvilke moduler hver bruker kan åpne.",
+    accessTeamBuilder: "Lagbygger",
+    accessTournaments: "Turneringer",
+    accessAdmin: "Admin",
+    accessOn: "PÅ",
+    accessOff: "AV",
+    accessSaved: "Tilgang oppdatert.",
+    noModuleAccess: "Kontoen din har ikke tilgang ennå.",
     noActiveTrainers: "Ingen aktive trenere ennå.",
     archivedTrainersSubtitle: "Arkiverte trenere kan gjenopprettes senere",
     noArchivedTrainers: "Ingen arkiverte trenere.",
@@ -673,7 +814,7 @@ const TRANSLATIONS = {
     landingChipPublicPage: "Offentlig side",
     landingChipGroupKnockout: "Gruppe + sluttspill",
     landingChipOrganizerTools: "Arrangørverktøy",
-    landingUpcomingTitle: "Kommende volleyballturneringer",
+    landingUpcomingTitle: "Kommende turneringer",
     landingOpenTournament: "Se turnering",
     landingNoPublicTournaments: "Ingen offentlige turneringer enda.",
     landingPublishedAppear: "Publiserte turneringer vises her.",
@@ -690,10 +831,64 @@ const TRANSLATIONS = {
     landingControlScores: "Score",
     landingControlPublicLink: "Offentlig lenke",
     landingControlSchedulePreview: "Mini kampoppsett",
+    landingShowcaseKicker: "Produktvisning",
+    landingShowcaseSubtitle: "Lagbygger + Turneringer",
+    landingShowcaseCreateTeams: "Lag lag",
+    landingShowcaseBuildTournaments: "Bygg turneringer",
+    landingShowcaseLiveSchedule: "Live kampoppsett",
+    landingShowcasePublicLive: "Offentlig live-visning",
+    landingShowcaseStandingsFinals: "Tabell og finaler",
+    landingShowcaseCustomTheme: "Egen offentlig stil",
+    landingShowcasePlayerPool: "Spillerliste",
+    landingShowcaseGeneratedTeams: "Genererte lag",
+    landingShowcaseClasses: "Klasser",
+    landingShowcasePublicPage: "Offentlig side",
+    landingShowcaseFinished: "Ferdig",
     landingControlCourtCount: "3 baner",
     landingControlMatchCount: "12 kamper",
     teamBuilder: "Lagbygger",
   },
+};
+
+TRANSLATIONS.dk = {
+  ...TRANSLATIONS.en,
+  logout: "Log ud",
+  loginOk: "Login ok.",
+  trainerLogin: "Log ind",
+  loginRequired: "Log ind for at fortsætte",
+  username: "Brugernavn",
+  password: "Adgangskode",
+  login: "Log ind",
+  loggingIn: "Logger ind...",
+  enterUsernamePassword: "Indtast brugernavn og adgangskode.",
+  loginFailed: "Login mislykkedes.",
+  appTitle: "Make Teams Pro",
+  appSubtitle: "Thines Vijay",
+  landingBrandSubtitle: "Turneringsstyring for volleyballarrangører",
+  landingOrganizerLogin: "Arrangørlogin",
+  landingLoginHelper: "Administrer dine turneringer.",
+  landingUpcomingTitle: "Kommende turneringer",
+  landingOpenTournament: "Se turnering",
+  landingNoPublicTournaments: "Ingen offentlige turneringer endnu.",
+  landingPublishedAppear: "Offentliggjorte turneringer vises her.",
+  landingAllCountries: "Alle lande",
+  landingAllTypes: "Alle typer",
+  landingStatusUpcoming: "Kommende",
+  landingStatusLive: "Live",
+  landingStatusPast: "Tidligere",
+  landingStatusCompleted: "Færdig",
+  landingShowcaseCreateTeams: "Lav hold",
+  landingShowcaseBuildTournaments: "Byg turneringer",
+  landingShowcaseLiveSchedule: "Live kampprogram",
+  landingShowcasePublicLive: "Offentlig livevisning",
+  landingShowcaseStandingsFinals: "Stilling og finaler",
+  landingShowcaseCustomTheme: "Eget offentligt tema",
+  landingShowcasePlayerPool: "Spillerliste",
+  landingShowcaseGeneratedTeams: "Genererede hold",
+  landingShowcaseClasses: "Klasser",
+  landingShowcasePublicPage: "Offentlig side",
+  landingShowcaseFinished: "Færdig",
+  teamBuilder: "Holdbygger",
 };
 
 function getPlayerViewModeStorageKey(username) {
@@ -1483,14 +1678,29 @@ function getSeriesPlayersPerTeam(series) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : "";
 }
 
-function getSeriesDisplayName(series, language = "en") {
-  const name = String(series?.name || "").trim();
-  if (name) return name;
+function getSeriesDisplayName(seriesOrName) {
+  const rawName =
+    typeof seriesOrName === "string"
+      ? seriesOrName
+      : String(seriesOrName?.name || "").trim();
+  const trimmedName = String(rawName || "").trim();
+  const playersPerTeam =
+    typeof seriesOrName === "object" ? getSeriesPlayersPerTeam(seriesOrName) : "";
 
-  const playersPerTeam = getSeriesPlayersPerTeam(series);
-  if (playersPerTeam) return `${playersPerTeam}-${language === "no" ? "manns" : "side"}`;
+  if (!trimmedName && playersPerTeam === 4) return "4-side";
+  if (!trimmedName && playersPerTeam === 5) return "5-side";
+  if (!trimmedName) return "";
 
-  return language === "no" ? "Klasse" : "Class";
+  return trimmedName
+    .replace(/^4\s*[- ]\s*(manns|side)\b/i, "4-side")
+    .replace(/^5\s*[- ]\s*(manns|side)\b/i, "5-side");
+}
+
+function getSeriesShortLabel(seriesOrName) {
+  const displayName = getSeriesDisplayName(seriesOrName);
+  if (/^4-side\b/i.test(displayName)) return "4S";
+  if (/^5-side\b/i.test(displayName)) return "5S";
+  return displayName;
 }
 
 function hasExplicitTournamentSeries(tournament) {
@@ -2058,7 +2268,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("players");
   const [dragging, setDragging] = useState(null);
   const [isMobile, setIsMobile] = useState(
-    typeof window !== "undefined" ? window.innerWidth <= 768 : true
+    typeof window !== "undefined" ? window.innerWidth < 900 : true
   );
 
   const [showAddForm, setShowAddForm] = useState(false);
@@ -2126,6 +2336,18 @@ export default function App() {
     useState(false);
 
   const [visibleActions, setVisibleActions] = useState(DEFAULT_VISIBLE_ACTIONS);
+  const [landingShowcaseIndex, setLandingShowcaseIndex] = useState(0);
+  const [isLandingShowcaseDragging, setIsLandingShowcaseDragging] =
+    useState(false);
+  const landingShowcaseTrackRef = useRef(null);
+  const landingShowcaseCardRefs = useRef([]);
+  const landingShowcaseDragRef = useRef({
+    active: false,
+    pointerId: null,
+    startX: 0,
+    scrollLeft: 0,
+    dragged: false,
+  });
   const [playerViewMode, setPlayerViewMode] = useState("all");
   const [language, setLanguage] = useState(() => {
     if (typeof window === "undefined") return "en";
@@ -2215,20 +2437,18 @@ export default function App() {
     playersPerTeamLabel: "Spillere per lag",
     allClassesLabel: "Alle klasser",
     addClass: "Legg til klasse",
-    addFourManns: "Legg til 4-manns",
-    addFiveManns: "Legg til 5-manns",
+    addFourManns: "Legg til 4-side",
+    addFiveManns: "Legg til 5-side",
     scheduleOrderLabel: "Kampoppsett-rekkefølge",
-    scheduleFourFirst: "4-manns først, så 5-manns",
-    scheduleFiveFirst: "5-manns først, så 4-manns",
+    scheduleFourFirst: "4-side først, så 5-side",
+    scheduleFiveFirst: "5-side først, så 4-side",
     scheduleManualOrder: "Manuell rekkefølge",
     scheduleAllowOverlap: "Tillat overlapp på ledige baner",
     classVisibilityTitle: "Klassevisning",
-    classVisibilityHint: "Velg hvilke klasser publikum skal se i live-visningen.",
+    classVisibilityHint: "Velg hvilke klasser publikum kan se på live-siden.",
     classStatusHidden: "Skjult",
     classStatusLive: "Live",
     classStatusCompleted: "Ferdig",
-    startClassLive: "Start live",
-    markClassFinished: "Marker ferdig",
     classFinishedSuffix: "ferdig",
     classLiveSuffix: "live",
     classLiveNowSuffix: "er live nå",
@@ -2296,6 +2516,7 @@ export default function App() {
     publicLinkCopyFailed: "Kunne ikke kopiere lenken.",
     publicNotFound: "Turnering ikke funnet eller ikke publisert.",
     openApp: "Åpne app",
+    publicPoweredBy: "Drevet av Make Teams Pro",
     loadingTournament: "Laster turnering...",
     tournamentSyncLoading: "Laster turneringer",
     tournamentSyncSaving: "Lagrer",
@@ -2605,11 +2826,11 @@ export default function App() {
     playersPerTeamLabel: "Players per team",
     allClassesLabel: "All classes",
     addClass: "Add class",
-    addFourManns: "Add 4-manns",
-    addFiveManns: "Add 5-manns",
+    addFourManns: "Add 4-side",
+    addFiveManns: "Add 5-side",
     scheduleOrderLabel: "Schedule order",
-    scheduleFourFirst: "4-manns first, then 5-manns",
-    scheduleFiveFirst: "5-manns first, then 4-manns",
+    scheduleFourFirst: "4-side first, then 5-side",
+    scheduleFiveFirst: "5-side first, then 4-side",
     scheduleManualOrder: "Manual order",
     scheduleAllowOverlap: "Allow overlap on free courts",
     classVisibilityTitle: "Class visibility",
@@ -2617,8 +2838,6 @@ export default function App() {
     classStatusHidden: "Hidden",
     classStatusLive: "Live",
     classStatusCompleted: "Completed",
-    startClassLive: "Start live",
-    markClassFinished: "Mark finished",
     classFinishedSuffix: "finished",
     classLiveSuffix: "live",
     classLiveNowSuffix: "live now",
@@ -2686,6 +2905,7 @@ export default function App() {
     publicLinkCopyFailed: "Could not copy the public link.",
     publicNotFound: "Tournament not found or not published.",
     openApp: "Open app",
+    publicPoweredBy: "Powered by Make Teams Pro",
     loadingTournament: "Loading tournament...",
     tournamentSyncLoading: "Loading tournaments",
     tournamentSyncSaving: "Saving",
@@ -2927,6 +3147,7 @@ export default function App() {
   const [publicTournamentBackend, setPublicTournamentBackend] = useState(null);
   const [publicTournamentLoadStatus, setPublicTournamentLoadStatus] =
     useState("idle");
+  const [publicSelectedSeriesId, setPublicSelectedSeriesId] = useState("");
   const [publicTournaments, setPublicTournaments] = useState([]);
   const [publicTournamentsStatus, setPublicTournamentsStatus] =
     useState("idle");
@@ -3009,11 +3230,23 @@ export default function App() {
         password: parsed.password || "",
         loggedIn: Boolean(parsed.loggedIn),
         role: parsed.role || "guest",
+        access: normalizeUserAccess(parsed),
       };
     } catch (error) {
       return getDefaultAuth();
     }
   });
+  const [userAccessOverrides, setUserAccessOverrides] = useState(() =>
+    readStoredUserAccessOverrides()
+  );
+  const currentUser = useMemo(
+    () => applyUserAccessOverride(auth, userAccessOverrides),
+    [auth, userAccessOverrides]
+  );
+  const currentUserIsAdmin = isAdminUser(currentUser);
+  const hasTeamBuilderAccess = canUseTeamBuilder(currentUser);
+  const hasTournamentAccess = canUseTournaments(currentUser);
+  const hasAnyModuleAccess = hasTeamBuilderAccess || hasTournamentAccess;
 
   const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
@@ -3032,6 +3265,149 @@ export default function App() {
   });
 
   const skillOptions = useMemo(() => getSkillOptions(skillScale), [skillScale]);
+
+  const scrollLandingShowcaseTo = useCallback((index) => {
+    const safeIndex = Math.max(0, Number(index) || 0);
+    const card = landingShowcaseCardRefs.current[safeIndex];
+
+    if (card && typeof card.scrollIntoView === "function") {
+      card.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "start",
+      });
+      setLandingShowcaseIndex(safeIndex);
+      return;
+    }
+
+    const track = landingShowcaseTrackRef.current;
+    if (track) {
+      const left = track.clientWidth * safeIndex;
+      track.scrollTo({ left, behavior: "smooth" });
+      setLandingShowcaseIndex(safeIndex);
+    }
+  }, []);
+
+  const handleLandingShowcaseScroll = useCallback(() => {
+    const track = landingShowcaseTrackRef.current;
+    if (!track) return;
+
+    const trackCenter = track.scrollLeft + track.clientWidth / 2;
+    let closestIndex = 0;
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    landingShowcaseCardRefs.current.forEach((card, index) => {
+      if (!card) return;
+      const cardCenter = card.offsetLeft + card.offsetWidth / 2;
+      const distance = Math.abs(cardCenter - trackCenter);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestIndex = index;
+      }
+    });
+
+    setLandingShowcaseIndex((current) =>
+      current === closestIndex ? current : closestIndex
+    );
+  }, []);
+
+  const handleLandingShowcasePointerDown = useCallback((event) => {
+    if (event.button !== undefined && event.button !== 0) return;
+
+    const track = landingShowcaseTrackRef.current;
+    if (!track) return;
+
+    landingShowcaseDragRef.current = {
+      active: true,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      scrollLeft: track.scrollLeft,
+      dragged: false,
+    };
+    setIsLandingShowcaseDragging(true);
+
+    if (typeof track.setPointerCapture === "function") {
+      try {
+        track.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is progressive enhancement for smoother desktop drag.
+      }
+    }
+  }, []);
+
+  const handleLandingShowcasePointerMove = useCallback((event) => {
+    const dragState = landingShowcaseDragRef.current;
+    const track = landingShowcaseTrackRef.current;
+
+    if (!track || !dragState.active) return;
+    if (
+      dragState.pointerId !== null &&
+      event.pointerId !== dragState.pointerId
+    ) {
+      return;
+    }
+
+    if (event.buttons === 0 && event.pointerType === "mouse") {
+      landingShowcaseDragRef.current = {
+        ...dragState,
+        active: false,
+        pointerId: null,
+      };
+      setIsLandingShowcaseDragging(false);
+      return;
+    }
+
+    const deltaX = event.clientX - dragState.startX;
+    if (Math.abs(deltaX) > 3) {
+      landingShowcaseDragRef.current.dragged = true;
+    }
+
+    track.scrollLeft = dragState.scrollLeft - deltaX;
+
+    if (landingShowcaseDragRef.current.dragged) {
+      event.preventDefault();
+    }
+  }, []);
+
+  const finishLandingShowcaseDrag = useCallback(
+    () => {
+      const dragState = landingShowcaseDragRef.current;
+      const track = landingShowcaseTrackRef.current;
+
+      if (!dragState.active) return;
+
+      if (
+        track &&
+        dragState.pointerId !== null &&
+        typeof track.hasPointerCapture === "function" &&
+        track.hasPointerCapture(dragState.pointerId)
+      ) {
+        try {
+          track.releasePointerCapture(dragState.pointerId);
+        } catch {
+          // Ignore release errors when the browser already released capture.
+        }
+      }
+
+      landingShowcaseDragRef.current = {
+        ...dragState,
+        active: false,
+        pointerId: null,
+      };
+      setIsLandingShowcaseDragging(false);
+
+      window.requestAnimationFrame(handleLandingShowcaseScroll);
+    },
+    [handleLandingShowcaseScroll]
+  );
+
+  const handleLandingShowcaseClickCapture = useCallback((event) => {
+    if (!landingShowcaseDragRef.current.dragged) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    landingShowcaseDragRef.current.dragged = false;
+  }, []);
 
   const getAuthPayload = useCallback(() => {
     return auth?.loggedIn && auth?.username && auth?.password
@@ -3105,7 +3481,7 @@ export default function App() {
   );
 
   const loadTrainerUsers = useCallback(async () => {
-    if (!auth.loggedIn || auth.role !== "admin") {
+    if (!auth.loggedIn || !currentUserIsAdmin) {
       setTrainerUsers([]);
       return;
     }
@@ -3125,12 +3501,24 @@ export default function App() {
       });
 
       const data = await res.json();
-      setTrainerUsers(Array.isArray(data?.users) ? data.users : []);
+      setTrainerUsers(
+        Array.isArray(data?.users)
+          ? data.users.map((user) =>
+              applyUserAccessOverride(user, userAccessOverrides)
+            )
+          : []
+      );
     } catch (error) {
       console.error("Could not load trainer users:", error);
       setTrainerUsers([]);
     }
-  }, [auth.loggedIn, auth.password, auth.role, auth.username]);
+  }, [
+    auth.loggedIn,
+    auth.password,
+    auth.username,
+    currentUserIsAdmin,
+    userAccessOverrides,
+  ]);
 
   const saveUserSettingsToBackend = useCallback(
     async (nextSkillView, nextSkillScale) => {
@@ -7535,8 +7923,76 @@ export default function App() {
 
   const publicTournamentRequestActive = Boolean(publicTournamentCode);
   const publicTournament = publicTournamentBackend;
+  const publicVisibleSeriesForSelection = useMemo(() => {
+    const safePublicTournament = publicTournament
+      ? applyTournamentDefaults(publicTournament)
+      : null;
+    if (!safePublicTournament) return [];
+
+    const publicClasses = getTournamentSeriesClasses(
+      safePublicTournament,
+      language
+    );
+    const hasExplicitPublicSeries =
+      hasExplicitTournamentSeries(safePublicTournament);
+
+    return publicClasses
+      .filter((series) =>
+        hasExplicitPublicSeries
+          ? ["live", "completed"].includes(series.publicStatus)
+          : series.publicStatus !== "hidden"
+      )
+      .sort((a, b) => {
+        const statusRank = { live: 0, completed: 1, hidden: 2 };
+        const rankDelta =
+          (statusRank[a.publicStatus] ?? 2) -
+          (statusRank[b.publicStatus] ?? 2);
+        if (rankDelta) return rankDelta;
+        return (
+          publicClasses.findIndex((series) => series.id === a.id) -
+          publicClasses.findIndex((series) => series.id === b.id)
+        );
+      });
+  }, [language, publicTournament]);
+  const publicVisibleSeriesIdsKey = publicVisibleSeriesForSelection
+    .map((series) => String(series.id))
+    .join("|");
+  const defaultPublicSelectedSeriesId =
+    publicVisibleSeriesForSelection.find(
+      (series) => series.publicStatus === "live"
+    )?.id ||
+    publicVisibleSeriesForSelection.find(
+      (series) => series.publicStatus === "completed"
+    )?.id ||
+    "";
 
   const setupPanelTournamentIdRef = useRef("");
+
+  useEffect(() => {
+    if (!publicTournamentRequestActive) {
+      if (publicSelectedSeriesId) setPublicSelectedSeriesId("");
+      return;
+    }
+
+    if (!defaultPublicSelectedSeriesId) {
+      if (publicSelectedSeriesId) setPublicSelectedSeriesId("");
+      return;
+    }
+
+    const selectedIsVisible = publicVisibleSeriesForSelection.some(
+      (series) => String(series.id) === String(publicSelectedSeriesId)
+    );
+
+    if (!selectedIsVisible) {
+      setPublicSelectedSeriesId(defaultPublicSelectedSeriesId);
+    }
+  }, [
+    defaultPublicSelectedSeriesId,
+    publicSelectedSeriesId,
+    publicTournamentRequestActive,
+    publicVisibleSeriesForSelection,
+    publicVisibleSeriesIdsKey,
+  ]);
 
   useEffect(() => {
     const nextTournamentId = activeTournament?.id || "";
@@ -7729,6 +8185,11 @@ export default function App() {
         password,
         loggedIn: true,
         role: data?.profile?.role || "trainer",
+        access: normalizeUserAccess({
+          ...(data?.profile || {}),
+          username,
+          role: data?.profile?.role || "trainer",
+        }),
       };
 
       window.clearTimeout(tournamentAutosaveTimerRef.current);
@@ -7760,10 +8221,16 @@ export default function App() {
       setCreatedTrainerInfo(null);
       setPlayerActionMessage("");
 
-      await loadPlayers({
-        username,
-        password,
-      });
+      if (
+        canUseTeamBuilder(
+          applyUserAccessOverride(nextAuth, userAccessOverrides)
+        )
+      ) {
+        await loadPlayers({
+          username,
+          password,
+        });
+      }
     } catch (error) {
       console.error("Could not log in:", error);
       setLoginMessage(t.loginFailed);
@@ -7845,6 +8312,13 @@ export default function App() {
           skillView: trainerSkillView,
           skillScale: Number(trainerSkillScale),
           active: 1,
+          access: {
+            teamBuilder: true,
+            tournaments: false,
+            admin: false,
+          },
+          canUseTeamBuilder: true,
+          canUseTournaments: false,
           copyMode: trainerCopyMode,
           copyFromTrainerUsername:
             trainerCopyMode === "trainer" ? copyFromTrainerUsername : "",
@@ -7910,6 +8384,41 @@ export default function App() {
       console.error("Could not update trainer status:", error);
       setTrainerActionMessage("Could not update trainer.");
     }
+  }
+
+  function updateUserModuleAccess(targetUsername, patch) {
+    if (!currentUserIsAdmin) return;
+
+    const storageUsername = getUserAccessStorageUsername(targetUsername);
+    if (!storageUsername) return;
+
+    const targetUser =
+      accessPanelUsers.find(
+        (user) =>
+          getUserAccessStorageUsername(user.username) === storageUsername
+      ) || { username: targetUsername };
+    const currentAccess = normalizeUserAccess(targetUser);
+    const nextAccess = normalizeUserAccess({
+      ...targetUser,
+      access: {
+        ...currentAccess,
+        ...patch,
+        admin: currentAccess.admin,
+      },
+    });
+    const safeAccess = nextAccess.admin
+      ? { teamBuilder: true, tournaments: true, admin: true }
+      : nextAccess;
+
+    setUserAccessOverrides((prev) => {
+      const next = {
+        ...prev,
+        [storageUsername]: safeAccess,
+      };
+      saveStoredUserAccessOverrides(next);
+      return next;
+    });
+    setTrainerActionMessage(t.accessSaved);
   }
 
   async function resetTrainerPassword(targetUsername) {
@@ -8105,7 +8614,12 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!auth.loggedIn || !auth.username || publicTournamentRequestActive) {
+    if (
+      !auth.loggedIn ||
+      !auth.username ||
+      !hasTournamentAccess ||
+      publicTournamentRequestActive
+    ) {
       return;
     }
 
@@ -8113,7 +8627,13 @@ export default function App() {
       filterTournamentsForUsername(tournaments, auth.username),
       auth.username
     );
-  }, [auth.loggedIn, auth.username, publicTournamentRequestActive, tournaments]);
+  }, [
+    auth.loggedIn,
+    auth.username,
+    hasTournamentAccess,
+    publicTournamentRequestActive,
+    tournaments,
+  ]);
 
   useEffect(() => {
     const normalizedUsername = auth.loggedIn
@@ -8146,7 +8666,7 @@ export default function App() {
       lastTournamentBackendJsonRef.current = "[]";
     }
 
-    if (!auth.loggedIn) {
+    if (!auth.loggedIn || !hasTournamentAccess) {
       setTournaments([]);
       setActiveTournamentId("");
       setTournamentBackendReady(false);
@@ -8164,7 +8684,13 @@ export default function App() {
     }
 
     void loadTournamentsFromBackend();
-  }, [auth.loggedIn, auth.password, auth.username, loadTournamentsFromBackend]);
+  }, [
+    auth.loggedIn,
+    auth.password,
+    auth.username,
+    hasTournamentAccess,
+    loadTournamentsFromBackend,
+  ]);
 
   useEffect(() => {
     const normalizedCode = String(publicTournamentCode || "").trim();
@@ -8237,7 +8763,12 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    if (!auth.loggedIn || !tournamentBackendReady || publicTournamentRequestActive) {
+    if (
+      !auth.loggedIn ||
+      !hasTournamentAccess ||
+      !tournamentBackendReady ||
+      publicTournamentRequestActive
+    ) {
       return undefined;
     }
 
@@ -8364,6 +8895,7 @@ export default function App() {
     auth.loggedIn,
     auth.username,
     callTournamentBackend,
+    hasTournamentAccess,
     publicTournamentRequestActive,
     tournamentBackendReady,
     tournaments,
@@ -8383,7 +8915,7 @@ export default function App() {
   }, [tournamentActionMessage]);
 
   useEffect(() => {
-    if (!auth.loggedIn) {
+    if (!auth.loggedIn || !hasTeamBuilderAccess) {
       setPlayers([]);
       setArchivedPlayers([]);
       setTrainerUsers([]);
@@ -8391,20 +8923,30 @@ export default function App() {
     }
 
     loadPlayers();
-  }, [auth.loggedIn, auth.password, auth.username, loadPlayers]);
+  }, [
+    auth.loggedIn,
+    auth.password,
+    auth.username,
+    hasTeamBuilderAccess,
+    loadPlayers,
+  ]);
 
   useEffect(() => {
-    if (auth.loggedIn && auth.role === "admin") {
+    if (auth.loggedIn && currentUserIsAdmin) {
       loadTrainerUsers();
     } else {
       setTrainerUsers([]);
     }
-  }, [auth, loadTrainerUsers]);
+  }, [auth.loggedIn, currentUserIsAdmin, loadTrainerUsers]);
 
   useEffect(() => {
-    if (!auth.loggedIn) {
+    if (!auth.loggedIn || !hasTeamBuilderAccess) {
       setTeams([]);
-      setActiveTab("players");
+      if (hasTournamentAccess) {
+        setActiveTab("tournament");
+      } else {
+        setActiveTab("players");
+      }
       return;
     }
 
@@ -8432,16 +8974,37 @@ const savedRound = readStorageWithTtl(
 
     setTeams([]);
     setActiveTab("players");
-  }, [auth, language]);
+  }, [auth, hasTeamBuilderAccess, hasTournamentAccess, language]);
 
   useEffect(() => {
     function handleResize() {
-      setIsMobile(window.innerWidth <= 768);
+      setIsMobile(window.innerWidth < 900);
     }
 
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  useEffect(() => {
+    if (!auth.loggedIn || !hasAnyModuleAccess) return;
+
+    const isTeamBuilderTab = activeTab === "players" || activeTab === "teams";
+    if (activeTab === "tournament" && !hasTournamentAccess) {
+      setActiveTab(hasTeamBuilderAccess && teams.length ? "teams" : "players");
+      return;
+    }
+
+    if (isTeamBuilderTab && !hasTeamBuilderAccess && hasTournamentAccess) {
+      setActiveTab("tournament");
+    }
+  }, [
+    activeTab,
+    auth.loggedIn,
+    hasAnyModuleAccess,
+    hasTeamBuilderAccess,
+    hasTournamentAccess,
+    teams.length,
+  ]);
 
   useEffect(() => {
     const roundCacheKey = getRoundStorageKey(ROUND_CACHE_KEY, auth);
@@ -8560,7 +9123,7 @@ const savedRound = readStorageWithTtl(
   useEffect(() => {
     try {
       const raw = localStorage.getItem(getLanguageStorageKey(auth.username));
-      setLanguage(raw === "no" ? "no" : "en");
+      setLanguage(["en", "no", "dk"].includes(raw) ? raw : "en");
     } catch (e) {
       console.error("Could not load language", e);
       setLanguage("en");
@@ -9214,18 +9777,41 @@ const savedRound = readStorageWithTtl(
   }, [activeScheduleRounds, matchRoundIndex]);
 
   const visibleTrainerUsers = useMemo(() => {
-    return trainerUsers.filter((trainer) => trainer.role !== "archived");
-  }, [trainerUsers]);
+    return trainerUsers
+      .filter((trainer) => trainer.role !== "archived")
+      .map((trainer) =>
+        applyUserAccessOverride(trainer, userAccessOverrides)
+      );
+  }, [trainerUsers, userAccessOverrides]);
 
   const archivedTrainerUsers = useMemo(() => {
-    return trainerUsers.filter((trainer) => trainer.role === "archived");
-  }, [trainerUsers]);
+    return trainerUsers
+      .filter((trainer) => trainer.role === "archived")
+      .map((trainer) =>
+        applyUserAccessOverride(trainer, userAccessOverrides)
+      );
+  }, [trainerUsers, userAccessOverrides]);
 
   const trainerCopySourceUsers = useMemo(() => {
     return trainerUsers.filter(
       (trainer) => trainer.role === "trainer" && trainer.active
     );
   }, [trainerUsers]);
+  const accessPanelUsers = useMemo(() => {
+    const usersByName = new Map();
+    if (auth.loggedIn && auth.username) {
+      usersByName.set(getUserAccessStorageUsername(auth.username), currentUser);
+    }
+
+    visibleTrainerUsers.forEach((trainer) => {
+      const key = getUserAccessStorageUsername(trainer.username);
+      if (key) usersByName.set(key, trainer);
+    });
+
+    return Array.from(usersByName.values()).filter(
+      (user) => getUserAccessStorageUsername(user.username)
+    );
+  }, [auth.loggedIn, auth.username, currentUser, visibleTrainerUsers]);
 
   const availablePlayersForTeams = useMemo(() => {
     const currentTeamNames = new Set(
@@ -9339,11 +9925,14 @@ const savedRound = readStorageWithTtl(
 
     if (!date) return startTime || "-";
 
-    const formatted = date.toLocaleDateString(language === "no" ? "nb-NO" : "en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
+    const formatted = date.toLocaleDateString(
+      language === "no" ? "nb-NO" : language === "dk" ? "da-DK" : "en-US",
+      {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }
+    );
 
     return startTime ? `${formatted} ${startTime}` : formatted;
   }
@@ -9419,7 +10008,7 @@ const savedRound = readStorageWithTtl(
                       ? tournamentText.fourSide
                       : Number(item.teamSize) === 5
                         ? tournamentText.fiveSide
-                        : item.name || tournamentText.seriesLabel
+                        : getSeriesDisplayName(item) || tournamentText.seriesLabel
                   )
                 : [];
               const location = [
@@ -9669,7 +10258,7 @@ const savedRound = readStorageWithTtl(
             ? tournamentText.fourSide
             : Number(item.teamSize) === 5
               ? tournamentText.fiveSide
-              : item.name || tournamentText.seriesLabel
+              : getSeriesDisplayName(item) || tournamentText.seriesLabel
         )
       : [];
     const location = [
@@ -9845,7 +10434,6 @@ const savedRound = readStorageWithTtl(
       <section style={styles.landingUpcomingSection}>
         <div style={styles.landingSectionHeader}>
           <div>
-            <div style={styles.landingEyebrow}>{t.landingEventPlatform}</div>
             <h2 style={styles.landingSectionTitle}>{t.landingUpcomingTitle}</h2>
           </div>
           <div style={styles.landingFilterRow}>
@@ -9901,14 +10489,402 @@ const savedRound = readStorageWithTtl(
     );
   }
 
-  function renderLoggedOutLandingPage() {
-    const featureChips = [
-      t.landingChipLiveSchedule,
-      t.landingChipPublicPage,
-      t.landingChipGroupKnockout,
-      t.landingChipOrganizerTools,
+  function renderLandingShowcaseVisual(type) {
+    if (type === "teams") {
+      return (
+        <div style={styles.landingMockScreen}>
+          <div style={styles.landingMockTopBar}>
+            <span>{t.teamBuilder}</span>
+            <strong>1-5</strong>
+          </div>
+          <div style={styles.landingTeamBuilderMock}>
+            <div style={styles.landingMockPanel}>
+              <div style={styles.landingMockLabel}>
+                {t.landingShowcasePlayerPool}
+              </div>
+              {["Mia", "Jonas", "Sara"].map((name, index) => (
+                <div key={name} style={styles.landingPlayerMockRow}>
+                  <span style={styles.landingPlayerMockAvatar}>
+                    {index + 1}
+                  </span>
+                  <span>{name}</span>
+                  <strong>{5 - (index % 2)}</strong>
+                </div>
+              ))}
+            </div>
+            <div style={styles.landingGeneratedTeamsMock}>
+              <div style={styles.landingMockLabel}>
+                {t.landingShowcaseGeneratedTeams}
+              </div>
+              <div style={styles.landingTeamMockCardGrid}>
+                {[1, 2].map((teamNumber) => (
+                  <div key={teamNumber} style={styles.landingTeamMockCard}>
+                    <strong>
+                      {tournamentText.teamLabel} {teamNumber}
+                    </strong>
+                    <div style={styles.landingTeamMockBars}>
+                      <span style={styles.landingTeamMockBar} />
+                      <span style={styles.landingTeamMockBar} />
+                      <span style={styles.landingTeamMockBar} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (type === "tournaments") {
+      return (
+        <div style={styles.landingMockScreen}>
+          <div style={styles.landingMockTopBar}>
+            <span>{tournamentText.tournamentSetupTitle}</span>
+            <strong>{t.landingShowcaseClasses}</strong>
+          </div>
+          <div style={styles.landingClassChipRow}>
+            {["4-manns", "5-manns"].map((label) => (
+              <span key={label} style={styles.landingClassChip}>
+                {getSeriesDisplayName(label)}
+              </span>
+            ))}
+          </div>
+          <div style={styles.landingSetupMockGrid}>
+            {[
+              [tournamentText.totalTeamsLabel, "16"],
+              [tournamentText.groupsLabel, "4"],
+              [tournamentText.qualifiersLabel, "2"],
+              [tournamentText.groupMinutesLabel, "15"],
+            ].map(([label, value]) => (
+              <div key={label} style={styles.landingSetupMockTile}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+              </div>
+            ))}
+          </div>
+          <div style={styles.landingSetupActionMock}>
+            {tournamentText.buildUpdateSlots}
+          </div>
+        </div>
+      );
+    }
+
+    if (type === "schedule") {
+      return (
+        <div style={styles.landingMockScreen}>
+          <div style={styles.landingMockTopBar}>
+            <span>{tournamentText.scheduleTitle}</span>
+            <strong>LIVE</strong>
+          </div>
+          <div style={styles.landingScheduleMockTable}>
+            {[
+              ["09:00", `${t.courtLabel} 1`, "Blue - Nord", "21-16", "done"],
+              ["09:15", `${t.courtLabel} 2`, "Serve - Block", "Live", "live"],
+              ["09:30", `${t.courtLabel} 3`, "Team C - Team D", "Next", "next"],
+            ].map(([time, court, match, status, state]) => (
+              <div
+                key={`${time}-${court}`}
+                style={{
+                  ...styles.landingScheduleMockRow,
+                  ...(state === "done"
+                    ? styles.landingScheduleMockRowDone
+                    : {}),
+                  ...(state === "live"
+                    ? styles.landingScheduleMockRowLive
+                    : {}),
+                }}
+              >
+                <span>{time}</span>
+                <strong style={styles.landingScheduleMockCourt}>{court}</strong>
+                <span style={styles.landingScheduleMockMatch}>{match}</span>
+                <span style={styles.landingScheduleMockStatus}>{status}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (type === "public") {
+      return (
+        <div style={styles.landingPublicMock}>
+          <div style={styles.landingPublicHeroMock}>
+            <span style={styles.landingPublicLogoMock}>MTP</span>
+            <div style={styles.landingPublicHeroText}>
+              <strong style={styles.landingPublicHeroTitle}>{t.appTitle}</strong>
+              <span style={styles.landingPublicHeroSubtitle}>
+                {tournamentText.publicLinkReadonly}
+              </span>
+            </div>
+          </div>
+          <div style={styles.landingPublicClassRow}>
+            <span
+              style={{
+                ...styles.landingPublicClassPill,
+                ...styles.landingPublicClassActive,
+              }}
+            >
+              {getSeriesDisplayName("5-manns")} Live
+            </span>
+            <span style={styles.landingPublicClassPill}>
+              {getSeriesDisplayName("4-manns")} {t.landingShowcaseFinished}
+            </span>
+          </div>
+          <div style={styles.landingPublicScheduleMock}>
+            <div
+              style={{
+                ...styles.landingPublicMatchMock,
+                ...styles.landingPublicMatchLive,
+              }}
+            >
+              <span>09:15</span>
+              <strong style={styles.landingPublicMatchTitle}>Aces vs Nord</strong>
+              <span style={styles.landingPublicMatchStatus}>Live</span>
+            </div>
+            <div style={styles.landingPublicMatchMock}>
+              <span>09:30</span>
+              <strong style={styles.landingPublicMatchTitle}>Serve vs Blue</strong>
+              <span style={styles.landingPublicMatchStatus}>
+                {tournamentText.nextLabel}
+              </span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    if (type === "finals") {
+      return (
+        <div style={styles.landingFinalsMock}>
+          <div style={styles.landingStandingsMock}>
+            <div style={styles.landingMockTopBar}>
+              <span>{tournamentText.standingsTitle}</span>
+              <strong>{tournamentText.groupLabel} A</strong>
+            </div>
+            {["Blue Spikers", "Nord Volley", "Serve Crew"].map(
+              (team, index) => (
+                <div key={team} style={styles.landingStandingMockRow}>
+                  <span>{index + 1}</span>
+                  <strong>{team}</strong>
+                  <span>{6 - index * 2}</span>
+                </div>
+              )
+            )}
+          </div>
+          <div style={styles.landingBracketMock}>
+            <div style={styles.landingBracketMockMatch}>Semi</div>
+            <div style={styles.landingBracketMockMatch}>Semi</div>
+            <div style={styles.landingBracketMockFinal}>
+              {tournamentText.final}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div style={styles.landingThemeMock}>
+        <div style={styles.landingThemePoster}>
+          <div style={styles.landingThemeLogo}>MTP</div>
+          <strong style={styles.landingThemeTitle}>
+            {t.landingShowcaseCustomTheme}
+          </strong>
+          <div style={styles.landingThemeClassPills}>
+            <span style={styles.landingThemeClassPill}>
+              {getSeriesDisplayName("4-manns")}
+            </span>
+            <span style={styles.landingThemeClassPill}>
+              {getSeriesDisplayName("5-manns")}
+            </span>
+          </div>
+        </div>
+        <div style={styles.landingThemeDots}>
+          {["#2563eb", "#38bdf8", "#22c55e", "#facc15"].map((color) => (
+            <span
+              key={color}
+              style={{ ...styles.landingThemeDot, background: color }}
+            />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function renderLandingProductShowcase() {
+    const slides = [
+      {
+        title: t.landingShowcaseCreateTeams,
+        type: "teams",
+        tone: "linear-gradient(155deg, #ffffff 0%, #dbeafe 58%, #bfdbfe 100%)",
+      },
+      {
+        title: t.landingShowcaseBuildTournaments,
+        type: "tournaments",
+        tone: "linear-gradient(155deg, #ffffff 0%, #e0f2fe 58%, #bae6fd 100%)",
+      },
+      {
+        title: t.landingShowcaseLiveSchedule,
+        type: "schedule",
+        tone: "linear-gradient(155deg, #ffffff 0%, #eff6ff 52%, #c7d2fe 100%)",
+      },
+      {
+        title: t.landingShowcasePublicLive,
+        type: "public",
+        tone: "linear-gradient(155deg, #eff6ff 0%, #dbeafe 48%, #93c5fd 100%)",
+      },
+      {
+        title: t.landingShowcaseStandingsFinals,
+        type: "finals",
+        tone: "linear-gradient(155deg, #ffffff 0%, #ecfeff 54%, #bfdbfe 100%)",
+      },
+      {
+        title: t.landingShowcaseCustomTheme,
+        type: "theme",
+        tone: "linear-gradient(155deg, #ffffff 0%, #eef2ff 54%, #bfdbfe 100%)",
+      },
     ];
 
+    return (
+      <section style={styles.landingProductShowcase}>
+        <div style={styles.landingShowcaseControls}>
+          <div style={styles.landingShowcaseDots}>
+            {slides.map((slide, index) => (
+              <button
+                type="button"
+                key={slide.type}
+                aria-label={slide.title}
+                style={{
+                  ...styles.landingShowcaseDot,
+                  ...(index === landingShowcaseIndex
+                    ? styles.landingShowcaseDotActive
+                    : {}),
+                }}
+                onClick={() => scrollLandingShowcaseTo(index)}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div
+          ref={landingShowcaseTrackRef}
+          style={{
+            ...styles.landingShowcaseTrack,
+            ...(isLandingShowcaseDragging
+              ? styles.landingShowcaseTrackDragging
+              : {}),
+          }}
+          onScroll={handleLandingShowcaseScroll}
+          onPointerDown={handleLandingShowcasePointerDown}
+          onPointerMove={handleLandingShowcasePointerMove}
+          onPointerUp={finishLandingShowcaseDrag}
+          onPointerCancel={finishLandingShowcaseDrag}
+          onPointerLeave={finishLandingShowcaseDrag}
+          onClickCapture={handleLandingShowcaseClickCapture}
+        >
+          {slides.map((slide, index) => (
+            <article
+              key={slide.type}
+              ref={(node) => {
+                landingShowcaseCardRefs.current[index] = node;
+              }}
+              style={{
+                ...styles.landingShowcaseCard,
+                background: slide.tone,
+              }}
+            >
+              <div style={styles.landingShowcaseCardHeader}>
+                <span style={styles.landingShowcaseIndex}>
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <h2 style={styles.landingShowcaseCardTitle}>{slide.title}</h2>
+              </div>
+              {renderLandingShowcaseVisual(slide.type)}
+            </article>
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  function renderPublicBrandHeader(theme = null) {
+    const titleStyle = theme
+      ? {
+          ...styles.publicBrandTitle,
+          color: theme.text,
+        }
+      : styles.publicBrandTitle;
+    const subtitleStyle = theme
+      ? {
+          ...styles.publicBrandSubtitle,
+          color: theme.mutedText,
+        }
+      : styles.publicBrandSubtitle;
+
+    return (
+      <header style={styles.publicBrandHeader}>
+        <div style={styles.publicBrandIdentity}>
+          <div style={styles.publicBrandLogo}>MTP</div>
+          <div style={styles.publicBrandText}>
+            <strong style={titleStyle}>{t.appTitle}</strong>
+            <span style={subtitleStyle}>
+              {tournamentText.publicLinkReadonly}
+            </span>
+          </div>
+        </div>
+
+        <div style={styles.publicBrandActions}>
+          <div style={styles.publicBrandLanguageRow}>
+            <button
+              type="button"
+              style={{
+                ...styles.publicBrandLanguageButton,
+                ...(language === "en"
+                  ? styles.publicBrandLanguageButtonActive
+                  : {}),
+              }}
+              onClick={() => setLanguage("en")}
+            >
+              EN
+            </button>
+            <button
+              type="button"
+              style={{
+                ...styles.publicBrandLanguageButton,
+                ...(language === "no"
+                  ? styles.publicBrandLanguageButtonActive
+                  : {}),
+              }}
+              onClick={() => setLanguage("no")}
+            >
+              NO
+            </button>
+            <button
+              type="button"
+              style={{
+                ...styles.publicBrandLanguageButton,
+                ...(language === "dk"
+                  ? styles.publicBrandLanguageButtonActive
+                  : {}),
+              }}
+              onClick={() => setLanguage("dk")}
+            >
+              DK
+            </button>
+          </div>
+          <button
+            type="button"
+            style={styles.publicBrandOpenButton}
+            onClick={openAppFromPublicTournament}
+          >
+            {tournamentText.openApp}
+          </button>
+        </div>
+      </header>
+    );
+  }
+
+  function renderLoggedOutLandingPage() {
     return (
       <div style={styles.landingPage}>
         <div style={styles.landingGlowOne} />
@@ -9952,124 +10928,83 @@ const savedRound = readStorageWithTtl(
               >
                 NO
               </button>
+              <button
+                type="button"
+                style={{
+                  ...styles.landingLanguageButton,
+                  ...(language === "dk" ? styles.landingLanguageButtonActive : {}),
+                }}
+                onClick={() => setLanguage("dk")}
+              >
+                DK
+              </button>
             </div>
           </header>
 
-          <main style={styles.landingHeroGrid}>
-            <section style={styles.landingHeroCopy}>
-              <div style={styles.landingHeroKicker}>{t.landingEventPlatform}</div>
-              <h1 style={styles.landingHeroTitle}>{t.landingHeroTitle}</h1>
-              <p style={styles.landingHeroText}>{t.landingHeroCopy}</p>
-              <div style={styles.landingFeatureChips}>
-                {featureChips.map((chip) => (
-                  <span key={chip} style={styles.landingFeatureChip}>
-                    {chip}
-                  </span>
-                ))}
+          <aside
+            style={{
+              ...styles.landingLoginCard,
+              ...(isMobile ? styles.landingLoginCardStacked : {}),
+            }}
+          >
+            <div style={styles.landingLoginHeader}>
+              <div style={styles.landingLoginIcon}>MTP</div>
+              <div>
+                <h2 style={styles.landingLoginTitle}>
+                  {t.landingOrganizerLogin}
+                </h2>
+                <p style={styles.landingLoginHelper}>{t.landingLoginHelper}</p>
               </div>
+            </div>
 
-              <div style={styles.landingVisualCard}>
-                <div style={styles.landingVisualHeader}>
-                  <span>{t.landingControlTitle}</span>
-                  <strong>{t.preview}</strong>
-                </div>
-                <p style={styles.landingVisualText}>{t.landingControlSubtitle}</p>
-                <div style={styles.landingControlPills}>
-                  {[
-                    t.landingControlGroups,
-                    tournamentText.scheduleTitle,
-                    t.landingControlScores,
-                    t.landingControlPublicLink,
-                  ].map((item) => (
-                    <span key={item} style={styles.landingControlPill}>
-                      {item}
-                    </span>
-                  ))}
-                </div>
-                <div style={styles.landingSchedulePreview}>
-                  <div style={styles.landingSchedulePreviewTop}>
-                    <span>{t.landingControlSchedulePreview}</span>
-                    <strong>LIVE</strong>
-                  </div>
-                  {[
-                    ["09:00", `${t.courtLabel} 1`, "Team A vs Team B"],
-                    ["09:15", `${t.courtLabel} 2`, "Team C vs Team D"],
-                  ].map(([time, court, teams]) => (
-                    <div key={`${time}-${court}`} style={styles.landingScheduleRow}>
-                      <span style={styles.landingScheduleTime}>{time}</span>
-                      <span style={styles.landingScheduleCourt}>{court}</span>
-                      <strong style={styles.landingScheduleTeams}>{teams}</strong>
-                    </div>
-                  ))}
-                </div>
-                <div style={styles.landingVisualStats}>
-                  <div style={styles.landingVisualStat}>
-                    <strong style={styles.landingVisualStatValue}>12</strong>
-                    <span>{tournamentText.matchesTitle}</span>
-                  </div>
-                  <div style={styles.landingVisualStat}>
-                    <strong style={styles.landingVisualStatValue}>03</strong>
-                    <span>{tournamentText.courtsLabel}</span>
-                  </div>
-                  <div style={styles.landingVisualStat}>
-                    <strong style={styles.landingVisualStatValue}>
-                      {t.landingStatusLive}
-                    </strong>
-                    <span>{t.landingChipPublicPage}</span>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <aside style={styles.landingLoginCard}>
-              <div style={styles.landingLoginHeader}>
-                <div style={styles.landingLoginIcon}>MTP</div>
-                <div>
-                  <h2 style={styles.landingLoginTitle}>
-                    {t.landingOrganizerLogin}
-                  </h2>
-                  <p style={styles.landingLoginHelper}>{t.landingLoginHelper}</p>
-                </div>
-              </div>
-
-              <form
-                style={styles.landingLoginForm}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  handleLogin();
-                }}
+            <form
+              style={{
+                ...styles.landingLoginForm,
+                ...(isMobile ? styles.landingLoginFormStacked : {}),
+              }}
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleLogin();
+              }}
+            >
+              <input
+                style={styles.landingInput}
+                value={loginUsername}
+                onChange={(e) => setLoginUsername(e.target.value)}
+                placeholder={t.username}
+                autoComplete="username"
+              />
+              <input
+                style={styles.landingInput}
+                type="password"
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                placeholder={t.password}
+                autoComplete="current-password"
+              />
+              <button
+                type="submit"
+                style={styles.landingLoginButton}
+                disabled={loginLoading}
               >
-                <input
-                  style={styles.landingInput}
-                  value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
-                  placeholder={t.username}
-                  autoComplete="username"
-                />
-                <input
-                  style={styles.landingInput}
-                  type="password"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  placeholder={t.password}
-                  autoComplete="current-password"
-                />
-                <button
-                  type="submit"
-                  style={styles.landingLoginButton}
-                  disabled={loginLoading}
-                >
-                  {loginLoading ? t.loggingIn : t.login}
-                </button>
-              </form>
+                {loginLoading ? t.loggingIn : t.login}
+              </button>
+            </form>
 
-              {loginMessage && (
-                <div style={styles.landingLoginMessage}>{loginMessage}</div>
-              )}
-            </aside>
+            {loginMessage && (
+              <div style={styles.landingLoginMessage}>{loginMessage}</div>
+            )}
+          </aside>
+
+          <main style={styles.landingHeroGrid}>
+            <div style={styles.landingShowcaseGridItem}>
+              {renderLandingProductShowcase()}
+            </div>
+
+            <div style={styles.landingUpcomingGridItem}>
+              {renderLandingPublicTournamentShowcase()}
+            </div>
           </main>
-
-          {renderLandingPublicTournamentShowcase()}
         </div>
       </div>
     );
@@ -10083,6 +11018,8 @@ const savedRound = readStorageWithTtl(
     editableScores = false,
     scheduleEditable = false,
     publicTheme = null,
+    publicScheduleView = false,
+    hideSeriesBadge = false,
     courtBlocks = [],
   }) {
     const safeBatches = Array.isArray(hallScheduleBatches)
@@ -10143,13 +11080,26 @@ const savedRound = readStorageWithTtl(
         : item.teamB || item.sourceB || "-";
       const scoreValue = String(item?.[isSideA ? "scoreA" : "scoreB"] ?? "");
       const hasScore = hasScoreValue(scoreValue);
+      const displayStatus = getMatchDisplayStatus(item);
+      const isPublicCompleted =
+        publicScheduleView && displayStatus.status === "completed";
+      const isPublicLive =
+        publicScheduleView && displayStatus.status === "in_progress";
 
       return (
         <div style={styles.tournamentScheduleTeamLine}>
           <span
             style={{
               ...styles.tournamentScheduleTeamName,
-              ...(publicTheme ? { color: publicTheme.text } : {}),
+              ...(publicTheme
+                ? {
+                    color: isPublicCompleted
+                      ? publicTheme.mutedText
+                      : publicTheme.text,
+                    opacity: isPublicCompleted ? 0.78 : 1,
+                    fontWeight: isPublicLive ? "950" : undefined,
+                  }
+                : {}),
             }}
           >
             {teamName}
@@ -10160,7 +11110,13 @@ const savedRound = readStorageWithTtl(
             <span
               style={{
                 ...styles.tournamentScheduleReadonlyScore,
-                ...(publicTheme ? { color: publicTheme.text } : {}),
+                ...(publicTheme
+                  ? {
+                      color: isPublicCompleted
+                        ? publicTheme.accent
+                        : publicTheme.text,
+                    }
+                  : {}),
               }}
             >
               {hasScore ? scoreValue : ""}
@@ -10324,6 +11280,53 @@ const savedRound = readStorageWithTtl(
                   );
                   const displayStatus = getMatchDisplayStatus(item);
                   const resultTypeLabel = getMatchResultTypeLabel(item);
+                  const isPublicScheduleCell =
+                    publicScheduleView && publicTheme && item;
+                  const isPublicCompletedCell =
+                    isPublicScheduleCell &&
+                    (displayStatus.status === "completed" || resultTypeLabel);
+                  const isPublicLiveCell =
+                    isPublicScheduleCell &&
+                    displayStatus.status === "in_progress" &&
+                    !isPublicCompletedCell;
+                  const publicStatusLabel =
+                    publicScheduleView &&
+                    displayStatus.status === "completed"
+                      ? language === "no"
+                        ? "Ferdig"
+                        : "Finished"
+                      : publicScheduleView &&
+                          displayStatus.status === "in_progress"
+                        ? "Live"
+                        : displayStatus.label;
+                  const publicScheduleStateStyle = isPublicCompletedCell
+                    ? {
+                        background: `linear-gradient(135deg, ${hexToRgba(
+                          publicTheme.accent,
+                          0.22
+                        )}, ${hexToRgba(publicTheme.panel, 0.94)} 72%)`,
+                        borderLeft: `5px solid ${publicTheme.accent}`,
+                        boxShadow: `inset 0 0 0 1px ${hexToRgba(
+                          publicTheme.accent,
+                          0.30
+                        )}`,
+                      }
+                    : isPublicLiveCell
+                      ? {
+                          background: `linear-gradient(135deg, ${hexToRgba(
+                            publicTheme.primary,
+                            0.26
+                          )}, ${hexToRgba(publicTheme.panel, 0.96)} 72%)`,
+                          borderLeft: `5px solid ${publicTheme.primary}`,
+                          boxShadow: `inset 0 0 0 1px ${hexToRgba(
+                            publicTheme.primary,
+                            0.34
+                          )}, 0 10px 26px ${hexToRgba(
+                            publicTheme.primary,
+                            0.10
+                          )}`,
+                        }
+                      : {};
                   const finishWarning = editableScores && item
                     ? matchFinishWarnings[item.id]
                     : "";
@@ -10423,6 +11426,7 @@ const savedRound = readStorageWithTtl(
                               borderLeft: `4px solid ${groupColor.accent}`,
                             }
                           : {}),
+                        ...publicScheduleStateStyle,
                         ...(isSelectedMoveSource
                           ? styles.tournamentScheduleSelectedSource
                           : {}),
@@ -10433,10 +11437,10 @@ const savedRound = readStorageWithTtl(
                     >
                       {item?.stage === "knockout" && item.round && (
                         <small style={styles.tournamentScheduleRoundLabel}>
-                          {item.round}
+                          {getSeriesDisplayName(item.round)}
                         </small>
                       )}
-                      {item?.seriesName && (
+                      {item?.seriesName && !hideSeriesBadge && (
                         <span
                           style={{
                             ...styles.tournamentScheduleSeriesBadge,
@@ -10449,7 +11453,7 @@ const savedRound = readStorageWithTtl(
                               : {}),
                           }}
                         >
-                          {item.seriesName}
+                          {getSeriesShortLabel(item.seriesName)}
                         </span>
                       )}
                       {isSelectedMoveSource && (
@@ -10646,13 +11650,65 @@ const savedRound = readStorageWithTtl(
                                   ...(displayStatus.status === "completed"
                                     ? styles.tournamentScheduleStatusBadgeDone
                                     : {}),
+                                  ...(publicScheduleView && publicTheme
+                                    ? {
+                                        background:
+                                          displayStatus.status === "completed"
+                                            ? hexToRgba(
+                                                publicTheme.accent,
+                                                0.20
+                                              )
+                                            : hexToRgba(
+                                                publicTheme.primary,
+                                                0.20
+                                              ),
+                                        border: `1px solid ${
+                                          displayStatus.status === "completed"
+                                            ? hexToRgba(
+                                                publicTheme.accent,
+                                                0.42
+                                              )
+                                            : hexToRgba(
+                                                publicTheme.primary,
+                                                0.42
+                                              )
+                                        }`,
+                                        color:
+                                          displayStatus.status === "completed"
+                                            ? publicTheme.accent
+                                            : publicTheme.primary,
+                                        boxShadow: `0 6px 16px ${hexToRgba(
+                                          displayStatus.status === "completed"
+                                            ? publicTheme.accent
+                                            : publicTheme.primary,
+                                          0.10
+                                        )}`,
+                                      }
+                                    : {}),
                                 }}
                               >
-                                {displayStatus.label}
+                                {publicStatusLabel}
                               </span>
                             )}
                             {resultTypeLabel && (
-                              <span style={styles.tournamentScheduleResultBadge}>
+                              <span
+                                style={{
+                                  ...styles.tournamentScheduleResultBadge,
+                                  ...(publicScheduleView && publicTheme
+                                    ? {
+                                        background: hexToRgba(
+                                          publicTheme.accent,
+                                          0.18
+                                        ),
+                                        border: `1px solid ${hexToRgba(
+                                          publicTheme.accent,
+                                          0.38
+                                        )}`,
+                                        color: publicTheme.accent,
+                                      }
+                                    : {}),
+                                }}
+                              >
                                 {resultTypeLabel}
                               </span>
                             )}
@@ -10712,30 +11768,29 @@ const savedRound = readStorageWithTtl(
   function renderPublicTournamentPage(tournament, loadStatus = "ready") {
     const safeTournament = tournament ? applyTournamentDefaults(tournament) : null;
     const isPublicTournamentLoading = loadStatus === "loading";
-    const publicSeriesClasses = safeTournament
-      ? getTournamentSeriesClasses(safeTournament, language)
-      : [];
     const hasPublicExplicitSeries = hasExplicitTournamentSeries(safeTournament);
-    const publicVisibleSeriesClasses = publicSeriesClasses
-      .filter((series) =>
-        hasPublicExplicitSeries
-          ? ["live", "completed"].includes(series.publicStatus)
-          : series.publicStatus !== "hidden"
-      )
-      .sort((a, b) => {
-        const statusRank = { live: 0, completed: 1, hidden: 2 };
-        const rankDelta =
-          (statusRank[a.publicStatus] ?? 2) - (statusRank[b.publicStatus] ?? 2);
-        if (rankDelta) return rankDelta;
-        return (
-          publicSeriesClasses.findIndex((series) => series.id === a.id) -
-          publicSeriesClasses.findIndex((series) => series.id === b.id)
-        );
-      });
+    const publicVisibleSeriesClasses = publicVisibleSeriesForSelection;
+    const effectivePublicSelectedSeriesId = publicVisibleSeriesClasses.some(
+      (series) => String(series.id) === String(publicSelectedSeriesId)
+    )
+      ? publicSelectedSeriesId
+      : defaultPublicSelectedSeriesId;
+    const selectedPublicSeries =
+      publicVisibleSeriesClasses.find(
+        (series) =>
+          String(series.id) === String(effectivePublicSelectedSeriesId)
+      ) ||
+      publicVisibleSeriesClasses[0] ||
+      null;
+    const selectedPublicSeriesClasses = selectedPublicSeries
+      ? [selectedPublicSeries]
+      : [];
     const publicSeriesSections = safeTournament
       ? getTournamentSeriesRenderSections(
           safeTournament,
-          publicVisibleSeriesClasses
+          selectedPublicSeriesClasses.length
+            ? selectedPublicSeriesClasses
+            : publicVisibleSeriesClasses
         )
       : [];
     const groups = publicSeriesSections.flatMap((section) =>
@@ -10744,7 +11799,7 @@ const savedRound = readStorageWithTtl(
         seriesId: section.series.id,
         seriesName: section.series.name,
         name: hasPublicExplicitSeries
-          ? `${section.series.name} - ${
+          ? `${getSeriesDisplayName(section.series)} - ${
               group.name || `${tournamentText.groupLabel} ${group.code || ""}`
             }`
           : group.name,
@@ -10759,7 +11814,7 @@ const savedRound = readStorageWithTtl(
         seriesId: section.series.id,
         seriesName: section.series.name,
         groupName: hasPublicExplicitSeries
-          ? `${section.series.name} - ${standing.groupName}`
+          ? `${getSeriesDisplayName(section.series)} - ${standing.groupName}`
           : standing.groupName,
       }))
     ).filter((standing) => (standing.rows || []).length > 0);
@@ -10767,11 +11822,11 @@ const savedRound = readStorageWithTtl(
     const builtPublicSchedule = safeTournament
       ? buildTournamentHallSchedule(safeTournament)
       : { batches: [], courtCount: 1 };
-    const publicVisibleSeriesIds = publicVisibleSeriesClasses.map(
+    const publicVisibleSeriesIds = selectedPublicSeriesClasses.map(
       (series) => series.id
     );
     const publicStatusBySeriesId = new Map(
-      publicVisibleSeriesClasses.map((series) => [String(series.id), series.publicStatus])
+      selectedPublicSeriesClasses.map((series) => [String(series.id), series.publicStatus])
     );
     const getPublicScheduleBatchStatusRank = (batch) => {
       if (!hasPublicExplicitSeries) return 0;
@@ -10824,13 +11879,6 @@ const savedRound = readStorageWithTtl(
         .length,
       0
     );
-    const publicSeriesLabels = publicVisibleSeriesClasses.map((series) =>
-      Number(series.playersPerTeam || series.teamSize) === 4
-        ? tournamentText.fourSide
-        : Number(series.playersPerTeam || series.teamSize) === 5
-          ? tournamentText.fiveSide
-          : getSeriesDisplayName(series, language)
-    );
     const publicLocation = [
       safeTournament?.locationName,
       safeTournament?.city,
@@ -10849,12 +11897,18 @@ const savedRound = readStorageWithTtl(
       (series) => series.publicStatus === "completed"
     );
     const hasPublicVisibleSeries = publicVisibleSeriesClasses.length > 0;
+    const getPublicClassStatusLabel = (series) =>
+      series.publicStatus === "completed"
+        ? language === "no"
+          ? "Ferdig"
+          : "Finished"
+        : "Live";
     const publicClassStatusNotice =
       publicLiveSeries.length > 0 && publicCompletedSeries.length > 0
         ? `${publicCompletedSeries
-            .map((series) => `${series.name} ${tournamentText.classFinishedSuffix}`)
+            .map((series) => `${getSeriesDisplayName(series)} ${tournamentText.classFinishedSuffix}`)
             .join(". ")}. ${publicLiveSeries
-            .map((series) => `${series.name} ${tournamentText.classLiveNowSuffix}`)
+            .map((series) => `${getSeriesDisplayName(series)} ${tournamentText.classLiveNowSuffix}`)
             .join(". ")}.`
         : "";
     const publicSectionStyle = {
@@ -10869,12 +11923,6 @@ const savedRound = readStorageWithTtl(
     };
     const publicSectionHeaderStyle = {
       ...styles.publicTournamentSectionHeader,
-      color: publicTheme.text,
-    };
-    const publicBackButtonStyle = {
-      ...styles.publicTournamentBackButton,
-      background: publicTheme.surface,
-      borderColor: publicTheme.border,
       color: publicTheme.text,
     };
     const publicStatusPillStyle = {
@@ -11032,15 +12080,6 @@ const savedRound = readStorageWithTtl(
         }}
       >
         <main style={styles.publicTournamentShell}>
-          <div style={styles.publicTournamentTopbar}>
-            <button
-              style={publicBackButtonStyle}
-              onClick={openAppFromPublicTournament}
-            >
-              {tournamentText.openApp}
-            </button>
-          </div>
-
           {!safeTournament ? (
             <section
               style={{
@@ -11050,6 +12089,7 @@ const savedRound = readStorageWithTtl(
                 color: publicTheme.text,
               }}
             >
+              {renderPublicBrandHeader()}
               <div style={publicStatusPillStyle}>
                 {tournamentText.publicPreviewTitle}
               </div>
@@ -11088,7 +12128,8 @@ const savedRound = readStorageWithTtl(
                   color: publicTheme.text,
                 }}
               >
-                <div style={styles.publicTournamentHeroTop}>
+                {renderPublicBrandHeader(publicTheme)}
+                <div style={styles.publicTournamentTitleRow}>
                   {publicLiveLogoUrl && (
                     <span
                       style={{
@@ -11104,19 +12145,15 @@ const savedRound = readStorageWithTtl(
                       />
                     </span>
                   )}
-                  <span style={publicStatusPillStyle}>
-                    {tournamentText.publicLinkReadonly}
-                  </span>
+                  <h1
+                    style={{
+                      ...styles.publicTournamentTitle,
+                      color: publicTheme.text,
+                    }}
+                  >
+                    {getTournamentPublicTitle(safeTournament)}
+                  </h1>
                 </div>
-
-                <h1
-                  style={{
-                    ...styles.publicTournamentTitle,
-                    color: publicTheme.text,
-                  }}
-                >
-                  {getTournamentPublicTitle(safeTournament)}
-                </h1>
                 {String(safeTournament.rules || "").trim() && (
                   <p
                     style={{
@@ -11142,10 +12179,6 @@ const savedRound = readStorageWithTtl(
                   {[
                     [tournamentText.dateLabel, formatPublicTournamentDate(safeTournament)],
                     [tournamentText.locationLabel, publicLocation],
-                    [
-                      tournamentText.seriesLabel,
-                      Array.from(new Set(publicSeriesLabels)).join(" / "),
-                    ],
                     [tournamentText.prizeLabel, safeTournament.prizeText],
                     [
                       tournamentText.registrationDeadlineLabel,
@@ -11172,21 +12205,53 @@ const savedRound = readStorageWithTtl(
                   <div style={styles.publicTournamentClassStatusList}>
                     {publicVisibleSeriesClasses.map((series) => {
                       const isCompleted = series.publicStatus === "completed";
+                      const isSelected =
+                        String(series.id) ===
+                        String(effectivePublicSelectedSeriesId);
+                      const statusColor = isCompleted
+                        ? publicTheme.mutedText
+                        : publicTheme.primary;
+                      const statusAccent = isCompleted
+                        ? publicTheme.border
+                        : publicTheme.accent;
                       return (
-                        <span
+                        <button
                           key={`public-status-${series.id}`}
+                          type="button"
                           style={{
                             ...styles.publicTournamentClassStatusBadge,
-                            ...(isCompleted
-                              ? styles.publicTournamentClassStatusBadgeDone
-                              : {}),
+                            background: isSelected
+                              ? `linear-gradient(135deg, ${statusColor}, ${statusAccent})`
+                              : hexToRgba(statusColor, isCompleted ? 0.12 : 0.15),
+                            borderColor: isSelected
+                              ? statusColor
+                              : hexToRgba(statusColor, isCompleted ? 0.26 : 0.34),
+                            color: isSelected ? "#ffffff" : statusColor,
+                            textShadow: isSelected
+                              ? "0 1px 10px rgba(15,23,42,0.18)"
+                              : "none",
+                            boxShadow: isSelected
+                              ? `0 16px 34px ${hexToRgba(statusColor, 0.30)}`
+                              : `0 8px 20px ${hexToRgba(statusColor, 0.10)}`,
+                            outline: isSelected
+                              ? `2px solid ${hexToRgba(statusAccent, 0.34)}`
+                              : "none",
+                            outlineOffset: "2px",
+                            transform: isSelected
+                              ? "translateY(-1px)"
+                              : "none",
                           }}
+                          onClick={() => setPublicSelectedSeriesId(series.id)}
                         >
-                          {series.name}{" "}
-                          {isCompleted
-                            ? tournamentText.classFinishedSuffix
-                            : tournamentText.classLiveSuffix}
-                        </span>
+                          <span
+                            style={{
+                              ...styles.publicTournamentClassStatusDot,
+                              background: isSelected ? "#ffffff" : statusColor,
+                            }}
+                          />
+                          <strong>{getSeriesDisplayName(series)}</strong>
+                          <span>{getPublicClassStatusLabel(series)}</span>
+                        </button>
                       );
                     })}
                   </div>
@@ -11223,6 +12288,8 @@ const savedRound = readStorageWithTtl(
                     showRoundLabels:
                       shouldShowTournamentRoundLabels(safeTournament),
                     publicTheme,
+                    publicScheduleView: true,
+                    hideSeriesBadge: Boolean(effectivePublicSelectedSeriesId),
                     courtBlocks: safeTournament?.courtBlocks || [],
                   })}
                 </section>
@@ -11575,7 +12642,7 @@ const savedRound = readStorageWithTtl(
                                   color: publicTheme.text,
                                 }}
                               >
-                                {section.series.name}
+                                {getSeriesDisplayName(section.series)}
                               </div>
                             )}
                             {section.knockoutStages.map((stage) => (
@@ -11605,6 +12672,10 @@ const savedRound = readStorageWithTtl(
 
             </>
           )}
+          <footer style={styles.publicPoweredByBadge}>
+            <span style={styles.publicPoweredByLogo}>MTP</span>
+            <span>{tournamentText.publicPoweredBy}</span>
+          </footer>
         </main>
       </div>
     );
@@ -11737,7 +12808,7 @@ const savedRound = readStorageWithTtl(
         seriesId: section.series.id,
         seriesName: section.series.name,
         name: hasExplicitTournamentSeries(activeTournament)
-          ? `${section.series.name} - ${group.name}`
+          ? `${getSeriesDisplayName(section.series)} - ${group.name}`
           : group.name,
       }))
     );
@@ -11747,7 +12818,7 @@ const savedRound = readStorageWithTtl(
         seriesId: section.series.id,
         seriesName: section.series.name,
         groupName: hasExplicitTournamentSeries(activeTournament)
-          ? `${section.series.name} - ${standing.groupName}`
+          ? `${getSeriesDisplayName(section.series)} - ${standing.groupName}`
           : standing.groupName,
       }))
     );
@@ -11882,6 +12953,44 @@ const savedRound = readStorageWithTtl(
           .length,
       0
     );
+    const overviewFilledSlotCount =
+      hasExplicitTournamentSeries(activeTournament)
+        ? visibleFilledSlotCount
+        : filledSlotCount;
+    const overviewConfiguredTotalTeams =
+      hasExplicitTournamentSeries(activeTournament)
+        ? visibleConfiguredTotalTeams || configuredTotalTeams
+        : configuredTotalTeams;
+    const overviewScheduledMatchesCount =
+      hasExplicitTournamentSeries(activeTournament)
+        ? visibleScheduledMatchesCount
+        : scheduledMatchesCount;
+    const overviewCompletedMatchesCount =
+      hasExplicitTournamentSeries(activeTournament)
+        ? visibleCompletedMatchesCount
+        : completedMatchesCount;
+    const overviewTournamentMatches =
+      hasExplicitTournamentSeries(activeTournament)
+        ? visibleTournamentMatches
+        : tournamentMatches;
+    const overviewBracketSections = visibleBracketSections
+      .map((section) => {
+        const sectionDisplayKnockout = section.displayKnockout || {};
+        const firstRound =
+          (sectionDisplayKnockout.quarterFinals || []).length > 0
+            ? sectionDisplayKnockout.quarterFinals
+            : sectionDisplayKnockout.semiFinals || [];
+
+        return {
+          ...section,
+          overviewFirstRound: firstRound,
+          overviewFinal: sectionDisplayKnockout.final || null,
+        };
+      })
+      .filter(
+        (section) =>
+          section.overviewFirstRound.length > 0 || section.overviewFinal
+      );
     const manualSlotTotal = manualPreviewGroups.reduce(
       (sum, group) => sum + (group.teams || []).length,
       0
@@ -11899,29 +13008,24 @@ const savedRound = readStorageWithTtl(
         : null;
     const doneWithSelectedClassLabel = selectedSetupSeries
       ? language === "no"
-        ? `Ferdig med ${selectedSetupSeries.name}`
-        : `Done with ${selectedSetupSeries.name}`
+        ? `Ferdig med ${getSeriesDisplayName(selectedSetupSeries)}`
+        : `Done with ${getSeriesDisplayName(selectedSetupSeries)}`
       : "";
     const continueToNextClassLabel = nextSetupSeries
       ? language === "no"
-        ? `Fortsett til ${nextSetupSeries.name}`
-        : `Continue to ${nextSetupSeries.name}`
+        ? `Fortsett til ${getSeriesDisplayName(nextSetupSeries)}`
+        : `Continue to ${getSeriesDisplayName(nextSetupSeries)}`
       : "";
-    const previewFirstRound =
-      (knockoutPreview.quarterFinals || []).length > 0
-        ? knockoutPreview.quarterFinals
-        : knockoutPreview.semiFinals || [];
-
     const statCards = [
       {
         label: tournamentText.slotsLabel,
-        value: `${filledSlotCount}/${configuredTotalTeams}`,
+        value: `${overviewFilledSlotCount}/${overviewConfiguredTotalTeams}`,
         note: tournamentText.manualDrawLabel,
         accent: "#2563eb",
       },
       {
         label: tournamentText.groupsTab,
-        value: manualPreviewGroups.length,
+        value: visibleGroups.length,
         note: `${configuredTeamsPerGroup} ${tournamentText.teamsPerGroupLabel}`,
         accent: "#0f766e",
       },
@@ -11933,8 +13037,8 @@ const savedRound = readStorageWithTtl(
       },
       {
         label: tournamentText.matchesTitle,
-        value: `${completedMatchesCount}/${tournamentMatches.length}`,
-        note: `${scheduledMatchesCount} ${tournamentText.matchStatusScheduled}`,
+        value: `${overviewCompletedMatchesCount}/${overviewTournamentMatches.length}`,
+        note: `${overviewScheduledMatchesCount} ${tournamentText.matchStatusScheduled}`,
         accent: "#ea580c",
       },
     ];
@@ -12644,7 +13748,7 @@ const savedRound = readStorageWithTtl(
                               setActiveTournamentSetupSeriesId(series.id)
                             }
                           >
-                            {series.name}
+                            {getSeriesDisplayName(series)}
                           </button>
                         ))}
                       </div>
@@ -13017,7 +14121,7 @@ const savedRound = readStorageWithTtl(
                             setActiveTournamentSetupSeriesId(series.id)
                           }
                         >
-                          {series.name}
+                          {getSeriesDisplayName(series)}
                         </button>
                       ))}
                     </div>
@@ -13367,7 +14471,7 @@ const savedRound = readStorageWithTtl(
                   </div>
 
                   {hasTournamentClassFilters &&
-                    ["groups", "matches", "table", "bracket"].includes(
+                    ["overview", "groups", "matches", "table", "bracket"].includes(
                       activeTournamentView
                     ) && (
                       <div style={styles.tournamentSubTabs}>
@@ -13399,7 +14503,7 @@ const savedRound = readStorageWithTtl(
                               setActiveTournamentSetupSeriesId(series.id);
                             }}
                           >
-                            {series.name}
+                            {getSeriesDisplayName(series)}
                           </button>
                         ))}
                       </div>
@@ -13424,56 +14528,51 @@ const savedRound = readStorageWithTtl(
                               </div>
                             </div>
                             <div style={styles.tournamentStatusBadge}>
-                              {filledSlotCount}/{configuredTotalTeams}
+                              {overviewFilledSlotCount}/
+                              {overviewConfiguredTotalTeams}
                             </div>
                           </div>
 
-                          {manualPreviewGroups.length > 0 ? (
-                            <div style={styles.tournamentCompactGroupGrid}>
-                              {manualPreviewGroups.map((group, groupIndex) => {
-                                const groupCode =
-                                  group.code || getTournamentGroupCode(groupIndex);
-                                const groupColor =
-                                  getTournamentGroupColor(groupCode);
-                                const filledTeams = (group.teams || []).filter(
-                                  (team) => String(team.name || "").trim()
-                                );
-
-                                return (
+                          {visibleGroups.length > 0 ? (
+                            <div style={styles.tournamentOverviewSeriesList}>
+                              {visibleSeriesSections
+                                .filter((section) => section.groups.length > 0)
+                                .map((section) => (
                                   <div
-                                    key={`overview-group-${group.id}`}
-                                    style={{
-                                      ...styles.tournamentCompactGroupCard,
-                                      background: groupColor.soft,
-                                      borderColor: groupColor.border,
-                                    }}
-                                  >
-                                    <div style={styles.tournamentGroupHeader}>
-                                      <div style={styles.tournamentMiniTitle}>
-                                        {group.name}
-                                      </div>
-                                      <span
-                                        style={{
-                                          ...styles.tournamentTeamSeed,
-                                          background: groupColor.soft,
-                                          borderColor: groupColor.border,
-                                          color: groupColor.text,
-                                        }}
-                                      >
-                                        {groupCode}
-                                      </span>
+                                  key={`overview-groups-${section.series.id}`}
+                                  style={styles.tournamentOverviewSeriesBlock}
+                                >
+                                  {hasExplicitTournamentSeries(activeTournament) && (
+                                    <div style={styles.tournamentMiniTitle}>
+                                      {getSeriesDisplayName(section.series)}
                                     </div>
-                                    <div style={styles.tournamentMutedText}>
-                                      {filledTeams.length}/
-                                      {(group.teams || []).length}{" "}
-                                      {tournamentText.slotsLabel}
-                                    </div>
-                                    <div style={styles.tournamentSnapshotList}>
-                                      {(group.teams || []).map((team, index) => (
-                                          <div
-                                            key={`overview-group-${group.id}-${team.id}`}
-                                            style={styles.tournamentSnapshotRow}
-                                          >
+                                  )}
+                                  <div style={styles.tournamentCompactGroupGrid}>
+                                    {section.groups.map((group, groupIndex) => {
+                                      const groupCode =
+                                        group.code ||
+                                        getTournamentGroupCode(groupIndex);
+                                      const groupColor =
+                                        getTournamentGroupColor(groupCode);
+                                      const filledTeams = (
+                                        group.teams || []
+                                      ).filter((team) =>
+                                        String(team.name || "").trim()
+                                      );
+
+                                      return (
+                                        <div
+                                          key={`overview-group-${section.series.id}-${group.id}`}
+                                          style={{
+                                            ...styles.tournamentCompactGroupCard,
+                                            background: groupColor.soft,
+                                            borderColor: groupColor.border,
+                                          }}
+                                        >
+                                          <div style={styles.tournamentGroupHeader}>
+                                            <div style={styles.tournamentMiniTitle}>
+                                              {group.name}
+                                            </div>
                                             <span
                                               style={{
                                                 ...styles.tournamentTeamSeed,
@@ -13482,18 +14581,50 @@ const savedRound = readStorageWithTtl(
                                                 color: groupColor.text,
                                               }}
                                             >
-                                              {team.slot ||
-                                                `${groupCode}${index + 1}`}
+                                              {groupCode}
                                             </span>
-                                            <strong>
-                                              {String(team.name || "").trim() || "-"}
-                                            </strong>
                                           </div>
-                                        ))}
-                                    </div>
+                                          <div style={styles.tournamentMutedText}>
+                                            {filledTeams.length}/
+                                            {(group.teams || []).length}{" "}
+                                            {tournamentText.slotsLabel}
+                                          </div>
+                                          <div style={styles.tournamentSnapshotList}>
+                                            {(group.teams || []).map(
+                                              (team, index) => (
+                                                <div
+                                                  key={`overview-group-${section.series.id}-${group.id}-${team.id || index}`}
+                                                  style={
+                                                    styles.tournamentSnapshotRow
+                                                  }
+                                                >
+                                                  <span
+                                                    style={{
+                                                      ...styles.tournamentTeamSeed,
+                                                      background: groupColor.soft,
+                                                      borderColor:
+                                                        groupColor.border,
+                                                      color: groupColor.text,
+                                                    }}
+                                                  >
+                                                    {team.slot ||
+                                                      `${groupCode}${index + 1}`}
+                                                  </span>
+                                                  <strong>
+                                                    {String(
+                                                      team.name || ""
+                                                    ).trim() || "-"}
+                                                  </strong>
+                                                </div>
+                                              )
+                                            )}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
                                   </div>
-                                );
-                              })}
+                                  </div>
+                                ))}
                             </div>
                           ) : (
                             <div style={styles.tournamentMutedPanel}>
@@ -13522,32 +14653,57 @@ const savedRound = readStorageWithTtl(
                             </div>
                           </div>
 
-                          <div style={styles.tournamentPreviewMatchList}>
-                            {previewFirstRound.slice(0, 4).map((match) => (
-                              <div
-                                key={`overview-compact-ko-${match.id}`}
-                                style={styles.tournamentPreviewMatchRow}
-                              >
-                                <span>{match.label}</span>
-                                <strong>
-                                  {match.sourceA || match.teamA} vs{" "}
-                                  {match.sourceB || match.teamB}
-                                </strong>
-                              </div>
-                            ))}
-                            {knockoutPreview.final && (
-                              <div style={styles.tournamentPreviewMatchRow}>
-                                <span>{tournamentText.final}</span>
-                                <strong>
-                                  {knockoutPreview.final.sourceA ||
-                                    knockoutPreview.final.teamA}{" "}
-                                  vs{" "}
-                                  {knockoutPreview.final.sourceB ||
-                                    knockoutPreview.final.teamB}
-                                </strong>
-                              </div>
-                            )}
-                          </div>
+                          {overviewBracketSections.length > 0 ? (
+                            <div style={styles.tournamentPreviewMatchList}>
+                              {overviewBracketSections.map((section) => (
+                                <div
+                                  key={`overview-ko-series-${section.series.id}`}
+                                  style={styles.tournamentOverviewSeriesBlock}
+                                >
+                                  {hasExplicitTournamentSeries(activeTournament) && (
+                                    <div
+                                      style={{
+                                        ...styles.tournamentMiniTitle,
+                                        color: "#fff",
+                                      }}
+                                    >
+                                      {getSeriesDisplayName(section.series)}
+                                    </div>
+                                  )}
+                                  {section.overviewFirstRound
+                                    .slice(0, 4)
+                                    .map((match) => (
+                                      <div
+                                        key={`overview-compact-ko-${section.series.id}-${match.id}`}
+                                        style={styles.tournamentPreviewMatchRow}
+                                      >
+                                        <span>{match.label}</span>
+                                        <strong>
+                                          {match.sourceA || match.teamA} vs{" "}
+                                          {match.sourceB || match.teamB}
+                                        </strong>
+                                      </div>
+                                    ))}
+                                  {section.overviewFinal && (
+                                    <div style={styles.tournamentPreviewMatchRow}>
+                                      <span>{tournamentText.final}</span>
+                                      <strong>
+                                        {section.overviewFinal.sourceA ||
+                                          section.overviewFinal.teamA}{" "}
+                                        vs{" "}
+                                        {section.overviewFinal.sourceB ||
+                                          section.overviewFinal.teamB}
+                                      </strong>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div style={styles.tournamentMutedPanel}>
+                              {tournamentText.noKnockoutYet}
+                            </div>
+                          )}
                         </div>
 
                         <div style={styles.tournamentSurface}>
@@ -13561,14 +14717,14 @@ const savedRound = readStorageWithTtl(
                               </div>
                             </div>
                             <div style={styles.tournamentStatusBadge}>
-                              {scheduledMatchesCount}{" "}
+                              {overviewScheduledMatchesCount}{" "}
                               {tournamentText.matchStatusScheduled}
                             </div>
                           </div>
 
-                          {tournamentMatches.length > 0 ? (
+                          {overviewTournamentMatches.length > 0 ? (
                             <div style={styles.tournamentSnapshotList}>
-                              {tournamentMatches
+                              {overviewTournamentMatches
                                 .filter(
                                   (match) =>
                                     getMatchDisplayStatus(match).status !==
@@ -13584,7 +14740,17 @@ const savedRound = readStorageWithTtl(
                                       {match.teamA} vs {match.teamB}
                                     </span>
                                     <strong>
-                                      {match.groupName ||
+                                      {[
+                                        hasExplicitTournamentSeries(
+                                          activeTournament
+                                        )
+                                          ? getSeriesDisplayName(match.seriesName)
+                                          : "",
+                                        getSeriesDisplayName(match.groupName) ||
+                                          tournamentText.matchStatusScheduled,
+                                      ]
+                                        .filter(Boolean)
+                                        .join(" - ") ||
                                         tournamentText.matchStatusScheduled}
                                     </strong>
                                   </div>
@@ -13783,7 +14949,7 @@ const savedRound = readStorageWithTtl(
                                 >
                                   {hasExplicitTournamentSeries(activeTournament) && (
                                     <div style={styles.tournamentMiniTitle}>
-                                      {section.series.name}
+                                      {getSeriesDisplayName(section.series)}
                                     </div>
                                   )}
                                   <div
@@ -14472,7 +15638,7 @@ const savedRound = readStorageWithTtl(
                               key={`class-visibility-${series.id}`}
                               style={styles.tournamentClassVisibilityRow}
                             >
-                              <strong>{series.name}</strong>
+                              <strong>{getSeriesDisplayName(series)}</strong>
                               <div style={styles.tournamentClassVisibilityActions}>
                                 <div style={styles.tournamentClassSegmented}>
                                   {seriesPublicStatusOptions.map((option) => {
@@ -14500,34 +15666,6 @@ const savedRound = readStorageWithTtl(
                                     );
                                   })}
                                 </div>
-                                <button
-                                  type="button"
-                                  style={styles.secondaryButtonCompact}
-                                  onClick={() =>
-                                    updateTournamentSeriesPublicStatus(
-                                      series.id,
-                                      "live"
-                                    )
-                                  }
-                                >
-                                  {language === "no"
-                                    ? `Start ${series.name} live`
-                                    : `Start ${series.name} live`}
-                                </button>
-                                <button
-                                  type="button"
-                                  style={styles.secondaryButtonCompact}
-                                  onClick={() =>
-                                    updateTournamentSeriesPublicStatus(
-                                      series.id,
-                                      "completed"
-                                    )
-                                  }
-                                >
-                                  {language === "no"
-                                    ? `Marker ${series.name} ferdig`
-                                    : `Mark ${series.name} finished`}
-                                </button>
                               </div>
                             </div>
                           ))}
@@ -15092,6 +16230,8 @@ const savedRound = readStorageWithTtl(
 
   const activeMainModule =
     activeTab === "tournament" ? "tournament" : "team-builder";
+  const availableModuleCount =
+    (hasTeamBuilderAccess ? 1 : 0) + (hasTournamentAccess ? 1 : 0);
 
   return (
     <div style={styles.app}>
@@ -15139,6 +16279,17 @@ const savedRound = readStorageWithTtl(
                 >
                   NO
                 </button>
+                <button
+                  style={{
+                    ...styles.languageToggleButton,
+                    ...(language === "dk"
+                      ? styles.languageToggleButtonActive
+                      : {}),
+                  }}
+                  onClick={() => setLanguage("dk")}
+                >
+                  DK
+                </button>
               </div>
 
               <button style={styles.profileCompactLogout} onClick={handleLogout}>
@@ -15152,7 +16303,7 @@ const savedRound = readStorageWithTtl(
 
         {!auth.loggedIn && renderPublicUpcomingTournaments()}
 
-        {auth.loggedIn && auth.role === "admin" && (
+        {auth.loggedIn && currentUserIsAdmin && (
           <div style={styles.adminCard}>
             <div style={styles.authHeader}>
               <div>
@@ -15319,6 +16470,79 @@ const savedRound = readStorageWithTtl(
                 <div style={styles.loginMessage}>{trainerActionMessage}</div>
               )}
 
+              <div style={styles.accessPanel}>
+                <div>
+                  <div style={styles.authTitle}>{t.adminAccessTitle}</div>
+                  <div style={styles.authSubtitle}>
+                    {t.adminAccessSubtitle}
+                  </div>
+                </div>
+                <div style={styles.accessGrid}>
+                  <div style={styles.accessHeaderRow}>
+                    <div style={styles.accessHeader}>{t.username}</div>
+                    <div style={styles.accessHeader}>{t.accessTeamBuilder}</div>
+                    <div style={styles.accessHeader}>{t.accessTournaments}</div>
+                    <div style={styles.accessHeader}>{t.accessAdmin}</div>
+                  </div>
+                  {accessPanelUsers.map((user) => {
+                    const access = normalizeUserAccess(user);
+                    const adminUser = access.admin;
+
+                    return (
+                      <div
+                        key={`access-${user.username}`}
+                        style={styles.accessRow}
+                      >
+                        <strong>{user.username}</strong>
+                        <button
+                          type="button"
+                          style={{
+                            ...styles.accessToggle,
+                            ...(access.teamBuilder
+                              ? styles.accessToggleActive
+                              : {}),
+                            ...(adminUser
+                              ? styles.accessToggleDisabled
+                              : {}),
+                          }}
+                          disabled={adminUser}
+                          onClick={() =>
+                            updateUserModuleAccess(user.username, {
+                              teamBuilder: !access.teamBuilder,
+                            })
+                          }
+                        >
+                          {access.teamBuilder ? t.accessOn : t.accessOff}
+                        </button>
+                        <button
+                          type="button"
+                          style={{
+                            ...styles.accessToggle,
+                            ...(access.tournaments
+                              ? styles.accessToggleActive
+                              : {}),
+                            ...(adminUser
+                              ? styles.accessToggleDisabled
+                              : {}),
+                          }}
+                          disabled={adminUser}
+                          onClick={() =>
+                            updateUserModuleAccess(user.username, {
+                              tournaments: !access.tournaments,
+                            })
+                          }
+                        >
+                          {access.tournaments ? t.accessOn : t.accessOff}
+                        </button>
+                        <span style={styles.accessAdminBadge}>
+                          {adminUser ? t.accessAdmin : "-"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div style={styles.trainerUsersWrap}>
                 {visibleTrainerUsers.length === 0 ? (
                   <div style={styles.emptyText}>{t.noActiveTrainers}</div>
@@ -15437,50 +16661,66 @@ const savedRound = readStorageWithTtl(
           </div>
         )}
 
-        <div style={styles.tabBar}>
-          <button
+        {hasAnyModuleAccess ? (
+          <div
             style={{
-              ...styles.tabButton,
-              ...(activeMainModule === "team-builder"
-                ? styles.tabButtonActive
-                : {}),
+              ...styles.tabBar,
+              gridTemplateColumns: `repeat(${Math.max(
+                1,
+                availableModuleCount
+              )}, minmax(0, 1fr))`,
             }}
-            onClick={() => setActiveTab(teams.length ? "teams" : "players")}
           >
-            {t.teamBuilder}
-          </button>
+            {hasTeamBuilderAccess && (
+              <button
+                style={{
+                  ...styles.tabButton,
+                  ...(activeMainModule === "team-builder"
+                    ? styles.tabButtonActive
+                    : {}),
+                }}
+                onClick={() => setActiveTab(teams.length ? "teams" : "players")}
+              >
+                {t.teamBuilder}
+              </button>
+            )}
 
-          <button
-            style={{
-              ...styles.tabButton,
-              ...(activeMainModule === "tournament"
-                ? styles.tabButtonActive
-                : {}),
-            }}
-            onClick={() => {
-              setActiveTab("tournament");
-              setShowTournamentSetupPanel(true);
+            {hasTournamentAccess && (
+              <button
+                style={{
+                  ...styles.tabButton,
+                  ...(activeMainModule === "tournament"
+                    ? styles.tabButtonActive
+                    : {}),
+                }}
+                onClick={() => {
+                  setActiveTab("tournament");
+                  setShowTournamentSetupPanel(true);
 
-              const scopedTournaments = filterTournamentsForUsername(
-                tournaments,
-                auth.username
-              );
-              const preferredId = getPreferredActiveTournamentId(
-                scopedTournaments,
-                auth.username,
-                activeTournamentId
-              );
+                  const scopedTournaments = filterTournamentsForUsername(
+                    tournaments,
+                    auth.username
+                  );
+                  const preferredId = getPreferredActiveTournamentId(
+                    scopedTournaments,
+                    auth.username,
+                    activeTournamentId
+                  );
 
-              if (preferredId && preferredId !== activeTournamentId) {
-                setActiveTournamentId(preferredId);
-              }
-            }}
-        >
-            {tournamentText.tabTitle}
-          </button>
-        </div>
+                  if (preferredId && preferredId !== activeTournamentId) {
+                    setActiveTournamentId(preferredId);
+                  }
+                }}
+              >
+                {tournamentText.tabTitle}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div style={styles.lockedCard}>{t.noModuleAccess}</div>
+        )}
 
-        {activeTab === "players" && (
+        {hasTeamBuilderAccess && activeTab === "players" && (
           <div style={styles.section}>
             {!auth.loggedIn ? (
               <div style={styles.lockedCard}>
@@ -15973,7 +17213,7 @@ const savedRound = readStorageWithTtl(
           </div>
         )}
 
-        {activeTab === "teams" && (
+        {hasTeamBuilderAccess && activeTab === "teams" && (
           <div style={styles.section}>
             {!auth.loggedIn ? (
               <div style={styles.lockedCard}>
@@ -16448,7 +17688,7 @@ const savedRound = readStorageWithTtl(
           </div>
         )}
 
-        {activeTab === "tournament" && renderTournamentDashboard()}
+        {hasTournamentAccess && activeTab === "tournament" && renderTournamentDashboard()}
 
       {editingPlayer && (
         <div style={styles.modalOverlay} onClick={closeEditPlayer}>
@@ -16760,22 +18000,26 @@ const styles = {
   landingPage: {
     minHeight: "100vh",
     position: "relative",
-    overflow: "hidden",
+    overflowX: "hidden",
+    overflowY: "auto",
     background:
       "radial-gradient(circle at 12% 10%, rgba(37,99,235,0.14), transparent 30%), radial-gradient(circle at 82% 12%, rgba(96,165,250,0.15), transparent 32%), radial-gradient(circle at 72% 88%, rgba(56,189,248,0.10), transparent 34%), linear-gradient(135deg, #f5f9ff 0%, #eaf4ff 48%, #dbeafe 100%)",
     color: "#0f172a",
     fontFamily: "Arial, sans-serif",
-    padding: "18px",
+    padding: "14px",
     boxSizing: "border-box",
   },
 
   landingShell: {
     position: "relative",
     zIndex: 2,
-    maxWidth: "1180px",
+    width: "100%",
+    maxWidth: "980px",
     margin: "0 auto",
     display: "grid",
-    gap: "22px",
+    gap: "12px",
+    minWidth: 0,
+    boxSizing: "border-box",
   },
 
   landingGlowOne: {
@@ -16845,7 +18089,7 @@ const styles = {
     alignItems: "center",
     gap: "16px",
     flexWrap: "wrap",
-    padding: "8px 0",
+    padding: "4px 0",
   },
 
   landingBrandBlock: {
@@ -16856,9 +18100,9 @@ const styles = {
   },
 
   landingBrandMark: {
-    width: "42px",
-    height: "42px",
-    borderRadius: "14px",
+    width: "38px",
+    height: "38px",
+    borderRadius: "13px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -16910,12 +18154,669 @@ const styles = {
     color: "#ffffff",
   },
 
+  landingProductShowcase: {
+    minWidth: 0,
+    display: "grid",
+    gap: "8px",
+    alignSelf: "start",
+    width: "100%",
+    maxWidth: "100%",
+  },
+
+  landingShowcaseGridItem: {
+    minWidth: 0,
+    width: "100%",
+  },
+
+  landingUpcomingGridItem: {
+    minWidth: 0,
+    width: "100%",
+  },
+
+  landingShowcaseControls: {
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+    minWidth: 0,
+  },
+
+  landingShowcaseHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "14px",
+    alignItems: "flex-end",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+
+  landingShowcaseKicker: {
+    width: "fit-content",
+    padding: "7px 11px",
+    borderRadius: "999px",
+    background: "rgba(219,234,254,0.78)",
+    border: "1px solid rgba(37,99,235,0.18)",
+    color: "#1d4ed8",
+    fontSize: "11px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+
+  landingShowcaseTitle: {
+    margin: "10px 0 0",
+    color: "#0f172a",
+    fontSize: "clamp(30px, 4.6vw, 46px)",
+    lineHeight: 1,
+    fontWeight: "950",
+    overflowWrap: "anywhere",
+  },
+
+  landingShowcaseSubtitle: {
+    margin: "7px 0 0",
+    color: "#475569",
+    fontSize: "14px",
+    lineHeight: 1.4,
+    fontWeight: "800",
+  },
+
+  landingShowcaseDots: {
+    display: "flex",
+    gap: "5px",
+    padding: "5px",
+    borderRadius: "999px",
+    background: "rgba(255,255,255,0.70)",
+    border: "1px solid rgba(37,99,235,0.14)",
+  },
+
+  landingShowcaseDot: {
+    appearance: "none",
+    border: "none",
+    padding: 0,
+    width: "7px",
+    height: "7px",
+    borderRadius: "999px",
+    background: "rgba(37,99,235,0.24)",
+    display: "block",
+    cursor: "pointer",
+    transition: "width 160ms ease, background 160ms ease, transform 160ms ease",
+  },
+
+  landingShowcaseDotActive: {
+    width: "19px",
+    background: "#2563eb",
+    transform: "translateY(-1px)",
+  },
+
+  landingShowcaseTrack: {
+    display: "flex",
+    gap: "10px",
+    overflowX: "auto",
+    overflowY: "hidden",
+    scrollSnapType: "x mandatory",
+    padding: "2px 2px 10px",
+    minWidth: 0,
+    maxWidth: "100%",
+    boxSizing: "border-box",
+    WebkitOverflowScrolling: "touch",
+    scrollbarWidth: "none",
+    msOverflowStyle: "none",
+    cursor: "grab",
+    userSelect: "none",
+    touchAction: "pan-y",
+  },
+
+  landingShowcaseTrackDragging: {
+    cursor: "grabbing",
+    scrollSnapType: "none",
+  },
+
+  landingShowcaseCard: {
+    position: "relative",
+    flex: "0 0 clamp(190px, 23%, 222px)",
+    height: "342px",
+    borderRadius: "24px",
+    padding: "11px",
+    border: "1px solid rgba(37,99,235,0.18)",
+    boxShadow: "0 24px 58px rgba(37,99,235,0.14)",
+    scrollSnapAlign: "start",
+    display: "grid",
+    gridTemplateRows: "auto 1fr",
+    gap: "8px",
+    overflow: "hidden",
+    minWidth: 0,
+  },
+
+  landingShowcaseCardHeader: {
+    display: "grid",
+    gap: "4px",
+    minWidth: 0,
+  },
+
+  landingShowcaseIndex: {
+    width: "fit-content",
+    borderRadius: "999px",
+    padding: "4px 7px",
+    background: "rgba(255,255,255,0.72)",
+    border: "1px solid rgba(37,99,235,0.16)",
+    color: "#1d4ed8",
+    fontSize: "9px",
+    fontWeight: "950",
+    boxShadow: "0 8px 18px rgba(37,99,235,0.08)",
+  },
+
+  landingShowcaseCardTitle: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: "16px",
+    lineHeight: 1.1,
+    fontWeight: "950",
+    overflowWrap: "normal",
+  },
+
+  landingMockScreen: {
+    alignSelf: "stretch",
+    display: "grid",
+    gap: "7px",
+    padding: "8px",
+    borderRadius: "20px",
+    background: "rgba(255,255,255,0.72)",
+    border: "1px solid rgba(37,99,235,0.15)",
+    boxShadow:
+      "inset 0 1px 0 rgba(255,255,255,0.82), 0 18px 36px rgba(37,99,235,0.10)",
+    minWidth: 0,
+    alignContent: "start",
+  },
+
+  landingMockTopBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "6px",
+    alignItems: "center",
+    color: "#1e3a8a",
+    fontSize: "9px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+    minWidth: 0,
+  },
+
+  landingMockPanel: {
+    display: "grid",
+    gap: "5px",
+    padding: "8px",
+    borderRadius: "16px",
+    background: "rgba(248,250,252,0.88)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    minWidth: 0,
+  },
+
+  landingMockLabel: {
+    color: "#64748b",
+    fontSize: "9px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+
+  landingTeamBuilderMock: {
+    display: "grid",
+    gap: "7px",
+    minWidth: 0,
+  },
+
+  landingPlayerMockRow: {
+    display: "grid",
+    gridTemplateColumns: "22px minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: "5px",
+    padding: "5px",
+    borderRadius: "12px",
+    background: "#ffffff",
+    border: "1px solid rgba(37,99,235,0.10)",
+    color: "#0f172a",
+    fontSize: "10px",
+    fontWeight: "850",
+    minWidth: 0,
+  },
+
+  landingPlayerMockAvatar: {
+    width: "20px",
+    height: "20px",
+    borderRadius: "999px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#dbeafe",
+    color: "#1d4ed8",
+    fontSize: "9px",
+    fontWeight: "950",
+  },
+
+  landingGeneratedTeamsMock: {
+    display: "grid",
+    gap: "6px",
+    minWidth: 0,
+  },
+
+  landingTeamMockCardGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "6px",
+    minWidth: 0,
+  },
+
+  landingTeamMockCard: {
+    display: "grid",
+    gap: "6px",
+    padding: "8px",
+    borderRadius: "14px",
+    background: "linear-gradient(145deg, #0f172a, #2563eb)",
+    color: "#ffffff",
+    minWidth: 0,
+    boxShadow: "0 12px 24px rgba(37,99,235,0.16)",
+    overflow: "hidden",
+  },
+
+  landingTeamMockBars: {
+    display: "grid",
+    gap: "4px",
+  },
+
+  landingTeamMockBar: {
+    height: "5px",
+    borderRadius: "999px",
+    background: "rgba(255,255,255,0.62)",
+    display: "block",
+  },
+
+  landingClassChipRow: {
+    display: "flex",
+    gap: "6px",
+    flexWrap: "wrap",
+    justifyContent: "center",
+  },
+
+  landingClassChip: {
+    borderRadius: "999px",
+    padding: "6px 9px",
+    background: "#dbeafe",
+    color: "#1d4ed8",
+    border: "1px solid rgba(37,99,235,0.18)",
+    fontSize: "10px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+    minWidth: "68px",
+    textAlign: "center",
+    boxShadow: "0 10px 22px rgba(37,99,235,0.10)",
+  },
+
+  landingSetupMockGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "6px",
+    minWidth: 0,
+  },
+
+  landingSetupMockTile: {
+    display: "grid",
+    gap: "3px",
+    padding: "8px",
+    borderRadius: "13px",
+    background: "#ffffff",
+    border: "1px solid rgba(37,99,235,0.12)",
+    color: "#64748b",
+    fontSize: "9px",
+    fontWeight: "850",
+    minWidth: 0,
+    minHeight: "42px",
+    alignContent: "center",
+  },
+
+  landingSetupActionMock: {
+    borderRadius: "14px",
+    padding: "9px",
+    background: "linear-gradient(135deg, #0f172a, #2563eb)",
+    color: "#ffffff",
+    fontSize: "10px",
+    fontWeight: "950",
+    textAlign: "center",
+    boxShadow: "0 16px 30px rgba(37,99,235,0.18)",
+    alignSelf: "end",
+  },
+
+  landingScheduleMockTable: {
+    display: "grid",
+    gap: "6px",
+    minWidth: 0,
+  },
+
+  landingScheduleMockRow: {
+    display: "grid",
+    gridTemplateColumns: "34px 48px minmax(0, 1fr) 38px",
+    gap: "5px",
+    alignItems: "center",
+    padding: "7px 6px",
+    borderRadius: "14px",
+    background: "#ffffff",
+    border: "1px solid rgba(37,99,235,0.10)",
+    color: "#0f172a",
+    fontSize: "9px",
+    fontWeight: "850",
+    minWidth: 0,
+    overflow: "hidden",
+  },
+
+  landingScheduleMockCourt: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+
+  landingScheduleMockMatch: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+
+  landingScheduleMockStatus: {
+    justifySelf: "end",
+    width: "36px",
+    borderRadius: "999px",
+    padding: "4px 0",
+    background: "rgba(37,99,235,0.10)",
+    color: "#1d4ed8",
+    fontSize: "9px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+    textAlign: "center",
+  },
+
+  landingScheduleMockRowDone: {
+    background: "rgba(34,197,94,0.12)",
+    borderLeft: "4px solid #22c55e",
+  },
+
+  landingScheduleMockRowLive: {
+    background: "rgba(37,99,235,0.12)",
+    borderLeft: "4px solid #2563eb",
+    boxShadow: "0 12px 24px rgba(37,99,235,0.10)",
+  },
+
+  landingPublicMock: {
+    display: "grid",
+    gap: "8px",
+    padding: "10px",
+    borderRadius: "20px",
+    background: "linear-gradient(145deg, #071a14, #0f3d2f)",
+    color: "#ffffff",
+    boxShadow: "0 18px 42px rgba(15,23,42,0.18)",
+    border: "1px solid rgba(255,255,255,0.14)",
+    minWidth: 0,
+    alignContent: "start",
+  },
+
+  landingPublicHeroMock: {
+    display: "flex",
+    gap: "7px",
+    alignItems: "center",
+    minWidth: 0,
+  },
+
+  landingPublicHeroText: {
+    display: "grid",
+    gap: "2px",
+    minWidth: 0,
+  },
+
+  landingPublicHeroTitle: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+
+  landingPublicHeroSubtitle: {
+    color: "rgba(209,250,229,0.74)",
+    fontSize: "10px",
+    fontWeight: "850",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+
+  landingPublicLogoMock: {
+    width: "30px",
+    height: "30px",
+    borderRadius: "11px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#22c55e",
+    color: "#052e16",
+    fontSize: "9px",
+    fontWeight: "950",
+    flexShrink: 0,
+  },
+
+  landingPublicClassRow: {
+    display: "flex",
+    gap: "5px",
+    flexWrap: "wrap",
+  },
+
+  landingPublicClassPill: {
+    borderRadius: "999px",
+    padding: "6px 7px",
+    background: "rgba(255,255,255,0.12)",
+    border: "1px solid rgba(255,255,255,0.18)",
+    color: "#d1fae5",
+    fontSize: "9px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+
+  landingPublicClassActive: {
+    background: "#22c55e",
+    color: "#052e16",
+  },
+
+  landingPublicScheduleMock: {
+    display: "grid",
+    gap: "6px",
+    minWidth: 0,
+  },
+
+  landingPublicMatchMock: {
+    display: "grid",
+    gridTemplateColumns: "34px minmax(0, 1fr) 38px",
+    gap: "5px",
+    alignItems: "center",
+    padding: "7px",
+    borderRadius: "13px",
+    background: "rgba(255,255,255,0.10)",
+    border: "1px solid rgba(255,255,255,0.13)",
+    fontSize: "9px",
+    fontWeight: "850",
+    minWidth: 0,
+    overflow: "hidden",
+  },
+
+  landingPublicMatchTitle: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+
+  landingPublicMatchStatus: {
+    justifySelf: "end",
+    width: "36px",
+    borderRadius: "999px",
+    padding: "4px 0",
+    background: "rgba(255,255,255,0.14)",
+    color: "#d1fae5",
+    fontSize: "9px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+    textAlign: "center",
+  },
+
+  landingPublicMatchLive: {
+    borderLeft: "4px solid #22c55e",
+    background: "rgba(34,197,94,0.18)",
+  },
+
+  landingFinalsMock: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+
+  landingStandingsMock: {
+    display: "grid",
+    gap: "5px",
+    padding: "8px",
+    borderRadius: "17px",
+    background: "rgba(255,255,255,0.76)",
+    border: "1px solid rgba(37,99,235,0.13)",
+  },
+
+  landingStandingMockRow: {
+    display: "grid",
+    gridTemplateColumns: "20px minmax(0, 1fr) 24px",
+    gap: "5px",
+    alignItems: "center",
+    padding: "6px",
+    borderRadius: "12px",
+    background: "#ffffff",
+    color: "#0f172a",
+    fontSize: "9px",
+    fontWeight: "850",
+    minWidth: 0,
+  },
+
+  landingBracketMock: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "6px",
+    alignItems: "center",
+    minWidth: 0,
+  },
+
+  landingBracketMockMatch: {
+    borderRadius: "13px",
+    padding: "10px 8px",
+    background: "#ffffff",
+    border: "1px solid rgba(37,99,235,0.12)",
+    color: "#1d4ed8",
+    fontSize: "10px",
+    fontWeight: "950",
+    textAlign: "center",
+  },
+
+  landingBracketMockFinal: {
+    gridColumn: "1 / -1",
+    borderRadius: "15px",
+    padding: "12px 10px",
+    background: "linear-gradient(135deg, #0f172a, #2563eb)",
+    color: "#ffffff",
+    fontSize: "11px",
+    fontWeight: "950",
+    textAlign: "center",
+    boxShadow: "0 16px 30px rgba(37,99,235,0.18)",
+  },
+
+  landingThemeMock: {
+    display: "grid",
+    gap: "9px",
+    minWidth: 0,
+  },
+
+  landingThemePoster: {
+    minHeight: "174px",
+    borderRadius: "20px",
+    padding: "12px",
+    display: "grid",
+    alignContent: "space-between",
+    background:
+      "radial-gradient(circle at 20% 18%, rgba(250,204,21,0.50), transparent 30%), linear-gradient(145deg, #101827, #2563eb)",
+    color: "#ffffff",
+    boxShadow: "0 18px 42px rgba(37,99,235,0.18)",
+    overflow: "hidden",
+  },
+
+  landingThemeLogo: {
+    width: "34px",
+    height: "34px",
+    borderRadius: "13px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(255,255,255,0.90)",
+    color: "#1d4ed8",
+    fontSize: "10px",
+    fontWeight: "950",
+  },
+
+  landingThemeTitle: {
+    display: "block",
+    maxWidth: "100%",
+    fontSize: "17px",
+    lineHeight: 1.08,
+    fontWeight: "950",
+    overflowWrap: "normal",
+  },
+
+  landingThemeClassPills: {
+    display: "flex",
+    gap: "6px",
+    flexWrap: "wrap",
+  },
+
+  landingThemeClassPill: {
+    borderRadius: "999px",
+    padding: "6px 8px",
+    background: "rgba(255,255,255,0.16)",
+    border: "1px solid rgba(255,255,255,0.18)",
+    fontSize: "10px",
+    fontWeight: "950",
+  },
+
+  landingThemeDots: {
+    display: "flex",
+    gap: "7px",
+    justifyContent: "center",
+  },
+
+  landingThemeDot: {
+    width: "22px",
+    height: "22px",
+    borderRadius: "999px",
+    border: "2px solid rgba(255,255,255,0.88)",
+    boxShadow: "0 10px 20px rgba(37,99,235,0.12)",
+    display: "block",
+  },
+
   landingHeroGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
-    gap: "24px",
-    alignItems: "center",
-    padding: "28px 0 10px",
+    gap: "14px",
+    alignItems: "start",
+    padding: "0 0 4px",
+    minWidth: 0,
+    width: "100%",
+    maxWidth: "980px",
+    justifySelf: "start",
+    boxSizing: "border-box",
+  },
+
+  landingHeroGridStacked: {
+    gap: "12px",
   },
 
   landingHeroCopy: {
@@ -17158,29 +19059,45 @@ const styles = {
   },
 
   landingLoginCard: {
-    borderRadius: "30px",
-    padding: "24px",
+    borderRadius: "18px",
+    padding: "10px 12px",
     background:
       "linear-gradient(145deg, rgba(255,255,255,0.90), rgba(234,244,255,0.72))",
     border: "1px solid rgba(37,99,235,0.18)",
     boxShadow: "0 28px 80px rgba(37,99,235,0.16)",
     backdropFilter: "blur(22px)",
-    display: "grid",
-    gap: "18px",
-    alignSelf: "center",
+    display: "inline-flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: "10px",
+    alignSelf: "start",
+    justifySelf: "start",
+    width: "max-content",
+    maxWidth: "100%",
+    marginTop: 0,
+    boxSizing: "border-box",
     minWidth: 0,
+  },
+
+  landingLoginCardStacked: {
+    display: "grid",
+    width: "100%",
+    maxWidth: "none",
+    gap: "10px",
   },
 
   landingLoginHeader: {
     display: "flex",
     alignItems: "center",
-    gap: "12px",
+    gap: "10px",
+    minWidth: "198px",
+    flexShrink: 0,
   },
 
   landingLoginIcon: {
-    width: "46px",
-    height: "46px",
-    borderRadius: "16px",
+    width: "40px",
+    height: "40px",
+    borderRadius: "14px",
     background: "linear-gradient(145deg, #2563eb, #60a5fa)",
     display: "flex",
     alignItems: "center",
@@ -17194,29 +19111,36 @@ const styles = {
   landingLoginTitle: {
     margin: 0,
     color: "#0f172a",
-    fontSize: "24px",
+    fontSize: "20px",
     fontWeight: "950",
   },
 
   landingLoginHelper: {
     margin: "4px 0 0",
     color: "#475569",
-    fontSize: "13px",
+    fontSize: "12px",
     lineHeight: 1.45,
     fontWeight: "700",
   },
 
   landingLoginForm: {
     display: "grid",
-    gap: "10px",
+    gridTemplateColumns: "180px 180px 112px",
+    alignItems: "center",
+    gap: "8px",
+    minWidth: 0,
+  },
+
+  landingLoginFormStacked: {
+    gridTemplateColumns: "minmax(0, 1fr)",
   },
 
   landingInput: {
     width: "100%",
     boxSizing: "border-box",
     border: "1px solid rgba(37,99,235,0.18)",
-    borderRadius: "16px",
-    padding: "14px 15px",
+    borderRadius: "14px",
+    padding: "12px 13px",
     background: "rgba(255,255,255,0.92)",
     color: "#0f172a",
     outline: "none",
@@ -17225,18 +19149,22 @@ const styles = {
   },
 
   landingLoginButton: {
+    width: "100%",
     border: "none",
-    borderRadius: "16px",
-    padding: "14px 16px",
+    borderRadius: "14px",
+    padding: "12px 14px",
     background: "linear-gradient(135deg, #0f172a, #2563eb)",
     color: "#ffffff",
     fontSize: "14px",
     fontWeight: "950",
     cursor: "pointer",
     boxShadow: "0 18px 34px rgba(37,99,235,0.18)",
+    whiteSpace: "nowrap",
   },
 
   landingLoginMessage: {
+    gridColumn: "1 / -1",
+    flexBasis: "100%",
     color: "#0f172a",
     background: "rgba(239,246,255,0.92)",
     border: "1px solid rgba(37,99,235,0.16)",
@@ -17248,21 +19176,25 @@ const styles = {
 
   landingUpcomingSection: {
     display: "grid",
-    gap: "16px",
-    padding: "20px",
-    borderRadius: "28px",
+    gap: "12px",
+    padding: "15px",
+    borderRadius: "26px",
     background: "rgba(255,255,255,0.82)",
     border: "1px solid rgba(37,99,235,0.14)",
     boxShadow: "0 26px 70px rgba(37,99,235,0.10)",
     backdropFilter: "blur(18px)",
     minWidth: 0,
+    width: "100%",
+    maxWidth: "100%",
+    justifySelf: "start",
+    boxSizing: "border-box",
   },
 
   landingSectionHeader: {
     display: "flex",
-    justifyContent: "space-between",
-    gap: "14px",
-    alignItems: "flex-end",
+    justifyContent: "flex-start",
+    gap: "10px",
+    alignItems: "center",
     flexWrap: "wrap",
   },
 
@@ -17275,23 +19207,24 @@ const styles = {
   },
 
   landingSectionTitle: {
-    margin: "4px 0 0",
+    margin: 0,
     color: "#0f172a",
-    fontSize: "26px",
+    fontSize: "23px",
     lineHeight: 1.12,
     fontWeight: "950",
   },
 
   landingFilterRow: {
     display: "flex",
-    gap: "8px",
+    gap: "7px",
     flexWrap: "wrap",
+    justifyContent: "flex-start",
   },
 
   landingFilterSelect: {
     border: "1px solid rgba(37,99,235,0.16)",
     borderRadius: "999px",
-    padding: "10px 12px",
+    padding: "8px 10px",
     background: "rgba(255,255,255,0.92)",
     color: "#1e3a8a",
     fontSize: "12px",
@@ -17313,9 +19246,10 @@ const styles = {
 
   landingTournamentGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 420px))",
-    gap: "14px",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+    gap: "12px",
     justifyContent: "start",
+    maxWidth: "100%",
   },
 
   landingTournamentCard: {
@@ -17466,11 +19400,13 @@ const styles = {
   app: {
     minHeight: "100vh",
     position: "relative",
-    overflow: "hidden",
+    overflowX: "hidden",
+    overflowY: "auto",
     background:
       "radial-gradient(circle at 12% 8%, rgba(37,99,235,0.12), transparent 28%), radial-gradient(circle at 88% 18%, rgba(96,165,250,0.14), transparent 30%), linear-gradient(135deg, #f5f9ff 0%, #eaf4ff 48%, #dbeafe 100%)",
-    padding: "16px",
+    padding: "clamp(10px, 1.4vw, 16px)",
     fontFamily: "Arial, sans-serif",
+    boxSizing: "border-box",
   },
 
   appGlowOne: {
@@ -17500,10 +19436,13 @@ const styles = {
   shell: {
     position: "relative",
     zIndex: 1,
-    maxWidth: "1180px",
+    width: "100%",
+    maxWidth: "1560px",
     margin: "0 auto",
     display: "grid",
     gap: "14px",
+    minWidth: 0,
+    boxSizing: "border-box",
   },
 
   header: {
@@ -17584,6 +19523,86 @@ const styles = {
   trainerUsersWrap: {
     display: "grid",
     gap: "10px",
+  },
+
+  accessPanel: {
+    display: "grid",
+    gap: "10px",
+    padding: "12px",
+    borderRadius: "16px",
+    background: "rgba(248,250,252,0.82)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    minWidth: 0,
+  },
+
+  accessGrid: {
+    display: "grid",
+    gap: "7px",
+    minWidth: 0,
+    overflowX: "auto",
+    WebkitOverflowScrolling: "touch",
+  },
+
+  accessHeaderRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(130px, 1.2fr) repeat(3, minmax(96px, 0.7fr))",
+    gap: "8px",
+    minWidth: "520px",
+  },
+
+  accessHeader: {
+    color: "#64748b",
+    fontSize: "11px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+
+  accessRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(130px, 1.2fr) repeat(3, minmax(96px, 0.7fr))",
+    gap: "8px",
+    alignItems: "center",
+    minWidth: "520px",
+    padding: "8px",
+    borderRadius: "12px",
+    background: "rgba(255,255,255,0.76)",
+    border: "1px solid rgba(37,99,235,0.10)",
+    color: "#0f172a",
+    fontSize: "12px",
+  },
+
+  accessToggle: {
+    border: "1px solid #cbd5e1",
+    borderRadius: "999px",
+    padding: "7px 10px",
+    background: "#f8fafc",
+    color: "#64748b",
+    fontSize: "11px",
+    fontWeight: "950",
+    cursor: "pointer",
+  },
+
+  accessToggleActive: {
+    background: "#dcfce7",
+    borderColor: "#86efac",
+    color: "#166534",
+  },
+
+  accessToggleDisabled: {
+    opacity: 0.72,
+    cursor: "not-allowed",
+  },
+
+  accessAdminBadge: {
+    justifySelf: "start",
+    borderRadius: "999px",
+    padding: "7px 10px",
+    background: "#eef2ff",
+    border: "1px solid #c7d2fe",
+    color: "#3730a3",
+    fontSize: "11px",
+    fontWeight: "950",
   },
 
   trainerUserRow: {
@@ -17720,6 +19739,8 @@ const styles = {
     border: "1px solid rgba(37,99,235,0.16)",
     boxShadow: "0 20px 54px rgba(37,99,235,0.10)",
     backdropFilter: "blur(18px)",
+    minWidth: 0,
+    overflowX: "auto",
   },
 
   tabButton: {
@@ -17780,12 +19801,14 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: "10px",
-    padding: "14px",
+    padding: "clamp(10px, 1.4vw, 14px)",
     borderRadius: "28px",
     background: "rgba(255,255,255,0.72)",
     border: "1px solid rgba(37,99,235,0.14)",
     boxShadow: "0 24px 64px rgba(37,99,235,0.08)",
     backdropFilter: "blur(18px)",
+    minWidth: 0,
+    boxSizing: "border-box",
   },
 
   lockedCard: {
@@ -18699,20 +20722,161 @@ const styles = {
     minHeight: "100vh",
     background: "#04130f",
     color: "#f8fafc",
-    padding: "18px",
+    padding: "clamp(8px, 1.6vw, 14px)",
     boxSizing: "border-box",
+    overflowX: "hidden",
   },
 
   publicTournamentShell: {
     width: "min(1120px, 100%)",
     margin: "0 auto",
     display: "grid",
-    gap: "18px",
+    gap: "12px",
+    minWidth: 0,
   },
 
   publicTournamentTopbar: {
     display: "flex",
     justifyContent: "flex-end",
+  },
+
+  publicBrandHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "10px",
+    flexWrap: "wrap",
+    padding: "0 0 4px",
+    borderRadius: 0,
+    background: "transparent",
+    border: "none",
+    boxShadow: "none",
+    backdropFilter: "none",
+    minWidth: 0,
+    width: "100%",
+    boxSizing: "border-box",
+  },
+
+  publicBrandIdentity: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    minWidth: 0,
+  },
+
+  publicBrandLogo: {
+    width: "32px",
+    height: "32px",
+    borderRadius: "13px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "linear-gradient(145deg, #2563eb, #60a5fa)",
+    color: "#ffffff",
+    fontSize: "11px",
+    fontWeight: "950",
+    boxShadow: "0 12px 26px rgba(37,99,235,0.20)",
+    flexShrink: 0,
+  },
+
+  publicBrandText: {
+    display: "grid",
+    gap: "2px",
+    minWidth: 0,
+  },
+
+  publicBrandTitle: {
+    color: "#ffffff",
+    fontSize: "14px",
+    fontWeight: "950",
+    lineHeight: 1,
+    textShadow: "0 1px 12px rgba(15,23,42,0.28)",
+  },
+
+  publicBrandSubtitle: {
+    color: "rgba(255,255,255,0.76)",
+    fontSize: "10px",
+    fontWeight: "800",
+    lineHeight: 1.2,
+    textShadow: "0 1px 10px rgba(15,23,42,0.24)",
+  },
+
+  publicBrandActions: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: "8px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+
+  publicBrandLanguageRow: {
+    display: "flex",
+    gap: "4px",
+    padding: "4px",
+    borderRadius: "999px",
+    background: "rgba(219,234,254,0.70)",
+    border: "1px solid rgba(37,99,235,0.13)",
+  },
+
+  publicBrandLanguageButton: {
+    border: "none",
+    borderRadius: "999px",
+    padding: "7px 9px",
+    background: "transparent",
+    color: "#1e3a8a",
+    fontSize: "10px",
+    fontWeight: "950",
+    cursor: "pointer",
+  },
+
+  publicBrandLanguageButtonActive: {
+    background: "#0f172a",
+    color: "#ffffff",
+  },
+
+  publicBrandOpenButton: {
+    border: "1px solid rgba(37,99,235,0.18)",
+    borderRadius: "999px",
+    padding: "9px 12px",
+    background: "linear-gradient(135deg, #0f172a, #2563eb)",
+    color: "#ffffff",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+    boxShadow: "0 12px 26px rgba(37,99,235,0.18)",
+    whiteSpace: "nowrap",
+  },
+
+  publicPoweredByBadge: {
+    justifySelf: "center",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "8px",
+    borderRadius: "999px",
+    padding: "8px 11px",
+    background: "rgba(255,255,255,0.90)",
+    border: "1px solid rgba(37,99,235,0.16)",
+    color: "#1e3a8a",
+    fontSize: "11px",
+    fontWeight: "900",
+    boxShadow: "0 12px 28px rgba(15,23,42,0.12)",
+    maxWidth: "100%",
+  },
+
+  publicPoweredByLogo: {
+    width: "22px",
+    height: "22px",
+    borderRadius: "8px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "linear-gradient(145deg, #2563eb, #60a5fa)",
+    color: "#ffffff",
+    fontSize: "8px",
+    fontWeight: "950",
+    flexShrink: 0,
   },
 
   publicTournamentBackButton: {
@@ -18785,8 +20949,8 @@ const styles = {
 
   publicTournamentHero: {
     display: "grid",
-    gap: "12px",
-    padding: "20px",
+    gap: "8px",
+    padding: "12px",
     borderRadius: "20px",
     background: "#0b1f18",
     border: "1px solid rgba(110,231,183,0.24)",
@@ -18794,16 +20958,17 @@ const styles = {
     minWidth: 0,
   },
 
-  publicTournamentHeroTop: {
+  publicTournamentTitleRow: {
     display: "flex",
-    gap: "8px",
+    gap: "10px",
     alignItems: "center",
     flexWrap: "wrap",
+    minWidth: 0,
   },
 
   publicTournamentHeroLogo: {
-    width: "42px",
-    height: "42px",
+    width: "40px",
+    height: "40px",
     borderRadius: "12px",
     display: "inline-flex",
     alignItems: "center",
@@ -18823,33 +20988,34 @@ const styles = {
   publicTournamentTitle: {
     margin: 0,
     color: "#fff",
-    fontSize: "clamp(30px, 7vw, 56px)",
+    fontSize: "clamp(28px, 5vw, 44px)",
     lineHeight: 1,
     fontWeight: "900",
     overflowWrap: "anywhere",
+    minWidth: 0,
   },
 
   publicTournamentDescription: {
     margin: 0,
     maxWidth: "760px",
     color: "#d1fae5",
-    fontSize: "15px",
-    lineHeight: 1.7,
+    fontSize: "14px",
+    lineHeight: 1.5,
     fontWeight: "650",
   },
 
   publicTournamentSummaryGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 120px), 150px))",
-    gap: "8px",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 112px), 1fr))",
+    gap: "7px",
     minWidth: 0,
   },
 
   publicTournamentSummaryCard: {
     display: "grid",
     gap: "4px",
-    minHeight: "56px",
-    padding: "10px 12px",
+    minHeight: "48px",
+    padding: "8px 10px",
     borderRadius: "13px",
     background: "rgba(255,255,255,0.08)",
     border: "1px solid rgba(255,255,255,0.12)",
@@ -18859,7 +21025,7 @@ const styles = {
   publicTournamentClassStatusList: {
     display: "flex",
     flexWrap: "wrap",
-    gap: "8px",
+    gap: "9px",
     minWidth: 0,
   },
 
@@ -18867,20 +21033,41 @@ const styles = {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
+    appearance: "none",
     borderRadius: "999px",
-    padding: "6px 10px",
+    gap: "8px",
+    padding: "9px 13px",
     background: "#dcfce7",
     border: "1px solid #86efac",
     color: "#166534",
-    fontSize: "12px",
+    fontSize: "13px",
     fontWeight: "900",
     lineHeight: 1.2,
+    cursor: "pointer",
+    transition:
+      "transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease, background 160ms ease",
+    minWidth: 0,
+    whiteSpace: "nowrap",
+    backdropFilter: "blur(12px)",
   },
 
   publicTournamentClassStatusBadgeDone: {
     background: "#f1f5f9",
     borderColor: "#cbd5e1",
     color: "#475569",
+  },
+
+  publicTournamentClassStatusBadgeActive: {
+    boxShadow: "0 0 0 3px rgba(37,99,235,0.18)",
+    transform: "translateY(-1px)",
+  },
+
+  publicTournamentClassStatusDot: {
+    width: "9px",
+    height: "9px",
+    borderRadius: "999px",
+    flexShrink: 0,
+    boxShadow: "0 0 0 3px rgba(255,255,255,0.22)",
   },
 
   publicTournamentSection: {
@@ -19157,25 +21344,24 @@ const styles = {
 
   tournamentDashboardSection: {
     display: "grid",
-    gap: "20px",
-    padding: "16px",
+    gap: "clamp(12px, 1.4vw, 20px)",
+    padding: "clamp(10px, 1.2vw, 16px)",
     borderRadius: "24px",
     background: "#dde7f3",
     border: "1px solid #cdd8e7",
     boxShadow: "inset 0 1px 0 rgba(255,255,255,0.72)",
-    width: "min(1560px, calc(100vw - 24px))",
-    maxWidth: "1560px",
-    marginLeft: "50%",
-    transform: "translateX(-50%)",
+    width: "100%",
+    maxWidth: "100%",
+    margin: "0 auto",
     boxSizing: "border-box",
     minWidth: 0,
-    overflow: "visible",
+    overflow: "hidden",
   },
 
   tournamentDashboardShell: {
     display: "grid",
-    gridTemplateColumns: "minmax(378px, 406px) minmax(0, 1fr)",
-    gap: "20px",
+    gridTemplateColumns: "minmax(300px, 360px) minmax(0, 1fr)",
+    gap: "clamp(12px, 1.4vw, 18px)",
     alignItems: "start",
     width: "100%",
     minWidth: 0,
@@ -19195,9 +21381,9 @@ const styles = {
     background: "#111827",
     border: "1px solid #1f2937",
     borderRadius: "22px",
-    padding: "21px",
+    padding: "clamp(14px, 1.4vw, 19px)",
     display: "grid",
-    gap: "17px",
+    gap: "clamp(12px, 1.2vw, 16px)",
     boxShadow: "0 18px 38px rgba(17,24,39,0.24)",
     minWidth: 0,
     width: "100%",
@@ -19684,8 +21870,8 @@ const styles = {
 
   tournamentStatsGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(185px, 1fr))",
-    gap: "14px",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))",
+    gap: "clamp(9px, 1vw, 14px)",
     minWidth: 0,
   },
 
@@ -19777,7 +21963,7 @@ const styles = {
     minWidth: 0,
     width: "100%",
     display: "grid",
-    gap: "22px",
+    gap: "clamp(14px, 1.4vw, 22px)",
     alignContent: "start",
   },
 
@@ -19797,6 +21983,18 @@ const styles = {
     gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 390px), 1fr))",
     gap: "20px",
     alignItems: "stretch",
+    minWidth: 0,
+  },
+
+  tournamentOverviewSeriesList: {
+    display: "grid",
+    gap: "14px",
+    minWidth: 0,
+  },
+
+  tournamentOverviewSeriesBlock: {
+    display: "grid",
+    gap: "10px",
     minWidth: 0,
   },
 
@@ -20970,7 +23168,7 @@ const styles = {
   tournamentShareCompactCard: {
     display: "grid",
     gap: "14px",
-    padding: "18px",
+    padding: "clamp(12px, 2vw, 18px)",
     borderRadius: "20px",
     background: "#f8fafc",
     border: "1px solid #dbe3ef",
