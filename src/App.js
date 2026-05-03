@@ -355,8 +355,6 @@ function getLanguageStorageKey(username) {
   return `volleyball-language-${String(username || "guest").trim()}`;
 }
 
-const USER_ACCESS_STORAGE_KEY = "volleyball-user-module-access";
-
 function readAccessBoolean(value, fallback = false) {
   if (value === undefined || value === null || value === "") return fallback;
   if (typeof value === "boolean") return value;
@@ -414,47 +412,8 @@ function canUseTournaments(user) {
   return normalizeUserAccess(user).tournaments;
 }
 
-function readStoredUserAccessOverrides() {
-  if (typeof window === "undefined") return {};
-
-  try {
-    const parsed = JSON.parse(
-      localStorage.getItem(USER_ACCESS_STORAGE_KEY) || "{}"
-    );
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? parsed
-      : {};
-  } catch (error) {
-    return {};
-  }
-}
-
-function saveStoredUserAccessOverrides(overrides) {
-  if (typeof window === "undefined") return;
-
-  try {
-    localStorage.setItem(USER_ACCESS_STORAGE_KEY, JSON.stringify(overrides));
-  } catch (error) {
-    console.error("Could not save user access overrides:", error);
-  }
-}
-
-function applyUserAccessOverride(user, overrides = {}) {
-  const storageUsername = getUserAccessStorageUsername(user?.username);
-  const override = storageUsername ? overrides[storageUsername] || {} : {};
-  const access = normalizeUserAccess({
-    ...user,
-    access: {
-      ...(user?.access || {}),
-      ...override,
-    },
-    canUseTeamBuilder:
-      override.teamBuilder ?? user?.canUseTeamBuilder,
-    canUseTournaments:
-      override.tournaments ?? user?.canUseTournaments,
-    admin: override.admin ?? user?.admin,
-    isAdmin: override.admin ?? user?.isAdmin,
-  });
+function normalizeUserWithAccess(user = {}) {
+  const access = normalizeUserAccess(user);
 
   return {
     ...user,
@@ -1129,6 +1088,13 @@ function getDefaultAuth() {
     password: "",
     loggedIn: false,
     role: "guest",
+    access: {
+      teamBuilder: false,
+      tournaments: false,
+      admin: false,
+    },
+    canUseTeamBuilder: false,
+    canUseTournaments: false,
   };
 }
 
@@ -3225,23 +3191,24 @@ export default function App() {
       if (!raw) return getDefaultAuth();
 
       const parsed = JSON.parse(raw);
-      return {
+      return normalizeUserWithAccess({
         username: parsed.username || "",
         password: parsed.password || "",
         loggedIn: Boolean(parsed.loggedIn),
         role: parsed.role || "guest",
-        access: normalizeUserAccess(parsed),
-      };
+        access: parsed.access || {},
+        canUseTeamBuilder: parsed.canUseTeamBuilder,
+        canUseTournaments: parsed.canUseTournaments,
+        isAdmin: parsed.isAdmin,
+        admin: parsed.admin,
+      });
     } catch (error) {
       return getDefaultAuth();
     }
   });
-  const [userAccessOverrides, setUserAccessOverrides] = useState(() =>
-    readStoredUserAccessOverrides()
-  );
   const currentUser = useMemo(
-    () => applyUserAccessOverride(auth, userAccessOverrides),
-    [auth, userAccessOverrides]
+    () => normalizeUserWithAccess(auth),
+    [auth]
   );
   const currentUserIsAdmin = isAdminUser(currentUser);
   const hasTeamBuilderAccess = canUseTeamBuilder(currentUser);
@@ -3503,9 +3470,7 @@ export default function App() {
       const data = await res.json();
       setTrainerUsers(
         Array.isArray(data?.users)
-          ? data.users.map((user) =>
-              applyUserAccessOverride(user, userAccessOverrides)
-            )
+          ? data.users.map((user) => normalizeUserWithAccess(user))
           : []
       );
     } catch (error) {
@@ -3517,7 +3482,6 @@ export default function App() {
     auth.password,
     auth.username,
     currentUserIsAdmin,
-    userAccessOverrides,
   ]);
 
   const saveUserSettingsToBackend = useCallback(
@@ -8180,17 +8144,18 @@ export default function App() {
         ? Number(data?.profile?.settings?.skillScale)
         : 5;
 
-      const nextAuth = {
+      const profile = data?.profile || {};
+      const nextAuth = normalizeUserWithAccess({
         username,
         password,
         loggedIn: true,
-        role: data?.profile?.role || "trainer",
-        access: normalizeUserAccess({
-          ...(data?.profile || {}),
-          username,
-          role: data?.profile?.role || "trainer",
-        }),
-      };
+        role: profile?.role || "trainer",
+        access: profile?.access || {},
+        canUseTeamBuilder: profile?.canUseTeamBuilder,
+        canUseTournaments: profile?.canUseTournaments,
+        isAdmin: profile?.isAdmin,
+        admin: profile?.admin,
+      });
 
       window.clearTimeout(tournamentAutosaveTimerRef.current);
       window.clearTimeout(manualGroupEditingTimerRef.current);
@@ -8221,11 +8186,7 @@ export default function App() {
       setCreatedTrainerInfo(null);
       setPlayerActionMessage("");
 
-      if (
-        canUseTeamBuilder(
-          applyUserAccessOverride(nextAuth, userAccessOverrides)
-        )
-      ) {
+      if (canUseTeamBuilder(nextAuth)) {
         await loadPlayers({
           username,
           password,
@@ -8386,7 +8347,7 @@ export default function App() {
     }
   }
 
-  function updateUserModuleAccess(targetUsername, patch) {
+  async function updateUserModuleAccess(targetUsername, patch) {
     if (!currentUserIsAdmin) return;
 
     const storageUsername = getUserAccessStorageUsername(targetUsername);
@@ -8410,15 +8371,38 @@ export default function App() {
       ? { teamBuilder: true, tournaments: true, admin: true }
       : nextAccess;
 
-    setUserAccessOverrides((prev) => {
-      const next = {
-        ...prev,
-        [storageUsername]: safeAccess,
-      };
-      saveStoredUserAccessOverrides(next);
-      return next;
-    });
-    setTrainerActionMessage(t.accessSaved);
+    try {
+      setTrainerActionMessage("");
+
+      const res = await fetch(`${API}?_ts=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "updateTrainerAccess",
+          username: auth.username,
+          password: auth.password,
+          targetUsername,
+          canUseTeamBuilder: !!safeAccess.teamBuilder,
+          canUseTournaments: !!safeAccess.tournaments,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!data?.success) {
+        setTrainerActionMessage(data?.message || t.couldNotCreateTrainer);
+        return;
+      }
+
+      setTrainerActionMessage(t.accessSaved);
+      await loadTrainerUsers();
+    } catch (error) {
+      console.error("Could not update module access:", error);
+      setTrainerActionMessage(t.couldNotCreateTrainer);
+    }
   }
 
   async function resetTrainerPassword(targetUsername) {
@@ -9779,18 +9763,14 @@ const savedRound = readStorageWithTtl(
   const visibleTrainerUsers = useMemo(() => {
     return trainerUsers
       .filter((trainer) => trainer.role !== "archived")
-      .map((trainer) =>
-        applyUserAccessOverride(trainer, userAccessOverrides)
-      );
-  }, [trainerUsers, userAccessOverrides]);
+      .map((trainer) => normalizeUserWithAccess(trainer));
+  }, [trainerUsers]);
 
   const archivedTrainerUsers = useMemo(() => {
     return trainerUsers
       .filter((trainer) => trainer.role === "archived")
-      .map((trainer) =>
-        applyUserAccessOverride(trainer, userAccessOverrides)
-      );
-  }, [trainerUsers, userAccessOverrides]);
+      .map((trainer) => normalizeUserWithAccess(trainer));
+  }, [trainerUsers]);
 
   const trainerCopySourceUsers = useMemo(() => {
     return trainerUsers.filter(
