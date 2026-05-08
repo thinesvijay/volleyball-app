@@ -1,0 +1,10389 @@
+import { useCallback, useEffect, useState } from "react";
+import {
+  getPlayerHubAccessRequestCards,
+  getPlayerHubProfileDefaults,
+  getPlayerHubProfileTypeOptions,
+  normalizePlayerHubProfile,
+} from "./playerHubUtils";
+
+const playerHubCopy = {
+  profileSaved: "Player profile saved.",
+  profileLoadFailed: "Could not load player profile.",
+  profileSaveFailed: "Could not save player profile.",
+  profileLoading: "Loading profile...",
+  profileSaving: "Saving...",
+  profileSaveButton: "Save profile",
+};
+
+const isPlayerHubDev =
+  typeof process !== "undefined" &&
+  process.env &&
+  process.env.NODE_ENV !== "production";
+
+function playerHubNow() {
+  if (typeof performance !== "undefined" && performance.now) {
+    return performance.now();
+  }
+
+  return Date.now();
+}
+
+function startPlayerHubTimer() {
+  return isPlayerHubDev ? playerHubNow() : 0;
+}
+
+function logPlayerHubTiming(label, startedAt) {
+  if (!isPlayerHubDev || !startedAt || typeof console === "undefined") return;
+  console.log(`[PlayerHub] ${label} ${Math.round(playerHubNow() - startedAt)}ms`);
+}
+
+function cleanPlayerHubError(error, fallback) {
+  const message = String(error?.message || "").trim();
+  if (!message) return fallback;
+  if (/failed to fetch|unknown action/i.test(message)) return fallback;
+  return message;
+}
+
+function isUsablePlayerHubSnapshot(snapshot) {
+  return Boolean(
+    snapshot &&
+      typeof snapshot === "object" &&
+      Object.prototype.hasOwnProperty.call(snapshot, "profile") &&
+      Array.isArray(snapshot.availableClubs) &&
+      Array.isArray(snapshot.teamNeeds) &&
+      Array.isArray(snapshot.myTeams) &&
+      Array.isArray(snapshot.tournamentAvailability)
+  );
+}
+
+const playerHubStyles = {
+  shell: {
+    display: "grid",
+    gap: "14px",
+    width: "100%",
+    maxWidth: "1120px",
+    justifySelf: "center",
+    margin: "0 auto",
+    minWidth: 0,
+    boxSizing: "border-box",
+    overflowX: "hidden",
+  },
+  hero: {
+    display: "grid",
+    gap: "12px",
+    padding: "16px",
+    borderRadius: "18px",
+    background:
+      "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(239,246,255,0.86))",
+    border: "1px solid rgba(37,99,235,0.12)",
+    boxShadow: "0 12px 28px rgba(37,99,235,0.07)",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  heroTitleRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "12px",
+    alignItems: "flex-start",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  titleBlock: {
+    display: "grid",
+    gap: "6px",
+    minWidth: 0,
+  },
+  title: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: "24px",
+    lineHeight: 1.12,
+  },
+  subtitle: {
+    margin: 0,
+    color: "#475569",
+    fontSize: "13px",
+    lineHeight: 1.45,
+    maxWidth: "760px",
+  },
+  statusChip: {
+    borderRadius: "999px",
+    padding: "6px 9px",
+    background: "#0f172a",
+    color: "#dbeafe",
+    border: "1px solid rgba(37,99,235,0.22)",
+    fontSize: "11px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+  },
+  section: {
+    display: "grid",
+    gap: "10px",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  sectionTitle: {
+    color: "#0f172a",
+    fontSize: "14px",
+    fontWeight: "950",
+  },
+  playerHomeGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))",
+    gap: "12px",
+    alignItems: "start",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  compactHomeGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))",
+    gap: "12px",
+    alignItems: "start",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  profileCard: {
+    display: "grid",
+    gap: "12px",
+    padding: "14px",
+    borderRadius: "18px",
+    background: "rgba(255,255,255,0.94)",
+    border: "1px solid rgba(37,99,235,0.14)",
+    boxShadow: "0 12px 28px rgba(37,99,235,0.07)",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  playerHeroCard: {
+    display: "grid",
+    gap: "12px",
+    padding: "16px",
+    borderRadius: "20px",
+    background:
+      "linear-gradient(135deg, rgba(255,255,255,0.98), rgba(239,246,255,0.86))",
+    border: "1px solid rgba(37,99,235,0.14)",
+    boxShadow: "0 16px 34px rgba(37,99,235,0.08)",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  nextTournamentCard: {
+    display: "grid",
+    gap: "12px",
+    padding: "14px",
+    borderRadius: "18px",
+    background:
+      "linear-gradient(135deg, rgba(255,247,237,0.98), rgba(240,253,244,0.80))",
+    border: "1px solid rgba(249,115,22,0.16)",
+    boxShadow: "0 14px 30px rgba(249,115,22,0.06)",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  homeCard: {
+    display: "grid",
+    gap: "10px",
+    padding: "14px",
+    borderRadius: "18px",
+    background: "rgba(255,255,255,0.94)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    boxShadow: "0 10px 22px rgba(37,99,235,0.05)",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  homeCardHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  homeKicker: {
+    color: "#2563eb",
+    fontSize: "10px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+  heroActions: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  accountDetails: {
+    display: "grid",
+    gap: "10px",
+    maxWidth: "100%",
+    minWidth: 0,
+  },
+  accountSummary: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    justifySelf: "start",
+    border: "1px solid rgba(37,99,235,0.16)",
+    borderRadius: "999px",
+    padding: "8px 11px",
+    background: "rgba(239,246,255,0.92)",
+    color: "#1e3a8a",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+  },
+  compactRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    padding: "9px 10px",
+    borderRadius: "13px",
+    background: "rgba(248,250,252,0.82)",
+    border: "1px solid rgba(226,232,240,0.92)",
+    minWidth: 0,
+  },
+  compactRowMain: {
+    display: "grid",
+    gap: "2px",
+    minWidth: 0,
+  },
+  compactRowTitle: {
+    color: "#0f172a",
+    fontSize: "13px",
+    fontWeight: "950",
+    overflowWrap: "anywhere",
+  },
+  compactRowMeta: {
+    color: "#64748b",
+    fontSize: "11px",
+    fontWeight: "850",
+    overflowWrap: "anywhere",
+  },
+  profileHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: "10px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  profileMeta: {
+    display: "grid",
+    gap: "4px",
+    minWidth: 0,
+  },
+  profileEditorPanel: {
+    display: "grid",
+    gap: "10px",
+    minWidth: 0,
+  },
+  teamSetupCard: {
+    display: "grid",
+    gap: "10px",
+    padding: "12px",
+    borderRadius: "16px",
+    background:
+      "linear-gradient(135deg, rgba(240,253,244,0.88), rgba(239,246,255,0.82))",
+    border: "1px solid rgba(34,197,94,0.18)",
+    boxShadow: "0 10px 22px rgba(34,197,94,0.06)",
+    minWidth: 0,
+  },
+  teamSetupControls: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "8px",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  editorSection: {
+    display: "grid",
+    gap: "9px",
+    padding: "11px",
+    borderRadius: "15px",
+    background: "rgba(248,250,252,0.78)",
+    border: "1px solid rgba(37,99,235,0.10)",
+    minWidth: 0,
+  },
+  actionDrawer: {
+    display: "grid",
+    gap: "10px",
+    padding: "12px",
+    borderRadius: "18px",
+    background: "rgba(248,250,252,0.86)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    boxShadow: "0 14px 30px rgba(15,23,42,0.06)",
+    minWidth: 0,
+  },
+  actionDrawerHeader: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: "10px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  actionDrawerTitle: {
+    margin: 0,
+    color: "#0f172a",
+    fontSize: "14px",
+    fontWeight: "950",
+  },
+  actionDrawerHint: {
+    color: "#64748b",
+    fontSize: "12px",
+    fontWeight: "800",
+    lineHeight: 1.35,
+  },
+  profileFormGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))",
+    gap: "9px",
+    minWidth: 0,
+  },
+  profileField: {
+    display: "grid",
+    gap: "5px",
+    minWidth: 0,
+  },
+  profileLabel: {
+    color: "#334155",
+    fontSize: "11px",
+    fontWeight: "950",
+  },
+  profileInput: {
+    width: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+    border: "1px solid rgba(148,163,184,0.45)",
+    borderRadius: "12px",
+    padding: "9px 10px",
+    background: "#f8fafc",
+    color: "#0f172a",
+    fontSize: "13px",
+    outline: "none",
+  },
+  profileTextarea: {
+    width: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+    border: "1px solid rgba(148,163,184,0.45)",
+    borderRadius: "12px",
+    padding: "9px 10px",
+    background: "#f8fafc",
+    color: "#0f172a",
+    fontSize: "13px",
+    minHeight: "72px",
+    resize: "vertical",
+    outline: "none",
+  },
+  profileTextareaCompact: {
+    width: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+    border: "1px solid rgba(148,163,184,0.45)",
+    borderRadius: "12px",
+    padding: "8px 10px",
+    background: "#f8fafc",
+    color: "#0f172a",
+    fontSize: "13px",
+    minHeight: "54px",
+    resize: "vertical",
+    outline: "none",
+  },
+  choiceGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 190px), 1fr))",
+    gap: "9px",
+    minWidth: 0,
+  },
+  segmentedControl: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "6px",
+    minWidth: 0,
+  },
+  segmentButton: {
+    border: "1px solid rgba(148,163,184,0.35)",
+    borderRadius: "999px",
+    padding: "8px 10px",
+    background: "#ffffff",
+    color: "#475569",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+  },
+  segmentButtonActive: {
+    background: "#2563eb",
+    borderColor: "rgba(37,99,235,0.26)",
+    color: "#ffffff",
+  },
+  checkboxRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "9px 10px",
+    borderRadius: "12px",
+    background: "rgba(239,246,255,0.72)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    color: "#1e3a8a",
+    fontSize: "12px",
+    fontWeight: "850",
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
+  profileActions: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  saveButton: {
+    border: "1px solid rgba(37,99,235,0.22)",
+    borderRadius: "999px",
+    padding: "9px 13px",
+    background: "#2563eb",
+    color: "#ffffff",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+  },
+  saveButtonDisabled: {
+    background: "#94a3b8",
+    cursor: "not-allowed",
+  },
+  profileMessage: {
+    color: "#475569",
+    fontSize: "12px",
+    fontWeight: "850",
+  },
+  profilePreviewPanel: {
+    display: "grid",
+    gap: "10px",
+    padding: "13px",
+    borderRadius: "18px",
+    background:
+      "linear-gradient(135deg, rgba(239,246,255,0.82), rgba(255,255,255,0.94))",
+    border: "1px solid rgba(37,99,235,0.12)",
+    boxShadow: "0 12px 28px rgba(37,99,235,0.06)",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  profilePreviewCard: {
+    display: "grid",
+    gap: "12px",
+    padding: "14px",
+    borderRadius: "18px",
+    background: "rgba(255,255,255,0.94)",
+    border: "1px solid rgba(37,99,235,0.14)",
+    boxShadow: "0 10px 22px rgba(37,99,235,0.05)",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  profilePreviewTitleRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "10px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  playerCardHero: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    minWidth: 0,
+  },
+  playerAvatarLarge: {
+    width: "54px",
+    height: "54px",
+    borderRadius: "18px",
+    display: "grid",
+    placeItems: "center",
+    background: "linear-gradient(135deg, #2563eb, #22c55e)",
+    color: "#ffffff",
+    fontSize: "21px",
+    fontWeight: "950",
+    flex: "0 0 auto",
+  },
+  previewNameBlock: {
+    display: "grid",
+    gap: "4px",
+    minWidth: 0,
+  },
+  previewName: {
+    color: "#0f172a",
+    fontSize: "22px",
+    lineHeight: 1.12,
+    fontWeight: "950",
+    overflowWrap: "anywhere",
+  },
+  previewSubtitle: {
+    display: "block",
+    color: "#475569",
+    fontSize: "12px",
+    fontWeight: "850",
+    lineHeight: 1.35,
+    overflowWrap: "anywhere",
+  },
+  emptyPreview: {
+    padding: "18px",
+    borderRadius: "16px",
+    background: "rgba(255,255,255,0.78)",
+    border: "1px dashed rgba(37,99,235,0.22)",
+    color: "#64748b",
+    fontSize: "12px",
+    fontWeight: "850",
+    lineHeight: 1.45,
+  },
+  cardTitle: {
+    display: "block",
+    color: "#0f172a",
+    fontSize: "14px",
+    fontWeight: "950",
+    lineHeight: 1.25,
+  },
+  cardText: {
+    color: "#475569",
+    fontSize: "12px",
+    lineHeight: 1.4,
+  },
+  chipRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    minWidth: 0,
+  },
+  chip: {
+    borderRadius: "999px",
+    padding: "5px 8px",
+    background: "rgba(239,246,255,0.88)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    color: "#1e3a8a",
+    fontSize: "11px",
+    fontWeight: "850",
+  },
+  previewGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 210px), 1fr))",
+    gap: "10px",
+    minWidth: 0,
+  },
+  previewCard: {
+    display: "grid",
+    gap: "9px",
+    padding: "13px",
+    borderRadius: "16px",
+    background: "rgba(255,255,255,0.94)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    boxShadow: "0 10px 22px rgba(37,99,235,0.06)",
+    minWidth: 0,
+  },
+  teamNeedCard: {
+    display: "grid",
+    gap: "10px",
+    padding: "14px",
+    borderRadius: "16px",
+    background:
+      "linear-gradient(135deg, rgba(255,255,255,0.98), rgba(239,246,255,0.74))",
+    border: "1px solid rgba(37,99,235,0.14)",
+    boxShadow: "0 12px 28px rgba(37,99,235,0.07)",
+    minWidth: 0,
+  },
+  needStat: {
+    display: "grid",
+    gap: "2px",
+    padding: "8px 9px",
+    borderRadius: "12px",
+    background: "rgba(255,255,255,0.78)",
+    border: "1px solid rgba(37,99,235,0.10)",
+    minWidth: 0,
+  },
+  needStatStrong: {
+    color: "#0f172a",
+    fontSize: "13px",
+    fontWeight: "950",
+    lineHeight: 1.15,
+  },
+  needStatLabel: {
+    color: "#64748b",
+    fontSize: "10px",
+    fontWeight: "850",
+  },
+  previewType: {
+    color: "#2563eb",
+    fontSize: "10px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+  previewTitle: {
+    color: "#0f172a",
+    fontSize: "15px",
+    fontWeight: "950",
+    overflowWrap: "anywhere",
+  },
+  detailGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 130px), 1fr))",
+    gap: "6px",
+    minWidth: 0,
+  },
+  detail: {
+    padding: "7px 8px",
+    borderRadius: "10px",
+    background: "rgba(248,250,252,0.98)",
+    border: "1px solid rgba(226,232,240,0.92)",
+    minWidth: 0,
+  },
+  detailLabel: {
+    display: "block",
+    color: "#64748b",
+    fontSize: "9px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+  detailValue: {
+    display: "block",
+    color: "#0f172a",
+    fontSize: "11px",
+    fontWeight: "850",
+    overflowWrap: "anywhere",
+  },
+  statCard: {
+    display: "grid",
+    gap: "5px",
+    alignContent: "start",
+    padding: "9px 10px",
+    borderRadius: "13px",
+    background: "rgba(239,246,255,0.78)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    minWidth: 0,
+  },
+  editorTabs: {
+    display: "flex",
+    gap: "7px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  editorTab: {
+    border: "1px solid rgba(37,99,235,0.14)",
+    borderRadius: "999px",
+    padding: "7px 10px",
+    background: "rgba(239,246,255,0.72)",
+    color: "#1e3a8a",
+    fontSize: "11px",
+    fontWeight: "950",
+    cursor: "pointer",
+  },
+  editorTabActive: {
+    background: "#0f172a",
+    borderColor: "#0f172a",
+    color: "#ffffff",
+  },
+  adminReviewCard: {
+    display: "grid",
+    gap: "12px",
+    padding: "14px",
+    borderRadius: "18px",
+    background:
+      "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(239,246,255,0.80))",
+    border: "1px solid rgba(37,99,235,0.14)",
+    boxShadow: "0 12px 28px rgba(37,99,235,0.07)",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  adminDashboardGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))",
+    gap: "10px",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  adminDashboardTile: {
+    display: "grid",
+    gap: "8px",
+    padding: "12px",
+    borderRadius: "16px",
+    background: "rgba(255,255,255,0.94)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    boxShadow: "0 8px 18px rgba(37,99,235,0.05)",
+    minWidth: 0,
+  },
+  adminDashboardTileActive: {
+    borderColor: "rgba(37,99,235,0.32)",
+    background: "rgba(239,246,255,0.96)",
+  },
+  adminDashboardTileMuted: {
+    opacity: 0.68,
+    background: "rgba(248,250,252,0.88)",
+    borderColor: "rgba(148,163,184,0.16)",
+    boxShadow: "none",
+  },
+  adminDashboardIcon: {
+    width: "28px",
+    height: "28px",
+    borderRadius: "10px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "#eff6ff",
+    color: "#1e3a8a",
+    fontSize: "15px",
+    fontWeight: "950",
+  },
+  adminDashboardCount: {
+    color: "#0f172a",
+    fontSize: "20px",
+    fontWeight: "950",
+    lineHeight: 1,
+  },
+  adminAccordion: {
+    display: "grid",
+    gap: "10px",
+    padding: "0",
+    borderRadius: "18px",
+    background: "rgba(255,255,255,0.90)",
+    border: "1px solid rgba(37,99,235,0.14)",
+    boxShadow: "0 10px 22px rgba(37,99,235,0.05)",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+    overflow: "hidden",
+  },
+  adminAccordionSummary: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    padding: "13px 14px",
+    color: "#0f172a",
+    fontSize: "14px",
+    fontWeight: "950",
+    cursor: "pointer",
+    minWidth: 0,
+  },
+  adminAccordionBody: {
+    display: "grid",
+    gap: "12px",
+    padding: "0 14px 14px",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  adminReviewTop: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: "10px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  adminReviewGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
+    gap: "10px",
+    minWidth: 0,
+  },
+  adminReviewProfileCard: {
+    display: "grid",
+    gap: "9px",
+    padding: "12px",
+    borderRadius: "16px",
+    background: "rgba(255,255,255,0.94)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    boxShadow: "0 8px 18px rgba(37,99,235,0.05)",
+    minWidth: 0,
+  },
+  adminActionRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "7px",
+    minWidth: 0,
+  },
+  adminPasswordRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "7px",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  adminActionButton: {
+    border: "1px solid rgba(37,99,235,0.16)",
+    borderRadius: "999px",
+    padding: "7px 9px",
+    background: "rgba(239,246,255,0.92)",
+    color: "#1e3a8a",
+    fontSize: "11px",
+    fontWeight: "950",
+    cursor: "pointer",
+  },
+  adminDangerButton: {
+    borderColor: "rgba(220,38,38,0.16)",
+    background: "rgba(255,241,242,0.92)",
+    color: "#be123c",
+  },
+  adminDisabledButton: {
+    opacity: 0.62,
+    cursor: "not-allowed",
+  },
+  adminFeedbackBanner: {
+    display: "grid",
+    gap: "3px",
+    padding: "10px 12px",
+    borderRadius: "14px",
+    border: "1px solid rgba(37,99,235,0.14)",
+    color: "#1e3a8a",
+    background: "rgba(239,246,255,0.94)",
+    fontSize: "12px",
+    fontWeight: "850",
+    lineHeight: 1.35,
+  },
+  adminFeedbackTitle: {
+    fontSize: "11px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+  adminFeedbackSuccess: {
+    borderColor: "rgba(34,197,94,0.22)",
+    background: "rgba(240,253,244,0.94)",
+    color: "#166534",
+  },
+  adminFeedbackError: {
+    borderColor: "rgba(244,63,94,0.24)",
+    background: "rgba(255,241,242,0.96)",
+    color: "#be123c",
+  },
+  clubTeamStatusChip: {
+    justifySelf: "start",
+    borderRadius: "999px",
+    padding: "5px 8px",
+    border: "1px solid #cbd5e1",
+    color: "#475569",
+    background: "#f8fafc",
+    fontSize: "11px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+  },
+  clubTeamStatusActive: {
+    background: "#dcfce7",
+    borderColor: "#86efac",
+    color: "#166534",
+  },
+  clubTeamStatusInactive: {
+    background: "#fee2e2",
+    borderColor: "#fecaca",
+    color: "#991b1b",
+  },
+  accessRequestCard: {
+    display: "grid",
+    gap: "9px",
+    alignContent: "start",
+    padding: "12px",
+    borderRadius: "16px",
+    background: "rgba(255,255,255,0.94)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    boxShadow: "0 8px 18px rgba(37,99,235,0.05)",
+    minWidth: 0,
+  },
+  accessRequestChooser: {
+    display: "grid",
+    gap: "9px",
+    padding: "10px",
+    borderRadius: "15px",
+    background: "rgba(248,250,252,0.86)",
+    border: "1px solid rgba(37,99,235,0.10)",
+    minWidth: 0,
+  },
+  accessRequestTile: {
+    display: "grid",
+    gap: "6px",
+    alignContent: "start",
+    width: "100%",
+    textAlign: "left",
+    padding: "10px",
+    borderRadius: "14px",
+    border: "1px solid rgba(37,99,235,0.14)",
+    background: "rgba(255,255,255,0.96)",
+    color: "#0f172a",
+    boxShadow: "0 8px 18px rgba(37,99,235,0.05)",
+    cursor: "pointer",
+    minWidth: 0,
+  },
+  accessRequestAction: {
+    justifySelf: "start",
+    borderRadius: "999px",
+    padding: "5px 8px",
+    background: "#2563eb",
+    color: "#ffffff",
+    fontSize: "11px",
+    fontWeight: "950",
+  },
+  accessRequestActionMuted: {
+    background: "#e2e8f0",
+    color: "#475569",
+  },
+  accessOptionButton: {
+    display: "grid",
+    gap: "4px",
+    textAlign: "left",
+    padding: "9px",
+    borderRadius: "13px",
+    border: "1px solid rgba(37,99,235,0.12)",
+    background: "rgba(255,255,255,0.94)",
+    color: "#0f172a",
+    cursor: "pointer",
+    minWidth: 0,
+  },
+  accessOptionSelected: {
+    borderColor: "rgba(37,99,235,0.45)",
+    background: "rgba(239,246,255,0.98)",
+    boxShadow: "0 8px 18px rgba(37,99,235,0.08)",
+  },
+  accessRequestList: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  accessRequestRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "10px",
+    alignItems: "center",
+    padding: "10px",
+    borderRadius: "14px",
+    background: "rgba(248,250,252,0.82)",
+    border: "1px solid rgba(37,99,235,0.10)",
+    minWidth: 0,
+  },
+  accessCompactList: {
+    display: "grid",
+    gap: "6px",
+    minWidth: 0,
+  },
+  accessCompactRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto auto",
+    gap: "8px",
+    alignItems: "center",
+    padding: "8px 9px",
+    borderRadius: "12px",
+    background: "rgba(255,255,255,0.86)",
+    border: "1px solid rgba(226,232,240,0.92)",
+    minWidth: 0,
+  },
+  accessMiniButton: {
+    border: "1px solid rgba(37,99,235,0.16)",
+    borderRadius: "999px",
+    padding: "6px 9px",
+    background: "rgba(239,246,255,0.92)",
+    color: "#1e3a8a",
+    fontSize: "11px",
+    fontWeight: "950",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  accessInlineForm: {
+    display: "grid",
+    gap: "8px",
+    padding: "10px",
+    borderRadius: "13px",
+    background: "rgba(239,246,255,0.72)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    minWidth: 0,
+  },
+  mutedLine: {
+    color: "#94a3b8",
+    fontSize: "11px",
+    fontWeight: "850",
+  },
+  progressTrack: {
+    width: "100%",
+    height: "7px",
+    borderRadius: "999px",
+    background: "rgba(226,232,240,0.9)",
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: "999px",
+    background: "linear-gradient(90deg, #2563eb, #22c55e)",
+  },
+  teamControlHero: {
+    display: "grid",
+    gap: "12px",
+    padding: "16px",
+    borderRadius: "20px",
+    background:
+      "linear-gradient(135deg, rgba(255,255,255,0.98), rgba(240,253,244,0.74))",
+    border: "1px solid rgba(37,99,235,0.14)",
+    boxShadow: "0 16px 34px rgba(37,99,235,0.07)",
+    minWidth: 0,
+  },
+  teamControlHeroTop: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: "12px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  teamControlActions: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    minWidth: 0,
+  },
+  teamControlGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
+    gap: "12px",
+    alignItems: "start",
+    minWidth: 0,
+  },
+  teamControlPanel: {
+    display: "grid",
+    gap: "9px",
+    padding: "12px",
+    borderRadius: "16px",
+    background: "rgba(255,255,255,0.92)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    minWidth: 0,
+  },
+  teamControlWidePanel: {
+    display: "grid",
+    gap: "9px",
+    padding: "12px",
+    borderRadius: "16px",
+    background: "rgba(255,255,255,0.92)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    minWidth: 0,
+    gridColumn: "1 / -1",
+  },
+  teamControlRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "10px",
+    alignItems: "center",
+    padding: "9px 10px",
+    borderRadius: "13px",
+    background: "rgba(248,250,252,0.82)",
+    border: "1px solid rgba(226,232,240,0.92)",
+    minWidth: 0,
+  },
+  teamControlActionsRow: {
+    display: "flex",
+    gap: "7px",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    minWidth: 0,
+  },
+  planStatsLine: {
+    color: "#475569",
+    fontSize: "12px",
+    fontWeight: "900",
+    lineHeight: 1.35,
+  },
+  interestGroup: {
+    display: "grid",
+    gap: "7px",
+    minWidth: 0,
+  },
+  interestGroupTitle: {
+    color: "#0f172a",
+    fontSize: "12px",
+    fontWeight: "950",
+  },
+  interestRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: "12px",
+    padding: "9px",
+    borderRadius: "13px",
+    background: "rgba(255,255,255,0.86)",
+    border: "1px solid rgba(37,99,235,0.10)",
+    width: "100%",
+    maxWidth: "100%",
+    boxSizing: "border-box",
+    minWidth: 0,
+  },
+  interestPlayerMeta: {
+    display: "grid",
+    gap: "4px",
+    flex: "1 1 240px",
+    minWidth: "min(100%, 240px)",
+  },
+  interestPlayerName: {
+    color: "#0f172a",
+    fontSize: "15px",
+    fontWeight: "950",
+    lineHeight: 1.22,
+    overflowWrap: "normal",
+    wordBreak: "normal",
+    whiteSpace: "normal",
+  },
+  interestActionRow: {
+    display: "flex",
+    flex: "0 1 auto",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    gap: "7px",
+    minWidth: 0,
+  },
+  addTeamMemberButton: {
+    border: "1px solid rgba(22,163,74,0.22)",
+    borderRadius: "999px",
+    padding: "8px 11px",
+    background: "#16a34a",
+    color: "#ffffff",
+    fontSize: "11px",
+    fontWeight: "950",
+    cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(22,163,74,0.14)",
+  },
+  squadBoard: {
+    display: "grid",
+    gap: "12px",
+    padding: "14px",
+    borderRadius: "18px",
+    background:
+      "linear-gradient(135deg, rgba(255,255,255,0.96), rgba(239,246,255,0.72))",
+    border: "1px solid rgba(37,99,235,0.14)",
+    minWidth: 0,
+    maxWidth: "100%",
+    boxSizing: "border-box",
+  },
+  teamPlanningWorkspace: {
+    display: "grid",
+    gap: "12px",
+    gridColumn: "1 / -1",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  squadBoardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "10px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  squadBuilderLayout: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: "10px",
+    minWidth: 0,
+  },
+  squadTeamsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+    gap: "10px",
+    minWidth: 0,
+  },
+  squadColumn: {
+    display: "grid",
+    alignContent: "start",
+    gap: "8px",
+    padding: "10px",
+    borderRadius: "16px",
+    background: "rgba(255,255,255,0.90)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    boxShadow: "0 10px 22px rgba(37,99,235,0.05)",
+    minWidth: 0,
+    width: "100%",
+    boxSizing: "border-box",
+  },
+  squadTeamBox: {
+    display: "grid",
+    alignContent: "start",
+    gap: "7px",
+    padding: "10px",
+    borderRadius: "16px",
+    background: "rgba(255,255,255,0.90)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    boxShadow: "0 10px 22px rgba(37,99,235,0.05)",
+    minWidth: 0,
+  },
+  squadColumnHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px",
+    color: "#0f172a",
+    fontSize: "13px",
+    fontWeight: "950",
+    minWidth: 0,
+  },
+  squadPlayerRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "7px",
+    alignItems: "center",
+    padding: "6px 0",
+    borderBottom: "1px solid rgba(37,99,235,0.08)",
+    minWidth: 0,
+  },
+  squadPlayerInfo: {
+    display: "grid",
+    gap: "2px",
+    minWidth: 0,
+  },
+  squadPlayerName: {
+    color: "#0f172a",
+    fontSize: "13px",
+    fontWeight: "900",
+    lineHeight: 1.16,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  squadPlayerMeta: {
+    color: "#64748b",
+    fontSize: "11px",
+    fontWeight: "750",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  squadBadgeRow: {
+    display: "flex",
+    gap: "4px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  squadTinyBadge: {
+    borderRadius: "999px",
+    padding: "2px 6px",
+    border: "1px solid rgba(148,163,184,0.28)",
+    background: "#f8fafc",
+    color: "#475569",
+    fontSize: "10px",
+    fontWeight: "900",
+    whiteSpace: "nowrap",
+  },
+  squadMoveRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: "4px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  squadMoveButton: {
+    border: "1px solid rgba(37,99,235,0.14)",
+    borderRadius: "8px",
+    padding: "4px 7px",
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    fontSize: "10px",
+    fontWeight: "900",
+    cursor: "pointer",
+    lineHeight: 1,
+  },
+  squadMoveButtonActive: {
+    background: "#2563eb",
+    borderColor: "#2563eb",
+    color: "#ffffff",
+  },
+  squadEmptyRow: {
+    padding: "8px",
+    borderRadius: "12px",
+    background: "rgba(248,250,252,0.86)",
+    color: "#64748b",
+    fontSize: "12px",
+    fontWeight: "800",
+  },
+  squadPendingPanel: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  squadPendingToggle: {
+    justifySelf: "start",
+    border: "1px solid rgba(37,99,235,0.14)",
+    borderRadius: "999px",
+    padding: "6px 10px",
+    background: "rgba(239,246,255,0.92)",
+    color: "#1e3a8a",
+    fontSize: "11px",
+    fontWeight: "950",
+    cursor: "pointer",
+  },
+  squadPendingList: {
+    display: "grid",
+    gap: "4px",
+    padding: "8px 10px",
+    borderRadius: "14px",
+    background: "rgba(255,255,255,0.86)",
+    border: "1px solid rgba(37,99,235,0.10)",
+    minWidth: 0,
+  },
+  accessActionRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "7px",
+    minWidth: 0,
+  },
+  accessStatusChip: {
+    justifySelf: "start",
+    borderRadius: "999px",
+    padding: "5px 8px",
+    border: "1px solid #cbd5e1",
+    color: "#475569",
+    background: "#f8fafc",
+    fontSize: "11px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+  },
+  accessStatusIdle: {
+    background: "#f8fafc",
+    borderColor: "#cbd5e1",
+    color: "#475569",
+  },
+  accessStatusPending: {
+    background: "#fef3c7",
+    borderColor: "#fde68a",
+    color: "#92400e",
+  },
+  accessStatusApproved: {
+    background: "#dcfce7",
+    borderColor: "#86efac",
+    color: "#166534",
+  },
+  accessStatusRejected: {
+    background: "#fee2e2",
+    borderColor: "#fecaca",
+    color: "#991b1b",
+  },
+  accessWarning: {
+    padding: "8px 10px",
+    borderRadius: "12px",
+    background: "rgba(255,247,237,0.94)",
+    border: "1px solid rgba(249,115,22,0.22)",
+    color: "#9a3412",
+    fontSize: "12px",
+    fontWeight: "850",
+    lineHeight: 1.35,
+  },
+  clubTeamAdminForm: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
+    gap: "8px",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  clubTeamAdminList: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  clubTeamAdminRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 190px), 1fr))",
+    gap: "10px",
+    alignItems: "center",
+    padding: "10px",
+    borderRadius: "14px",
+    background: "rgba(255,255,255,0.94)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    minWidth: 0,
+  },
+  confirmOverlay: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 9999,
+    display: "grid",
+    placeItems: "center",
+    padding: "16px",
+    background: "rgba(15,23,42,0.34)",
+    boxSizing: "border-box",
+  },
+  confirmDialog: {
+    display: "grid",
+    gap: "12px",
+    width: "min(100%, 420px)",
+    padding: "16px",
+    borderRadius: "18px",
+    background: "#ffffff",
+    border: "1px solid rgba(220,38,38,0.16)",
+    boxShadow: "0 24px 70px rgba(15,23,42,0.22)",
+    boxSizing: "border-box",
+  },
+  confirmActions: {
+    display: "flex",
+    gap: "8px",
+    justifyContent: "flex-end",
+    flexWrap: "wrap",
+  },
+};
+
+const hubDarkPalette = {
+  page: "#06111f",
+  panel: "rgba(15, 23, 42, 0.74)",
+  panelStrong: "rgba(15, 23, 42, 0.90)",
+  panelSoft: "rgba(30, 41, 59, 0.64)",
+  border: "1px solid rgba(125, 211, 252, 0.16)",
+  borderStrong: "1px solid rgba(34, 211, 238, 0.30)",
+  text: "#e5f3ff",
+  muted: "#9fb4d0",
+  dim: "#6f83a3",
+  cyan: "#38bdf8",
+  green: "#34d399",
+  amber: "#fbbf24",
+  red: "#fb7185",
+};
+
+const hubGlassPanel = {
+  background:
+    "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(15,23,42,0.66))",
+  border: hubDarkPalette.border,
+  boxShadow: "0 18px 54px rgba(2,6,23,0.34)",
+  backdropFilter: "blur(18px)",
+};
+
+const hubGlassPanelSoft = {
+  background:
+    "linear-gradient(145deg, rgba(30,41,59,0.72), rgba(15,23,42,0.58))",
+  border: "1px solid rgba(148,163,184,0.13)",
+  boxShadow: "0 12px 34px rgba(2,6,23,0.24)",
+  backdropFilter: "blur(14px)",
+};
+
+const hubGlassRow = {
+  background: "rgba(15,23,42,0.52)",
+  border: "1px solid rgba(148,163,184,0.12)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+};
+
+Object.assign(playerHubStyles, {
+  shell: {
+    ...playerHubStyles.shell,
+    gap: "16px",
+    maxWidth: "1240px",
+    padding: "18px",
+    borderRadius: "30px",
+    color: hubDarkPalette.text,
+    background:
+      "radial-gradient(circle at 12% 0%, rgba(56,189,248,0.22), transparent 30%), radial-gradient(circle at 88% 8%, rgba(52,211,153,0.16), transparent 28%), linear-gradient(135deg, #06111f 0%, #0f172a 55%, #111827 100%)",
+    border: "1px solid rgba(148,163,184,0.12)",
+    boxShadow: "0 28px 90px rgba(2,6,23,0.35)",
+  },
+  hero: {
+    ...playerHubStyles.hero,
+    padding: "18px",
+    borderRadius: "26px",
+    background:
+      "linear-gradient(135deg, rgba(14,165,233,0.18), rgba(15,23,42,0.78) 45%, rgba(22,163,74,0.12))",
+    border: hubDarkPalette.borderStrong,
+    boxShadow: "0 22px 70px rgba(8,47,73,0.35)",
+  },
+  title: {
+    ...playerHubStyles.title,
+    color: hubDarkPalette.text,
+    fontSize: "28px",
+  },
+  subtitle: {
+    ...playerHubStyles.subtitle,
+    color: hubDarkPalette.muted,
+  },
+  sectionTitle: {
+    ...playerHubStyles.sectionTitle,
+    color: hubDarkPalette.text,
+    fontSize: "15px",
+  },
+  profileCard: {
+    ...playerHubStyles.profileCard,
+    ...hubGlassPanel,
+    borderRadius: "24px",
+  },
+  playerHeroCard: {
+    ...playerHubStyles.playerHeroCard,
+    ...hubGlassPanel,
+    borderRadius: "28px",
+    background:
+      "linear-gradient(145deg, rgba(14,165,233,0.18), rgba(15,23,42,0.84) 46%, rgba(52,211,153,0.10))",
+  },
+  nextTournamentCard: {
+    ...playerHubStyles.nextTournamentCard,
+    ...hubGlassPanel,
+    borderRadius: "24px",
+    background:
+      "linear-gradient(145deg, rgba(245,158,11,0.16), rgba(15,23,42,0.82) 52%, rgba(14,165,233,0.11))",
+  },
+  homeCard: {
+    ...playerHubStyles.homeCard,
+    ...hubGlassPanelSoft,
+    borderRadius: "22px",
+  },
+  teamSetupCard: {
+    ...playerHubStyles.teamSetupCard,
+    ...hubGlassPanel,
+    borderRadius: "22px",
+    background:
+      "linear-gradient(145deg, rgba(34,197,94,0.16), rgba(15,23,42,0.82))",
+  },
+  profileEditorPanel: {
+    ...playerHubStyles.profileEditorPanel,
+  },
+  editorSection: {
+    ...playerHubStyles.editorSection,
+    ...hubGlassPanelSoft,
+  },
+  actionDrawer: {
+    ...playerHubStyles.actionDrawer,
+    ...hubGlassPanelSoft,
+    borderRadius: "20px",
+  },
+  actionDrawerTitle: {
+    ...playerHubStyles.actionDrawerTitle,
+    color: hubDarkPalette.text,
+  },
+  actionDrawerHint: {
+    ...playerHubStyles.actionDrawerHint,
+    color: hubDarkPalette.muted,
+  },
+  profileInput: {
+    ...playerHubStyles.profileInput,
+    background: "rgba(2,6,23,0.44)",
+    border: "1px solid rgba(148,163,184,0.22)",
+    color: hubDarkPalette.text,
+    colorScheme: "dark",
+  },
+  profileTextarea: {
+    ...playerHubStyles.profileTextarea,
+    background: "rgba(2,6,23,0.44)",
+    border: "1px solid rgba(148,163,184,0.22)",
+    color: hubDarkPalette.text,
+    colorScheme: "dark",
+  },
+  profileTextareaCompact: {
+    ...playerHubStyles.profileTextareaCompact,
+    background: "rgba(2,6,23,0.44)",
+    border: "1px solid rgba(148,163,184,0.22)",
+    color: hubDarkPalette.text,
+    colorScheme: "dark",
+  },
+  profileLabel: {
+    ...playerHubStyles.profileLabel,
+    color: "#c7d2fe",
+  },
+  checkboxRow: {
+    ...playerHubStyles.checkboxRow,
+    background: "rgba(14,165,233,0.10)",
+    border: "1px solid rgba(125,211,252,0.16)",
+    color: hubDarkPalette.text,
+  },
+  segmentButton: {
+    ...playerHubStyles.segmentButton,
+    background: "rgba(15,23,42,0.72)",
+    border: "1px solid rgba(148,163,184,0.18)",
+    color: hubDarkPalette.muted,
+  },
+  segmentButtonActive: {
+    ...playerHubStyles.segmentButtonActive,
+    background: "linear-gradient(135deg, #0ea5e9, #22c55e)",
+    borderColor: "rgba(125,211,252,0.40)",
+    color: "#eff6ff",
+  },
+  saveButton: {
+    ...playerHubStyles.saveButton,
+    border: "1px solid rgba(125,211,252,0.34)",
+    background: "linear-gradient(135deg, #0ea5e9, #22c55e)",
+    color: "#ecfeff",
+    boxShadow: "0 10px 26px rgba(14,165,233,0.22)",
+  },
+  saveButtonDisabled: {
+    ...playerHubStyles.saveButtonDisabled,
+    background: "rgba(71,85,105,0.72)",
+    color: "#cbd5e1",
+    boxShadow: "none",
+  },
+  adminActionButton: {
+    ...playerHubStyles.adminActionButton,
+    background: "rgba(14,165,233,0.12)",
+    border: "1px solid rgba(125,211,252,0.22)",
+    color: "#bae6fd",
+    boxShadow: "0 8px 20px rgba(2,6,23,0.18)",
+  },
+  adminDangerButton: {
+    ...playerHubStyles.adminDangerButton,
+    background: "rgba(244,63,94,0.14)",
+    borderColor: "rgba(251,113,133,0.26)",
+    color: "#fecdd3",
+  },
+  adminDisabledButton: {
+    ...playerHubStyles.adminDisabledButton,
+    opacity: 0.46,
+    boxShadow: "none",
+  },
+  profileMessage: {
+    ...playerHubStyles.profileMessage,
+    color: "#b6c5dd",
+  },
+  profilePreviewPanel: {
+    ...playerHubStyles.profilePreviewPanel,
+    ...hubGlassPanelSoft,
+  },
+  profilePreviewCard: {
+    ...playerHubStyles.profilePreviewCard,
+    ...hubGlassPanelSoft,
+  },
+  playerAvatarLarge: {
+    ...playerHubStyles.playerAvatarLarge,
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    boxShadow: "0 0 0 1px rgba(255,255,255,0.12), 0 16px 36px rgba(14,165,233,0.25)",
+    color: "#04111f",
+  },
+  previewName: {
+    ...playerHubStyles.previewName,
+    color: hubDarkPalette.text,
+  },
+  previewTitle: {
+    ...playerHubStyles.previewTitle,
+    color: hubDarkPalette.text,
+  },
+  previewSubtitle: {
+    ...playerHubStyles.previewSubtitle,
+    color: hubDarkPalette.muted,
+  },
+  previewType: {
+    ...playerHubStyles.previewType,
+    color: hubDarkPalette.cyan,
+  },
+  cardTitle: {
+    ...playerHubStyles.cardTitle,
+    color: hubDarkPalette.text,
+  },
+  cardText: {
+    ...playerHubStyles.cardText,
+    color: hubDarkPalette.muted,
+  },
+  emptyPreview: {
+    ...playerHubStyles.emptyPreview,
+    padding: "11px 12px",
+    borderRadius: "14px",
+    background: "rgba(15,23,42,0.38)",
+    border: "1px dashed rgba(125,211,252,0.18)",
+    color: hubDarkPalette.dim,
+  },
+  compactRow: {
+    ...playerHubStyles.compactRow,
+    ...hubGlassRow,
+  },
+  compactRowTitle: {
+    ...playerHubStyles.compactRowTitle,
+    color: hubDarkPalette.text,
+  },
+  compactRowMeta: {
+    ...playerHubStyles.compactRowMeta,
+    color: hubDarkPalette.muted,
+  },
+  chip: {
+    ...playerHubStyles.chip,
+    background: "rgba(14,165,233,0.12)",
+    border: "1px solid rgba(125,211,252,0.18)",
+    color: "#bae6fd",
+  },
+  internalNeedChip: {
+    background: "rgba(100,116,139,0.16)",
+    border: "1px solid rgba(148,163,184,0.22)",
+    color: "#cbd5e1",
+  },
+  tournamentAdChip: {
+    background: "rgba(14,165,233,0.16)",
+    border: "1px solid rgba(125,211,252,0.30)",
+    color: "#e0f2fe",
+  },
+  trainingNeedChip: {
+    background: "rgba(245,158,11,0.16)",
+    border: "1px solid rgba(251,191,36,0.26)",
+    color: "#fde68a",
+  },
+  statusChip: {
+    ...playerHubStyles.statusChip,
+    background: "rgba(14,165,233,0.16)",
+    border: "1px solid rgba(125,211,252,0.22)",
+    color: "#dff7ff",
+  },
+  previewCard: {
+    ...playerHubStyles.previewCard,
+    ...hubGlassPanelSoft,
+  },
+  teamNeedCard: {
+    ...playerHubStyles.teamNeedCard,
+    ...hubGlassPanelSoft,
+  },
+  needStat: {
+    ...playerHubStyles.needStat,
+    ...hubGlassRow,
+  },
+  needStatStrong: {
+    ...playerHubStyles.needStatStrong,
+    color: hubDarkPalette.text,
+  },
+  needStatLabel: {
+    ...playerHubStyles.needStatLabel,
+    color: hubDarkPalette.muted,
+  },
+  detail: {
+    ...playerHubStyles.detail,
+    ...hubGlassRow,
+  },
+  detailLabel: {
+    ...playerHubStyles.detailLabel,
+    color: hubDarkPalette.dim,
+  },
+  detailValue: {
+    ...playerHubStyles.detailValue,
+    color: hubDarkPalette.text,
+  },
+  statCard: {
+    ...playerHubStyles.statCard,
+    background: "rgba(14,165,233,0.10)",
+    border: "1px solid rgba(125,211,252,0.16)",
+  },
+  editorTab: {
+    ...playerHubStyles.editorTab,
+    background: "rgba(14,165,233,0.10)",
+    border: "1px solid rgba(125,211,252,0.16)",
+    color: "#bae6fd",
+  },
+  editorTabActive: {
+    ...playerHubStyles.editorTabActive,
+    background: "linear-gradient(135deg, #0ea5e9, #22c55e)",
+    borderColor: "rgba(125,211,252,0.36)",
+    color: "#04111f",
+  },
+  disabledButton: {
+    ...playerHubStyles.disabledButton,
+    background: "rgba(71,85,105,0.38)",
+    border: "1px solid rgba(148,163,184,0.18)",
+    color: hubDarkPalette.dim,
+  },
+  workflowStep: {
+    ...playerHubStyles.workflowStep,
+    ...hubGlassRow,
+    color: "#bae6fd",
+  },
+  conceptCard: {
+    ...playerHubStyles.conceptCard,
+    ...hubGlassPanelSoft,
+  },
+  permissionCard: {
+    ...playerHubStyles.permissionCard,
+    ...hubGlassPanelSoft,
+  },
+  linkedPanel: {
+    ...playerHubStyles.linkedPanel,
+    background: "rgba(245,158,11,0.10)",
+    border: "1px solid rgba(251,191,36,0.18)",
+  },
+  linkedText: {
+    ...playerHubStyles.linkedText,
+    color: "#fde68a",
+  },
+  opportunityCard: {
+    ...playerHubStyles.opportunityCard,
+    ...hubGlassPanelSoft,
+  },
+  opportunityMeta: {
+    ...playerHubStyles.opportunityMeta,
+    background: "rgba(245,158,11,0.12)",
+    border: "1px solid rgba(251,191,36,0.18)",
+    color: "#fde68a",
+  },
+  achievementCard: {
+    ...playerHubStyles.achievementCard,
+    ...hubGlassPanelSoft,
+  },
+  historyPanel: {
+    ...playerHubStyles.historyPanel,
+    background: "rgba(34,197,94,0.10)",
+    border: "1px solid rgba(52,211,153,0.18)",
+  },
+  historyIntro: {
+    ...playerHubStyles.historyIntro,
+    color: "#bbf7d0",
+  },
+  historyNote: {
+    ...playerHubStyles.historyNote,
+    color: "#86efac",
+  },
+  futureCard: {
+    ...playerHubStyles.futureCard,
+    background: "rgba(14,165,233,0.10)",
+    border: "1px solid rgba(125,211,252,0.16)",
+  },
+  adminReviewCard: {
+    ...playerHubStyles.adminReviewCard,
+    ...hubGlassPanel,
+    borderRadius: "24px",
+  },
+  adminDashboardTile: {
+    ...playerHubStyles.adminDashboardTile,
+    ...hubGlassPanelSoft,
+  },
+  adminDashboardTileActive: {
+    ...playerHubStyles.adminDashboardTileActive,
+    background: "linear-gradient(145deg, rgba(14,165,233,0.24), rgba(15,23,42,0.76))",
+    borderColor: "rgba(125,211,252,0.34)",
+  },
+  adminDashboardTileMuted: {
+    ...playerHubStyles.adminDashboardTileMuted,
+    opacity: 0.48,
+    background: "rgba(15,23,42,0.34)",
+    borderColor: "rgba(148,163,184,0.10)",
+    boxShadow: "none",
+  },
+  adminDashboardIcon: {
+    ...playerHubStyles.adminDashboardIcon,
+    background: "rgba(14,165,233,0.14)",
+    color: "#bae6fd",
+  },
+  adminDashboardCount: {
+    ...playerHubStyles.adminDashboardCount,
+    color: hubDarkPalette.text,
+  },
+  adminAccordion: {
+    ...playerHubStyles.adminAccordion,
+    ...hubGlassPanel,
+  },
+  adminAccordionSummary: {
+    ...playerHubStyles.adminAccordionSummary,
+    color: hubDarkPalette.text,
+  },
+  adminReviewProfileCard: {
+    ...playerHubStyles.adminReviewProfileCard,
+    ...hubGlassPanelSoft,
+  },
+  adminFeedbackBanner: {
+    ...playerHubStyles.adminFeedbackBanner,
+    background: "rgba(14,165,233,0.12)",
+    border: "1px solid rgba(125,211,252,0.20)",
+    color: "#dff7ff",
+  },
+  adminFeedbackSuccess: {
+    ...playerHubStyles.adminFeedbackSuccess,
+    background: "rgba(34,197,94,0.14)",
+    borderColor: "rgba(52,211,153,0.22)",
+    color: "#bbf7d0",
+  },
+  adminFeedbackError: {
+    ...playerHubStyles.adminFeedbackError,
+    background: "rgba(244,63,94,0.14)",
+    borderColor: "rgba(251,113,133,0.24)",
+    color: "#fecdd3",
+  },
+  clubTeamStatusChip: {
+    ...playerHubStyles.clubTeamStatusChip,
+    background: "rgba(15,23,42,0.50)",
+    border: "1px solid rgba(148,163,184,0.18)",
+    color: hubDarkPalette.muted,
+  },
+  clubTeamStatusActive: {
+    ...playerHubStyles.clubTeamStatusActive,
+    background: "rgba(34,197,94,0.16)",
+    borderColor: "rgba(52,211,153,0.30)",
+    color: "#bbf7d0",
+  },
+  clubTeamStatusInactive: {
+    ...playerHubStyles.clubTeamStatusInactive,
+    background: "rgba(244,63,94,0.14)",
+    borderColor: "rgba(251,113,133,0.24)",
+    color: "#fecdd3",
+  },
+  accessRequestCard: {
+    ...playerHubStyles.accessRequestCard,
+    ...hubGlassPanelSoft,
+  },
+  accessRequestChooser: {
+    ...playerHubStyles.accessRequestChooser,
+    ...hubGlassPanelSoft,
+  },
+  accessRequestTile: {
+    ...playerHubStyles.accessRequestTile,
+    ...hubGlassRow,
+    color: hubDarkPalette.text,
+  },
+  accessRequestAction: {
+    ...playerHubStyles.accessRequestAction,
+    background: "linear-gradient(135deg, #0ea5e9, #22c55e)",
+    color: "#04111f",
+  },
+  accessRequestActionMuted: {
+    ...playerHubStyles.accessRequestActionMuted,
+    background: "rgba(71,85,105,0.58)",
+    color: "#cbd5e1",
+  },
+  accessOptionButton: {
+    ...playerHubStyles.accessOptionButton,
+    ...hubGlassRow,
+    color: hubDarkPalette.text,
+  },
+  accessOptionSelected: {
+    ...playerHubStyles.accessOptionSelected,
+    background: "rgba(14,165,233,0.18)",
+    borderColor: "rgba(125,211,252,0.38)",
+  },
+  accessRequestRow: {
+    ...playerHubStyles.accessRequestRow,
+    ...hubGlassRow,
+  },
+  accessCompactRow: {
+    ...playerHubStyles.accessCompactRow,
+    ...hubGlassRow,
+  },
+  accessMiniButton: {
+    ...playerHubStyles.accessMiniButton,
+    background: "rgba(14,165,233,0.12)",
+    border: "1px solid rgba(125,211,252,0.20)",
+    color: "#bae6fd",
+  },
+  accessInlineForm: {
+    ...playerHubStyles.accessInlineForm,
+    background: "rgba(14,165,233,0.10)",
+    border: "1px solid rgba(125,211,252,0.16)",
+  },
+  mutedLine: {
+    ...playerHubStyles.mutedLine,
+    color: hubDarkPalette.dim,
+  },
+  progressTrack: {
+    ...playerHubStyles.progressTrack,
+    height: "5px",
+    background: "rgba(30,41,59,0.92)",
+  },
+  progressFill: {
+    ...playerHubStyles.progressFill,
+    background: "linear-gradient(90deg, #38bdf8, #34d399)",
+    boxShadow: "0 0 16px rgba(56,189,248,0.34)",
+  },
+  teamControlHero: {
+    ...playerHubStyles.teamControlHero,
+    ...hubGlassPanel,
+    borderRadius: "28px",
+    background:
+      "linear-gradient(145deg, rgba(52,211,153,0.14), rgba(15,23,42,0.86) 48%, rgba(14,165,233,0.12))",
+  },
+  teamControlPanel: {
+    ...playerHubStyles.teamControlPanel,
+    ...hubGlassPanelSoft,
+  },
+  teamControlWidePanel: {
+    ...playerHubStyles.teamControlWidePanel,
+    ...hubGlassPanelSoft,
+  },
+  teamControlRow: {
+    ...playerHubStyles.teamControlRow,
+    ...hubGlassRow,
+  },
+  planStatsLine: {
+    ...playerHubStyles.planStatsLine,
+    color: "#c7d2fe",
+  },
+  interestGroupTitle: {
+    ...playerHubStyles.interestGroupTitle,
+    color: hubDarkPalette.text,
+  },
+  interestRow: {
+    ...playerHubStyles.interestRow,
+    ...hubGlassRow,
+  },
+  interestPlayerName: {
+    ...playerHubStyles.interestPlayerName,
+    color: hubDarkPalette.text,
+  },
+  addTeamMemberButton: {
+    ...playerHubStyles.addTeamMemberButton,
+    background: "linear-gradient(135deg, #22c55e, #38bdf8)",
+    color: "#04111f",
+  },
+  squadBoard: {
+    ...playerHubStyles.squadBoard,
+    ...hubGlassPanel,
+    borderRadius: "26px",
+  },
+  squadColumn: {
+    ...playerHubStyles.squadColumn,
+    ...hubGlassPanelSoft,
+  },
+  squadTeamBox: {
+    ...playerHubStyles.squadTeamBox,
+    ...hubGlassPanelSoft,
+  },
+  squadColumnHeader: {
+    ...playerHubStyles.squadColumnHeader,
+    color: hubDarkPalette.text,
+  },
+  squadPlayerRow: {
+    ...playerHubStyles.squadPlayerRow,
+    borderBottom: "1px solid rgba(125,211,252,0.10)",
+  },
+  squadPlayerName: {
+    ...playerHubStyles.squadPlayerName,
+    color: hubDarkPalette.text,
+  },
+  squadPlayerMeta: {
+    ...playerHubStyles.squadPlayerMeta,
+    color: hubDarkPalette.muted,
+  },
+  squadTinyBadge: {
+    ...playerHubStyles.squadTinyBadge,
+    background: "rgba(14,165,233,0.12)",
+    border: "1px solid rgba(125,211,252,0.18)",
+    color: "#bae6fd",
+  },
+  squadMoveButton: {
+    ...playerHubStyles.squadMoveButton,
+    background: "rgba(14,165,233,0.12)",
+    border: "1px solid rgba(125,211,252,0.18)",
+    color: "#bae6fd",
+  },
+  squadMoveButtonActive: {
+    ...playerHubStyles.squadMoveButtonActive,
+    background: "linear-gradient(135deg, #0ea5e9, #22c55e)",
+    borderColor: "rgba(125,211,252,0.36)",
+    color: "#04111f",
+  },
+  squadEmptyRow: {
+    ...playerHubStyles.squadEmptyRow,
+    background: "rgba(15,23,42,0.36)",
+    color: hubDarkPalette.dim,
+  },
+  squadPendingToggle: {
+    ...playerHubStyles.squadPendingToggle,
+    background: "rgba(14,165,233,0.12)",
+    border: "1px solid rgba(125,211,252,0.18)",
+    color: "#bae6fd",
+  },
+  squadPendingList: {
+    ...playerHubStyles.squadPendingList,
+    ...hubGlassRow,
+  },
+  accessStatusChip: {
+    ...playerHubStyles.accessStatusChip,
+    background: "rgba(15,23,42,0.56)",
+    border: "1px solid rgba(148,163,184,0.18)",
+    color: hubDarkPalette.muted,
+  },
+  accessStatusIdle: {
+    ...playerHubStyles.accessStatusIdle,
+    background: "rgba(30,41,59,0.70)",
+    borderColor: "rgba(148,163,184,0.18)",
+    color: "#cbd5e1",
+  },
+  accessStatusPending: {
+    ...playerHubStyles.accessStatusPending,
+    background: "rgba(245,158,11,0.16)",
+    borderColor: "rgba(251,191,36,0.30)",
+    color: "#fde68a",
+  },
+  accessStatusApproved: {
+    ...playerHubStyles.accessStatusApproved,
+    background: "rgba(34,197,94,0.16)",
+    borderColor: "rgba(52,211,153,0.30)",
+    color: "#bbf7d0",
+  },
+  accessStatusRejected: {
+    ...playerHubStyles.accessStatusRejected,
+    background: "rgba(244,63,94,0.14)",
+    borderColor: "rgba(251,113,133,0.24)",
+    color: "#fecdd3",
+  },
+  accessWarning: {
+    ...playerHubStyles.accessWarning,
+    background: "rgba(245,158,11,0.12)",
+    border: "1px solid rgba(251,191,36,0.22)",
+    color: "#fde68a",
+  },
+  clubTeamAdminRow: {
+    ...playerHubStyles.clubTeamAdminRow,
+    ...hubGlassRow,
+  },
+  confirmOverlay: {
+    ...playerHubStyles.confirmOverlay,
+    background: "rgba(2,6,23,0.70)",
+  },
+  confirmDialog: {
+    ...playerHubStyles.confirmDialog,
+    ...hubGlassPanel,
+  },
+});
+
+Object.assign(playerHubStyles, {
+  feedPanel: {
+    ...hubGlassPanel,
+    display: "grid",
+    gap: "12px",
+    padding: "16px",
+    borderRadius: "24px",
+    background:
+      "linear-gradient(135deg, rgba(15,23,42,0.92), rgba(8,47,73,0.68))",
+  },
+  feedHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  feedList: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  feedItem: {
+    ...hubGlassRow,
+    gridTemplateColumns: "auto minmax(0, 1fr) auto",
+    padding: "10px 12px",
+    borderRadius: "16px",
+  },
+  feedIcon: {
+    width: "34px",
+    height: "34px",
+    borderRadius: "12px",
+    display: "grid",
+    placeItems: "center",
+    color: hubDarkPalette.text,
+    fontWeight: "950",
+    background:
+      "linear-gradient(135deg, rgba(56,189,248,0.22), rgba(52,211,153,0.18))",
+    border: "1px solid rgba(125,211,252,0.28)",
+  },
+  eventGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+    gap: "12px",
+    minWidth: 0,
+  },
+  eventCard: {
+    ...hubGlassPanel,
+    display: "grid",
+    gap: "10px",
+    padding: "13px",
+    borderRadius: "20px",
+    overflow: "hidden",
+    background:
+      "linear-gradient(160deg, rgba(15,23,42,0.92), rgba(14,116,144,0.20) 52%, rgba(5,150,105,0.14))",
+  },
+  eventCardFeatured: {
+    border: "1px solid rgba(56,189,248,0.42)",
+    boxShadow:
+      "0 22px 56px rgba(8,47,73,0.34), inset 0 1px 0 rgba(255,255,255,0.08)",
+  },
+  eventTopRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "12px",
+    alignItems: "start",
+    minWidth: 0,
+  },
+  eventTitle: {
+    color: hubDarkPalette.text,
+    fontSize: "17px",
+    lineHeight: 1.1,
+    fontWeight: "980",
+    overflowWrap: "anywhere",
+  },
+  eventMeta: {
+    color: hubDarkPalette.muted,
+    fontSize: "12px",
+    fontWeight: "800",
+    overflowWrap: "anywhere",
+  },
+  eventStats: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    minWidth: 0,
+  },
+  eventStat: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
+    padding: "5px 8px",
+    borderRadius: "999px",
+    background: "rgba(2,6,23,0.36)",
+    border: "1px solid rgba(148,163,184,0.14)",
+    minWidth: 0,
+  },
+  eventStatGoing: {
+    background: "rgba(34,197,94,0.14)",
+    borderColor: "rgba(52,211,153,0.25)",
+  },
+  eventStatMaybe: {
+    background: "rgba(14,165,233,0.13)",
+    borderColor: "rgba(125,211,252,0.22)",
+  },
+  eventStatNo: {
+    background: "rgba(244,63,94,0.12)",
+    borderColor: "rgba(251,113,133,0.20)",
+  },
+  eventStatPending: {
+    background: "rgba(245,158,11,0.13)",
+    borderColor: "rgba(251,191,36,0.22)",
+  },
+  eventStatValue: {
+    color: hubDarkPalette.text,
+    fontSize: "13px",
+    fontWeight: "980",
+  },
+  eventStatLabel: {
+    color: hubDarkPalette.dim,
+    fontSize: "10px",
+    fontWeight: "900",
+    textTransform: "none",
+    letterSpacing: 0,
+  },
+  eventActionBar: {
+    display: "flex",
+    gap: "7px",
+    flexWrap: "wrap",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  eventCommentDrawer: {
+    display: "grid",
+    gap: "8px",
+    padding: "10px",
+    borderRadius: "16px",
+    background: "rgba(2,6,23,0.42)",
+    border: "1px solid rgba(148,163,184,0.16)",
+    minWidth: 0,
+  },
+  commentRow: {
+    display: "grid",
+    gap: "3px",
+    padding: "8px 9px",
+    borderRadius: "12px",
+    background: "rgba(15,23,42,0.68)",
+    border: "1px solid rgba(148,163,184,0.12)",
+    minWidth: 0,
+  },
+  commentAuthor: {
+    color: hubDarkPalette.cyan,
+    fontSize: "12px",
+    fontWeight: "950",
+  },
+  commentText: {
+    color: hubDarkPalette.text,
+    fontSize: "12px",
+    lineHeight: 1.35,
+    fontWeight: "750",
+    overflowWrap: "anywhere",
+  },
+  commentComposer: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "8px",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  feedTinyAction: {
+    border: "1px solid rgba(125,211,252,0.22)",
+    borderRadius: "999px",
+    padding: "7px 10px",
+    background: "rgba(15,23,42,0.72)",
+    color: hubDarkPalette.text,
+    fontSize: "11px",
+    fontWeight: "950",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+});
+
+export default function PlayerHubPage({
+  username = "",
+  isAdmin = false,
+  canReviewRosterDrafts = false,
+  loadPlayerHubSnapshot,
+  loadEventComments,
+  addEventComment,
+  loadMyPlayerProfile,
+  saveMyPlayerProfile,
+  loadPlayerProfilesForAdmin,
+  updatePlayerProfileAdminStatus,
+  resetPlayerPasswordForAdmin,
+  loadClubTeams,
+  loadClubTeamsAdmin,
+  saveClubTeamAdmin,
+  updateClubTeamActiveAdmin,
+  requestTeamIdentityChange,
+  loadTeamIdentityChangeRequests,
+  reviewTeamIdentityChangeRequest,
+  createAccessRequest,
+  loadMyAccessRequests,
+  loadAccessRequestsAdmin,
+  reviewAccessRequestAdmin,
+  loadMyTeamProfile,
+  saveMyTeamProfile,
+  createOrUpdateTeamNeed,
+  closeTeamNeed,
+  loadVisibleTeamNeeds,
+  loadTeamProfilesAdmin,
+  updateTeamProfileAdmin,
+  createTeamNeedInterest,
+  loadMyTeamNeedInterests,
+  loadTeamNeedInterestsForCaptain,
+  reviewTeamNeedInterest,
+  loadTeamNeedInterestsAdmin,
+  addTeamMemberFromInterest,
+  loadMyTeamMembersForCaptain,
+  loadMyConfirmedTeamsForPlayer,
+  removeTeamMember,
+  loadTeamMembersAdmin,
+  createOrUpdateTeamMembershipRequest,
+  loadMyTeamMembershipRequests,
+  loadMembershipRequestsForCaptain,
+  reviewTeamMembershipRequest,
+  cancelMyTeamMembershipRequest,
+  loadTeamMembershipRequestsAdmin,
+  tournamentOptions = [],
+  createTournamentTeamPlan,
+  loadMyTournamentTeamPlansForCaptain,
+  loadMyTournamentAvailabilityForPlayer,
+  loadMyTournamentSquadPlanningForPlayer,
+  updateTournamentAvailabilityResponse,
+  loadTournamentAvailabilityForCaptain,
+  updateTournamentPlanStatus,
+  loadTournamentSquadPlanningForCaptain,
+  assignPlayerToSquad,
+  createOrUpdateRosterDraftFromSquadPlanning,
+  loadRosterDraftForCaptain,
+  submitRosterDraft,
+  cancelRosterDraft,
+  loadMyRosterStatusForPlayer,
+  loadRosterDraftAdmin,
+  reviewRosterDraft,
+  lockOfficialRoster,
+}) {
+  const copy = playerHubCopy;
+  const profileTypeOptions = getPlayerHubProfileTypeOptions();
+  const accessRequestCards = getPlayerHubAccessRequestCards();
+  const [myProfile, setMyProfile] = useState(() =>
+    normalizePlayerHubProfile({ ...getPlayerHubProfileDefaults(), username })
+  );
+  const [savedProfilePreview, setSavedProfilePreview] = useState(() =>
+    normalizePlayerHubProfile({ ...getPlayerHubProfileDefaults(), username })
+  );
+  const [profileStatus, setProfileStatus] = useState("idle");
+  const [profileMessage, setProfileMessage] = useState("");
+  const [adminProfiles, setAdminProfiles] = useState([]);
+  const [adminReviewStatus, setAdminReviewStatus] = useState("idle");
+  const [adminReviewMessage, setAdminReviewMessage] = useState("");
+  const [adminUpdatingUsername, setAdminUpdatingUsername] = useState("");
+  const [adminPasswordDrafts, setAdminPasswordDrafts] = useState({});
+  const [clubTeams, setClubTeams] = useState([]);
+  const [clubTeamsStatus, setClubTeamsStatus] = useState("idle");
+  const [clubTeamsMessage, setClubTeamsMessage] = useState("");
+  const [adminClubTeams, setAdminClubTeams] = useState([]);
+  const [adminClubTeamsStatus, setAdminClubTeamsStatus] = useState("idle");
+  const [adminClubTeamsMessage, setAdminClubTeamsMessage] = useState("");
+  const [adminClubTeamDraft, setAdminClubTeamDraft] = useState({
+    teamId: "",
+    name: "",
+    country: "",
+    city: "",
+    active: true,
+  });
+  const [adminClubTeamUpdatingId, setAdminClubTeamUpdatingId] = useState("");
+  const [accessRequestMessageDraft, setAccessRequestMessageDraft] =
+    useState("");
+  const [accessRequests, setAccessRequests] = useState([]);
+  const [accessRequestsStatus, setAccessRequestsStatus] = useState("idle");
+  const [accessRequestsMessage, setAccessRequestsMessage] = useState("");
+  const [accessRequestSubmittingType, setAccessRequestSubmittingType] =
+    useState("");
+  const [adminAccessRequests, setAdminAccessRequests] = useState([]);
+  const [adminAccessRequestsStatus, setAdminAccessRequestsStatus] =
+    useState("idle");
+  const [adminAccessRequestsMessage, setAdminAccessRequestsMessage] =
+    useState("");
+  const [adminAccessRequestUpdatingId, setAdminAccessRequestUpdatingId] =
+    useState("");
+  const [adminAccessRequestNotes, setAdminAccessRequestNotes] = useState({});
+  const [pendingDeactivateProfile, setPendingDeactivateProfile] =
+    useState(null);
+  const [showProfileEditor, setShowProfileEditor] = useState(false);
+  const [activeProfileEditorTab, setActiveProfileEditorTab] = useState("basic");
+  const [pendingAccessRequestType, setPendingAccessRequestType] = useState("");
+  const [accessClubWarningType, setAccessClubWarningType] = useState("");
+  const [teamProfileStatus, setTeamProfileStatus] = useState("idle");
+  const [teamProfileMessage, setTeamProfileMessage] = useState("");
+  const [canManageTeamProfile, setCanManageTeamProfile] = useState(false);
+  const [teamProfile, setTeamProfile] = useState(null);
+  const [teamProfileDraft, setTeamProfileDraft] = useState({
+    country: "",
+    teamLevel: "",
+    teamDescription: "",
+    contactNote: "",
+    active: true,
+  });
+  const [teamNeeds, setTeamNeeds] = useState([]);
+  const [teamNeedDraft, setTeamNeedDraft] = useState({
+    needType: "PLAYER",
+    neededCount: 1,
+    needText: "",
+    visibility: "internal",
+    needContext: "general",
+  });
+  const [tournamentAdDraft, setTournamentAdDraft] = useState({
+    needType: "PLAYER",
+    neededCount: 1,
+    needText: "",
+    tournamentId: "",
+    className: "",
+    squadLabel: "",
+    deadlineAt: "",
+  });
+  const [showTeamEditor, setShowTeamEditor] = useState(false);
+  const [showTeamNeedForm, setShowTeamNeedForm] = useState(false);
+  const [showTournamentAdForm, setShowTournamentAdForm] = useState(false);
+  const [showTournamentPlanForm, setShowTournamentPlanForm] = useState(false);
+  const [visibleTeamNeeds, setVisibleTeamNeeds] = useState([]);
+  const [visibleTeamNeedsStatus, setVisibleTeamNeedsStatus] = useState("idle");
+  const [teamInterestDrafts, setTeamInterestDrafts] = useState({});
+  const [teamInterestOpenNeedId, setTeamInterestOpenNeedId] = useState("");
+  const [teamInterestStatus, setTeamInterestStatus] = useState("idle");
+  const [teamInterestMessage, setTeamInterestMessage] = useState("");
+  const [myTeamNeedInterests, setMyTeamNeedInterests] = useState([]);
+  const [captainTeamNeedInterests, setCaptainTeamNeedInterests] = useState([]);
+  const [teamInterestUpdatingId, setTeamInterestUpdatingId] = useState("");
+  const [expandedTeamNeedInterestId, setExpandedTeamNeedInterestId] =
+    useState("");
+  const [loadingTeamNeedInterestId, setLoadingTeamNeedInterestId] =
+    useState("");
+  const [lastTeamNeedInterestAutoLoadKey, setLastTeamNeedInterestAutoLoadKey] =
+    useState("");
+  const [teamMembers, setTeamMembers] = useState([]);
+  const [confirmedTeams, setConfirmedTeams] = useState([]);
+  const [, setTeamMemberStatus] = useState("idle");
+  const [teamMemberMessage, setTeamMemberMessage] = useState("");
+  const [teamMemberUpdatingId, setTeamMemberUpdatingId] = useState("");
+  const [adminTeamProfiles, setAdminTeamProfiles] = useState([]);
+  const [adminTeamProfileStatus, setAdminTeamProfileStatus] = useState("idle");
+  const [adminTeamProfileMessage, setAdminTeamProfileMessage] = useState("");
+  const [adminTeamProfileUpdatingId, setAdminTeamProfileUpdatingId] =
+    useState("");
+  const [adminTeamNeedInterests, setAdminTeamNeedInterests] = useState([]);
+  const [adminTeamNeedInterestStatus, setAdminTeamNeedInterestStatus] =
+    useState("idle");
+  const [adminTeamMembers, setAdminTeamMembers] = useState([]);
+  const [adminTeamMembersStatus, setAdminTeamMembersStatus] = useState("idle");
+  const [adminTeamMemberUpdatingId, setAdminTeamMemberUpdatingId] =
+    useState("");
+  const [teamMembershipRequests, setTeamMembershipRequests] = useState([]);
+  const [captainMembershipRequests, setCaptainMembershipRequests] = useState(
+    []
+  );
+  const [adminTeamMembershipRequests, setAdminTeamMembershipRequests] =
+    useState([]);
+  const [, setTeamMembershipStatus] = useState("idle");
+  const [teamMembershipMessage, setTeamMembershipMessage] = useState("");
+  const [teamMembershipUpdatingId, setTeamMembershipUpdatingId] =
+    useState("");
+  const [adminTeamMembershipStatus, setAdminTeamMembershipStatus] =
+    useState("idle");
+  const [teamIdentityRequests, setTeamIdentityRequests] = useState([]);
+  const [teamIdentityStatus, setTeamIdentityStatus] = useState("idle");
+  const [teamIdentityMessage, setTeamIdentityMessage] = useState("");
+  const [showTeamIdentityRequestForm, setShowTeamIdentityRequestForm] =
+    useState(false);
+  const [teamIdentityDraft, setTeamIdentityDraft] = useState({
+    requestedName: "",
+    requestedCountry: "",
+    requestedCity: "",
+    reason: "",
+  });
+  const [adminTeamIdentityRequests, setAdminTeamIdentityRequests] = useState(
+    []
+  );
+  const [adminTeamIdentityStatus, setAdminTeamIdentityStatus] =
+    useState("idle");
+  const [adminTeamIdentityMessage, setAdminTeamIdentityMessage] = useState("");
+  const [adminTeamIdentityUpdatingId, setAdminTeamIdentityUpdatingId] =
+    useState("");
+  const [adminTeamIdentityNotes, setAdminTeamIdentityNotes] = useState({});
+  const [tournamentPlans, setTournamentPlans] = useState([]);
+  const [playerTournamentAvailability, setPlayerTournamentAvailability] =
+    useState([]);
+  const [playerTournamentSquadPlanning, setPlayerTournamentSquadPlanning] =
+    useState([]);
+  const [captainTournamentAvailability, setCaptainTournamentAvailability] =
+    useState([]);
+  const [tournamentAvailabilityDrafts, setTournamentAvailabilityDrafts] =
+    useState({});
+  const [, setLastAnsweredTournamentAvailabilityId] = useState("");
+  const [tournamentPlanDraft, setTournamentPlanDraft] = useState({
+    tournamentId: "",
+    squadLabel: "TEAM_PLANNING",
+    customSquadLabel: "",
+    className: "",
+    deadlineAt: "",
+    note: "",
+  });
+  const [tournamentPlanStatus, setTournamentPlanStatus] = useState("idle");
+  const [tournamentPlanMessage, setTournamentPlanMessage] = useState("");
+  const [tournamentPlanUpdatingId, setTournamentPlanUpdatingId] = useState("");
+  const [expandedTournamentPlanId, setExpandedTournamentPlanId] = useState("");
+  const [expandedEventCommentPlanId, setExpandedEventCommentPlanId] =
+    useState("");
+  const [eventCommentsByPlanId, setEventCommentsByPlanId] = useState({});
+  const [eventCommentDrafts, setEventCommentDrafts] = useState({});
+  const [eventCommentStatusByPlanId, setEventCommentStatusByPlanId] =
+    useState({});
+  const [captainTournamentSquadPlanning, setCaptainTournamentSquadPlanning] =
+    useState([]);
+  const [expandedSquadPlanId, setExpandedSquadPlanId] = useState("");
+  const [expandedSquadPendingPlanId, setExpandedSquadPendingPlanId] =
+    useState("");
+  const [squadPlanningUpdatingId, setSquadPlanningUpdatingId] = useState("");
+  const [captainRosterDraftsByPlanId, setCaptainRosterDraftsByPlanId] =
+    useState({});
+  const [rosterDraftUpdatingPlanId, setRosterDraftUpdatingPlanId] =
+    useState("");
+  const [rosterDraftMessage, setRosterDraftMessage] = useState("");
+  const [submitRosterConfirmPlanId, setSubmitRosterConfirmPlanId] =
+    useState("");
+  const [playerTournamentRosterStatus, setPlayerTournamentRosterStatus] =
+    useState([]);
+  const [adminTournamentRosterDrafts, setAdminTournamentRosterDrafts] =
+    useState([]);
+  const [adminTournamentRosterStatus, setAdminTournamentRosterStatus] =
+    useState("idle");
+  const [adminRosterReviewNotes, setAdminRosterReviewNotes] = useState({});
+  const [adminRosterReviewUpdatingId, setAdminRosterReviewUpdatingId] =
+    useState("");
+  const [adminRosterReviewMessage, setAdminRosterReviewMessage] = useState("");
+  const [openAdminPanel, setOpenAdminPanel] = useState("");
+  const [adminCounts, setAdminCounts] = useState(null);
+  const [snapshotInitialLoadComplete, setSnapshotInitialLoadComplete] =
+    useState(false);
+  const hasProfilePreview = Boolean(
+      savedProfilePreview.profileId ||
+      savedProfilePreview.displayName ||
+      savedProfilePreview.clubTeamId ||
+      savedProfilePreview.clubTeamName ||
+      savedProfilePreview.teamNote ||
+      savedProfilePreview.clubOrTeam ||
+      savedProfilePreview.country ||
+      savedProfilePreview.availability ||
+      savedProfilePreview.freeAgent ||
+      savedProfilePreview.canGuestForTeams ||
+      savedProfilePreview.interestedAbroad ||
+      savedProfilePreview.publicVisible ||
+      savedProfilePreview.approved
+  );
+  const activeClubTeamIds = new Set(
+    clubTeams.map((team) => String(team.teamId || ""))
+  );
+  const mySelectedTeamNoLongerActive = Boolean(
+    myProfile.clubTeamId &&
+      !myProfile.freeAgent &&
+      clubTeamsStatus === "ready" &&
+      !activeClubTeamIds.has(String(myProfile.clubTeamId || ""))
+  );
+  const savedSelectedTeamNoLongerActive = Boolean(
+    savedProfilePreview.clubTeamId &&
+      !savedProfilePreview.freeAgent &&
+      clubTeamsStatus === "ready" &&
+      !activeClubTeamIds.has(String(savedProfilePreview.clubTeamId || ""))
+  );
+  const previewClubStatus = savedProfilePreview.freeAgent
+    ? "No fixed club/team"
+    : savedSelectedTeamNoLongerActive
+      ? "Selected team is no longer active. Choose another or use no fixed club/team."
+    : savedProfilePreview.clubTeamName ||
+      savedProfilePreview.teamNote ||
+      "Not listed / no fixed team";
+  const previewDisplayName =
+    savedProfilePreview.displayName || "Unnamed player";
+  const previewInitial = (previewDisplayName || username || "?")
+    .trim()
+    .slice(0, 1)
+    .toUpperCase();
+  const needsClubTeamSetup = Boolean(
+    !savedProfilePreview.freeAgent && !savedProfilePreview.clubTeamId
+  );
+  const profileEditorOpen =
+    showProfileEditor || (!hasProfilePreview && profileStatus !== "loading");
+  const accessRequestSummary = accessRequestCards.map((card) => {
+    const latest = accessRequests.find(
+      (request) => request.requestType === card.type
+    );
+    return {
+      ...card,
+      latest,
+      label: accessRequestLabel(card.type),
+    };
+  });
+  const selectedProfileTeamName =
+    !savedProfilePreview.freeAgent && savedProfilePreview.clubTeamId
+      ? savedProfilePreview.clubTeamName || savedProfilePreview.clubTeamId
+      : "";
+  const selectedProfileClubTeamId =
+    !savedProfilePreview.freeAgent && savedProfilePreview.clubTeamId
+      ? String(savedProfilePreview.clubTeamId || "")
+      : "";
+  const selectedOfficialClubTeam = clubTeams.find(
+    (team) => String(team.teamId || "") === selectedProfileClubTeamId
+  );
+  const currentTeamIdentity = {
+    name:
+      teamProfile?.clubTeamName ||
+      selectedOfficialClubTeam?.name ||
+      selectedProfileTeamName ||
+      "",
+    country:
+      teamProfile?.country ||
+      selectedOfficialClubTeam?.country ||
+      savedProfilePreview.country ||
+      "",
+    city: selectedOfficialClubTeam?.city || "",
+  };
+  const pendingTeamIdentityRequest = teamIdentityRequests.find(
+    (request) =>
+      request.status === "PENDING" &&
+      selectedProfileClubTeamId &&
+      String(request.teamId || "") === selectedProfileClubTeamId
+  );
+  const confirmedTeamForSelected = confirmedTeams.find(
+    (team) =>
+      team.memberStatus === "ACTIVE" &&
+      selectedProfileClubTeamId &&
+      String(team.clubTeamId || "") === selectedProfileClubTeamId
+  );
+  const membershipRequestsForSelectedTeam = teamMembershipRequests
+    .filter(
+      (request) =>
+        selectedProfileClubTeamId &&
+        String(request.clubTeamId || "") === selectedProfileClubTeamId
+    )
+    .sort((a, b) => {
+      const aTime = Date.parse(a.updatedAt || a.requestedAt || a.createdAt || "") || 0;
+      const bTime = Date.parse(b.updatedAt || b.requestedAt || b.createdAt || "") || 0;
+      return bTime - aTime;
+    });
+  const latestTeamMembershipRequest =
+    membershipRequestsForSelectedTeam[0] || null;
+  const pendingCaptainMembershipRequests = captainMembershipRequests.filter(
+    (request) =>
+      request.status === "PENDING" && !request.alreadyConfirmed
+  );
+  const openTeamNeeds = teamNeeds.filter((need) => need.status === "OPEN");
+  const myInterestStatusByNeedId = myTeamNeedInterests.reduce((map, interest) => {
+    const needId = String(interest.needId || "");
+    if (!needId) return map;
+    if (!map[needId]) map[needId] = interest.status || "PENDING";
+    return map;
+  }, {});
+  const captainInterestsByNeedId = captainTeamNeedInterests.reduce(
+    (map, interest) => {
+      const needId = String(interest.needId || "");
+      if (!needId) return map;
+      if (!map[needId]) map[needId] = [];
+      map[needId].push(interest);
+      return map;
+    },
+    {}
+  );
+  const activeTeamMemberByInterestId = teamMembers.reduce((map, member) => {
+    const sourceInterestId = String(member.sourceInterestId || "");
+    if (sourceInterestId && member.memberStatus === "ACTIVE") {
+      map[sourceInterestId] = member;
+    }
+    return map;
+  }, {});
+  const activeTeamMemberByPlayerUsername = teamMembers.reduce((map, member) => {
+    const playerUsername = String(member.playerUsername || "").toLowerCase();
+    if (playerUsername && member.memberStatus === "ACTIVE") {
+      map[playerUsername] = member;
+    }
+    return map;
+  }, {});
+  const captainAvailabilityByPlanId = captainTournamentAvailability.reduce(
+    (map, item) => {
+      const planId = String(item.planId || "");
+      if (!planId) return map;
+      if (!map[planId]) map[planId] = [];
+      map[planId].push(item);
+      return map;
+    },
+    {}
+  );
+  const squadPlanningByPlanId = captainTournamentSquadPlanning.reduce(
+    (map, item) => {
+      const planId = String(item.planId || "");
+      if (!planId) return map;
+      if (!map[planId]) map[planId] = [];
+      map[planId].push(item);
+      return map;
+    },
+    {}
+  );
+  const expandedSquadPlan = tournamentPlans.find(
+    (plan) => String(plan.planId || "") === String(expandedSquadPlanId || "")
+  );
+  const expandedSquadAvailability = expandedSquadPlan
+    ? captainAvailabilityByPlanId[expandedSquadPlan.planId] || []
+    : [];
+  const expandedSquadPlanning = expandedSquadPlan
+    ? squadPlanningByPlanId[expandedSquadPlan.planId] || []
+    : [];
+  const loadAdminReviewProfiles = useCallback(async () => {
+    if (!isAdmin || !loadPlayerProfilesForAdmin) {
+      setAdminProfiles([]);
+      setAdminReviewStatus("idle");
+      setAdminReviewMessage("");
+      return;
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setAdminReviewStatus("loading");
+    setAdminReviewMessage("Loading player profiles...");
+
+    try {
+      const profiles = await loadPlayerProfilesForAdmin();
+      setAdminProfiles(Array.isArray(profiles) ? profiles : []);
+      setAdminReviewStatus("ready");
+      setAdminReviewMessage("");
+    } catch (error) {
+      setAdminReviewStatus("error");
+      setAdminReviewMessage(
+        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+      );
+    } finally {
+      logPlayerHubTiming("adminReview load", startedAt);
+    }
+  }, [isAdmin, loadPlayerProfilesForAdmin]);
+
+  const loadActiveClubTeams = useCallback(async () => {
+    if (!loadClubTeams) {
+      setClubTeams([]);
+      setClubTeamsStatus("idle");
+      setClubTeamsMessage("");
+      return;
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setClubTeamsStatus("loading");
+    setClubTeamsMessage("");
+
+    try {
+      const teams = await loadClubTeams();
+      setClubTeams(Array.isArray(teams) ? teams : []);
+      setClubTeamsStatus("ready");
+    } catch (error) {
+      setClubTeams([]);
+      setClubTeamsStatus("error");
+      setClubTeamsMessage(
+        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+      );
+    } finally {
+      logPlayerHubTiming("availableClubs load", startedAt);
+    }
+  }, [loadClubTeams]);
+
+  const loadAdminClubTeams = useCallback(async () => {
+    if (!isAdmin || !loadClubTeamsAdmin) {
+      setAdminClubTeams([]);
+      setAdminClubTeamsStatus("idle");
+      setAdminClubTeamsMessage("");
+      return;
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setAdminClubTeamsStatus("loading");
+    setAdminClubTeamsMessage("Loading official clubs/teams...");
+
+    try {
+      const teams = await loadClubTeamsAdmin();
+      setAdminClubTeams(Array.isArray(teams) ? teams : []);
+      setAdminClubTeamsStatus("ready");
+      setAdminClubTeamsMessage("");
+    } catch (error) {
+      setAdminClubTeamsStatus("error");
+      setAdminClubTeamsMessage(
+        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+      );
+    } finally {
+      logPlayerHubTiming("adminClubs load", startedAt);
+    }
+  }, [isAdmin, loadClubTeamsAdmin]);
+
+  const loadAccessRequests = useCallback(async () => {
+    if (!loadMyAccessRequests) {
+      setAccessRequests([]);
+      setAccessRequestsStatus("idle");
+      setAccessRequestsMessage("");
+      return;
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setAccessRequestsStatus("loading");
+    setAccessRequestsMessage("");
+
+    try {
+      const requests = await loadMyAccessRequests();
+      setAccessRequests(Array.isArray(requests) ? requests : []);
+      setAccessRequestsStatus("ready");
+    } catch (error) {
+      setAccessRequestsStatus("error");
+      setAccessRequestsMessage(
+        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+      );
+    } finally {
+      logPlayerHubTiming("accessRequests load", startedAt);
+    }
+  }, [loadMyAccessRequests]);
+
+  const loadAdminAccessRequests = useCallback(async () => {
+    if (!isAdmin || !loadAccessRequestsAdmin) {
+      setAdminAccessRequests([]);
+      setAdminAccessRequestsStatus("idle");
+      setAdminAccessRequestsMessage("");
+      return;
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setAdminAccessRequestsStatus("loading");
+    setAdminAccessRequestsMessage("");
+
+    try {
+      const requests = await loadAccessRequestsAdmin();
+      setAdminAccessRequests(Array.isArray(requests) ? requests : []);
+      setAdminAccessRequestsStatus("ready");
+    } catch (error) {
+      setAdminAccessRequestsStatus("error");
+      setAdminAccessRequestsMessage(
+        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+      );
+    } finally {
+      logPlayerHubTiming("adminAccess load", startedAt);
+    }
+  }, [isAdmin, loadAccessRequestsAdmin]);
+
+  const loadTeamProfile = useCallback(async () => {
+    if (!loadMyTeamProfile) {
+      setCanManageTeamProfile(false);
+      setTeamProfile(null);
+      setTeamNeeds([]);
+      setTeamProfileStatus("idle");
+      setTeamProfileMessage("");
+      return;
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setTeamProfileStatus("loading");
+    setTeamProfileMessage("");
+
+    try {
+      const data = await loadMyTeamProfile();
+      const nextTeamProfile = data?.teamProfile || null;
+      setCanManageTeamProfile(!!data?.canManageTeamProfile);
+      setTeamProfile(nextTeamProfile);
+      setTeamNeeds(Array.isArray(data?.needs) ? data.needs : []);
+      setCaptainTeamNeedInterests(
+        Array.isArray(data?.interests) ? data.interests : []
+      );
+      setTeamProfileDraft({
+        country: nextTeamProfile?.country || savedProfilePreview.country || "",
+        teamLevel: nextTeamProfile?.teamLevel || "",
+        teamDescription: nextTeamProfile?.teamDescription || "",
+        contactNote: nextTeamProfile?.contactNote || "",
+        active: nextTeamProfile?.active !== false,
+      });
+      setTeamProfileStatus("ready");
+      setTeamProfileMessage(data?.message || "");
+    } catch (error) {
+      setCanManageTeamProfile(false);
+      setTeamProfileStatus("error");
+      setTeamProfileMessage(
+        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+      );
+    } finally {
+      logPlayerHubTiming("teamProfile load", startedAt);
+    }
+  }, [loadMyTeamProfile, savedProfilePreview.country]);
+
+  const loadTeamNeeds = useCallback(async () => {
+    if (!loadVisibleTeamNeeds) {
+      setVisibleTeamNeeds([]);
+      setVisibleTeamNeedsStatus("idle");
+      return;
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setVisibleTeamNeedsStatus("loading");
+    try {
+      const needs = await loadVisibleTeamNeeds();
+      setVisibleTeamNeeds(Array.isArray(needs) ? needs : []);
+      setVisibleTeamNeedsStatus("ready");
+    } catch (error) {
+      setVisibleTeamNeeds([]);
+      setVisibleTeamNeedsStatus("error");
+    } finally {
+      logPlayerHubTiming("teamNeeds load", startedAt);
+    }
+  }, [loadVisibleTeamNeeds]);
+
+  const loadMyInterests = useCallback(async () => {
+    if (!loadMyTeamNeedInterests) {
+      setMyTeamNeedInterests([]);
+      return;
+    }
+
+    try {
+      const interests = await loadMyTeamNeedInterests();
+      setMyTeamNeedInterests(Array.isArray(interests) ? interests : []);
+    } catch (error) {
+      setMyTeamNeedInterests([]);
+    }
+  }, [loadMyTeamNeedInterests]);
+
+  const loadCaptainInterests = useCallback(async (needId = "") => {
+    if (!canManageTeamProfile || !loadTeamNeedInterestsForCaptain) {
+      setCaptainTeamNeedInterests([]);
+      return;
+    }
+
+    try {
+      const interests = await loadTeamNeedInterestsForCaptain(needId);
+      const nextInterests = Array.isArray(interests) ? interests : [];
+      if (needId) {
+        setCaptainTeamNeedInterests((current) => [
+          ...current.filter(
+            (interest) => String(interest.needId || "") !== String(needId)
+          ),
+          ...nextInterests,
+        ]);
+      } else {
+        setCaptainTeamNeedInterests(nextInterests);
+      }
+      return nextInterests;
+    } catch (error) {
+      if (!needId) {
+        setCaptainTeamNeedInterests([]);
+      }
+      return [];
+    }
+  }, [canManageTeamProfile, loadTeamNeedInterestsForCaptain]);
+
+  const loadCaptainInterestsForNeed = useCallback(
+    async (needId, autoLoadKey = "") => {
+      const targetNeedId = String(needId || "");
+      if (!targetNeedId) return [];
+
+      setLoadingTeamNeedInterestId(targetNeedId);
+      if (autoLoadKey) {
+        setLastTeamNeedInterestAutoLoadKey(autoLoadKey);
+      }
+
+      try {
+        return await loadCaptainInterests(targetNeedId);
+      } finally {
+        setLoadingTeamNeedInterestId((current) =>
+          current === targetNeedId ? "" : current
+        );
+      }
+    },
+    [loadCaptainInterests]
+  );
+
+  const loadCaptainTeamMembers = useCallback(async () => {
+    if (!canManageTeamProfile || !loadMyTeamMembersForCaptain) {
+      setTeamMembers([]);
+      return [];
+    }
+
+    const startedAt = startPlayerHubTimer();
+    try {
+      const members = await loadMyTeamMembersForCaptain();
+      const nextMembers = Array.isArray(members) ? members : [];
+      setTeamMembers(nextMembers);
+      return nextMembers;
+    } catch (error) {
+      setTeamMembers([]);
+      return [];
+    } finally {
+      logPlayerHubTiming("teamMembers load", startedAt);
+    }
+  }, [canManageTeamProfile, loadMyTeamMembersForCaptain]);
+
+  const loadConfirmedTeams = useCallback(async () => {
+    if (!loadMyConfirmedTeamsForPlayer) {
+      setConfirmedTeams([]);
+      return [];
+    }
+
+    try {
+      const teams = await loadMyConfirmedTeamsForPlayer();
+      const nextTeams = Array.isArray(teams) ? teams : [];
+      setConfirmedTeams(nextTeams);
+      return nextTeams;
+    } catch (error) {
+      setConfirmedTeams([]);
+      return [];
+    }
+  }, [loadMyConfirmedTeamsForPlayer]);
+
+  const loadAdminTeamProfiles = useCallback(async () => {
+    if (!isAdmin || !loadTeamProfilesAdmin) {
+      setAdminTeamProfiles([]);
+      setAdminTeamProfileStatus("idle");
+      setAdminTeamProfileMessage("");
+      return;
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setAdminTeamProfileStatus("loading");
+    setAdminTeamProfileMessage("");
+    try {
+      const profiles = await loadTeamProfilesAdmin();
+      setAdminTeamProfiles(Array.isArray(profiles) ? profiles : []);
+      setAdminTeamProfileStatus("ready");
+    } catch (error) {
+      setAdminTeamProfileStatus("error");
+      setAdminTeamProfileMessage(
+        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+      );
+    } finally {
+      logPlayerHubTiming("adminTeamProfiles load", startedAt);
+    }
+  }, [isAdmin, loadTeamProfilesAdmin]);
+
+  const loadAdminTeamNeedInterests = useCallback(async () => {
+    if (!isAdmin || !loadTeamNeedInterestsAdmin) {
+      setAdminTeamNeedInterests([]);
+      setAdminTeamNeedInterestStatus("idle");
+      return;
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setAdminTeamNeedInterestStatus("loading");
+    try {
+      const interests = await loadTeamNeedInterestsAdmin();
+      setAdminTeamNeedInterests(Array.isArray(interests) ? interests : []);
+      setAdminTeamNeedInterestStatus("ready");
+    } catch (error) {
+      setAdminTeamNeedInterests([]);
+      setAdminTeamNeedInterestStatus("error");
+    } finally {
+      logPlayerHubTiming("adminTeamNeeds load", startedAt);
+    }
+  }, [isAdmin, loadTeamNeedInterestsAdmin]);
+
+  const loadAdminTeamMembers = useCallback(async () => {
+    if (!isAdmin || !loadTeamMembersAdmin) {
+      setAdminTeamMembers([]);
+      setAdminTeamMembersStatus("idle");
+      return [];
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setAdminTeamMembersStatus("loading");
+    try {
+      const members = await loadTeamMembersAdmin();
+      const nextMembers = Array.isArray(members) ? members : [];
+      setAdminTeamMembers(nextMembers);
+      setAdminTeamMembersStatus("ready");
+      return nextMembers;
+    } catch (error) {
+      setAdminTeamMembers([]);
+      setAdminTeamMembersStatus("error");
+      return [];
+    } finally {
+      logPlayerHubTiming("adminTeamMembers load", startedAt);
+    }
+  }, [isAdmin, loadTeamMembersAdmin]);
+
+  const loadTeamMembershipRequests = useCallback(async () => {
+    if (!loadMyTeamMembershipRequests) {
+      setTeamMembershipRequests([]);
+      return [];
+    }
+
+    try {
+      const requests = await loadMyTeamMembershipRequests();
+      const nextRequests = Array.isArray(requests) ? requests : [];
+      setTeamMembershipRequests(nextRequests);
+      return nextRequests;
+    } catch (error) {
+      setTeamMembershipRequests([]);
+      return [];
+    }
+  }, [loadMyTeamMembershipRequests]);
+
+  const loadCaptainMembershipRequests = useCallback(async () => {
+    if (!canManageTeamProfile || !loadMembershipRequestsForCaptain) {
+      setCaptainMembershipRequests([]);
+      return [];
+    }
+
+    try {
+      const requests = await loadMembershipRequestsForCaptain();
+      const nextRequests = Array.isArray(requests) ? requests : [];
+      setCaptainMembershipRequests(nextRequests);
+      return nextRequests;
+    } catch (error) {
+      setCaptainMembershipRequests([]);
+      return [];
+    }
+  }, [canManageTeamProfile, loadMembershipRequestsForCaptain]);
+
+  const loadTeamIdentityRequests = useCallback(async () => {
+    if (!canManageTeamProfile || !loadTeamIdentityChangeRequests) {
+      setTeamIdentityRequests([]);
+      setTeamIdentityStatus("idle");
+      setTeamIdentityMessage("");
+      return [];
+    }
+
+    setTeamIdentityStatus("loading");
+    try {
+      const requests = await loadTeamIdentityChangeRequests();
+      const nextRequests = Array.isArray(requests) ? requests : [];
+      setTeamIdentityRequests(nextRequests);
+      setTeamIdentityStatus("ready");
+      setTeamIdentityMessage("");
+      return nextRequests;
+    } catch (error) {
+      if (String(error?.message || "").toLowerCase().includes("unknown action")) {
+        setTeamIdentityRequests([]);
+        setTeamIdentityStatus("ready");
+        setTeamIdentityMessage("");
+        return [];
+      }
+
+      setTeamIdentityRequests([]);
+      setTeamIdentityStatus("error");
+      setTeamIdentityMessage(
+        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+      );
+      return [];
+    }
+  }, [canManageTeamProfile, loadTeamIdentityChangeRequests]);
+
+  const loadAdminTeamMembershipRequests = useCallback(async () => {
+    if (!isAdmin || !loadTeamMembershipRequestsAdmin) {
+      setAdminTeamMembershipRequests([]);
+      setAdminTeamMembershipStatus("idle");
+      return [];
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setAdminTeamMembershipStatus("loading");
+    try {
+      const requests = await loadTeamMembershipRequestsAdmin();
+      const nextRequests = Array.isArray(requests) ? requests : [];
+      setAdminTeamMembershipRequests(nextRequests);
+      setAdminTeamMembershipStatus("ready");
+      return nextRequests;
+    } catch (error) {
+      setAdminTeamMembershipRequests([]);
+      setAdminTeamMembershipStatus("error");
+      return [];
+    } finally {
+      logPlayerHubTiming("adminMembershipRequests load", startedAt);
+    }
+  }, [isAdmin, loadTeamMembershipRequestsAdmin]);
+
+  const loadAdminTeamIdentityRequests = useCallback(async () => {
+    if (!isAdmin || !loadTeamIdentityChangeRequests) {
+      setAdminTeamIdentityRequests([]);
+      setAdminTeamIdentityStatus("idle");
+      setAdminTeamIdentityMessage("");
+      return [];
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setAdminTeamIdentityStatus("loading");
+    setAdminTeamIdentityMessage("");
+    try {
+      const requests = await loadTeamIdentityChangeRequests();
+      const nextRequests = Array.isArray(requests) ? requests : [];
+      setAdminTeamIdentityRequests(nextRequests);
+      setAdminTeamIdentityStatus("ready");
+      return nextRequests;
+    } catch (error) {
+      if (String(error?.message || "").toLowerCase().includes("unknown action")) {
+        setAdminTeamIdentityRequests([]);
+        setAdminTeamIdentityStatus("ready");
+        setAdminTeamIdentityMessage("");
+        return [];
+      }
+
+      setAdminTeamIdentityRequests([]);
+      setAdminTeamIdentityStatus("error");
+      setAdminTeamIdentityMessage(
+        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+      );
+      return [];
+    } finally {
+      logPlayerHubTiming("adminIdentityRequests load", startedAt);
+    }
+  }, [isAdmin, loadTeamIdentityChangeRequests]);
+
+  const loadTournamentPlans = useCallback(async () => {
+    if (!canManageTeamProfile || !loadMyTournamentTeamPlansForCaptain) {
+      setTournamentPlans([]);
+      return [];
+    }
+
+    const startedAt = startPlayerHubTimer();
+    try {
+      const plans = await loadMyTournamentTeamPlansForCaptain();
+      const nextPlans = Array.isArray(plans) ? plans : [];
+      setTournamentPlans(nextPlans);
+      return nextPlans;
+    } catch (error) {
+      setTournamentPlans([]);
+      return [];
+    } finally {
+      logPlayerHubTiming("tournamentPlans load", startedAt);
+    }
+  }, [canManageTeamProfile, loadMyTournamentTeamPlansForCaptain]);
+
+  const loadPlayerTournamentAvailability = useCallback(async () => {
+    if (!loadMyTournamentAvailabilityForPlayer) {
+      setPlayerTournamentAvailability([]);
+      return [];
+    }
+
+    const startedAt = startPlayerHubTimer();
+    try {
+      const availability = await loadMyTournamentAvailabilityForPlayer();
+      const nextAvailability = Array.isArray(availability) ? availability : [];
+      setPlayerTournamentAvailability(nextAvailability);
+      return nextAvailability;
+    } catch (error) {
+      setPlayerTournamentAvailability([]);
+      return [];
+    } finally {
+      logPlayerHubTiming("playerAvailability load", startedAt);
+    }
+  }, [loadMyTournamentAvailabilityForPlayer]);
+
+  const loadPlayerTournamentSquadPlanning = useCallback(async () => {
+    if (!loadMyTournamentSquadPlanningForPlayer) {
+      setPlayerTournamentSquadPlanning([]);
+      return [];
+    }
+
+    const startedAt = startPlayerHubTimer();
+    try {
+      const planning = await loadMyTournamentSquadPlanningForPlayer();
+      const nextPlanning = Array.isArray(planning) ? planning : [];
+      setPlayerTournamentSquadPlanning(nextPlanning);
+      return nextPlanning;
+    } catch (error) {
+      setPlayerTournamentSquadPlanning([]);
+      return [];
+    } finally {
+      logPlayerHubTiming("playerSquadPlanning load", startedAt);
+    }
+  }, [loadMyTournamentSquadPlanningForPlayer]);
+
+  const loadCaptainTournamentAvailability = useCallback(
+    async (planId) => {
+      const targetPlanId = String(planId || "");
+      if (!targetPlanId || !loadTournamentAvailabilityForCaptain) return [];
+
+      try {
+        const data = await loadTournamentAvailabilityForCaptain(targetPlanId);
+        const availability = Array.isArray(data?.availability)
+          ? data.availability
+          : [];
+        setCaptainTournamentAvailability((current) => [
+          ...current.filter(
+            (item) => String(item.planId || "") !== targetPlanId
+          ),
+          ...availability,
+        ]);
+        if (data?.plan) {
+          setTournamentPlans((current) =>
+            current.map((plan) =>
+              String(plan.planId || "") === String(data.plan.planId || "")
+                ? data.plan
+                : plan
+            )
+          );
+        }
+        return availability;
+      } catch (error) {
+        return [];
+      }
+    },
+    [loadTournamentAvailabilityForCaptain]
+  );
+
+  const loadSquadPlanningForPlan = useCallback(
+    async (planId) => {
+      const targetPlanId = String(planId || "");
+      if (!targetPlanId || !loadTournamentSquadPlanningForCaptain) {
+        return { planning: [], availability: [] };
+      }
+
+      try {
+        const data = await loadTournamentSquadPlanningForCaptain(targetPlanId);
+        const planning = Array.isArray(data?.planning) ? data.planning : [];
+        const availability = Array.isArray(data?.availability)
+          ? data.availability
+          : [];
+
+        setCaptainTournamentSquadPlanning((current) => [
+          ...current.filter(
+            (item) => String(item.planId || "") !== targetPlanId
+          ),
+          ...planning,
+        ]);
+        setCaptainTournamentAvailability((current) => [
+          ...current.filter(
+            (item) => String(item.planId || "") !== targetPlanId
+          ),
+          ...availability,
+        ]);
+        if (data?.plan) {
+          setTournamentPlans((current) =>
+            current.map((plan) =>
+              String(plan.planId || "") === String(data.plan.planId || "")
+                ? data.plan
+                : plan
+            )
+          );
+        }
+
+        return { planning, availability };
+      } catch (error) {
+        return { planning: [], availability: [] };
+      }
+    },
+    [loadTournamentSquadPlanningForCaptain]
+  );
+
+  const loadRosterDraftForPlan = useCallback(
+    async (planId) => {
+      const targetPlanId = String(planId || "");
+      if (!targetPlanId || !loadRosterDraftForCaptain) {
+        return { roster: null, players: [] };
+      }
+
+      try {
+        const data = await loadRosterDraftForCaptain(targetPlanId);
+        const roster = data?.roster || null;
+        const players = Array.isArray(data?.players) ? data.players : [];
+        setCaptainRosterDraftsByPlanId((current) => ({
+          ...current,
+          [targetPlanId]: { roster, players },
+        }));
+        return { roster, players };
+      } catch (error) {
+        setCaptainRosterDraftsByPlanId((current) => ({
+          ...current,
+          [targetPlanId]: { roster: null, players: [] },
+        }));
+        return { roster: null, players: [] };
+      }
+    },
+    [loadRosterDraftForCaptain]
+  );
+
+  const loadPlayerRosterStatus = useCallback(async () => {
+    if (!loadMyRosterStatusForPlayer) {
+      setPlayerTournamentRosterStatus([]);
+      return [];
+    }
+
+    const startedAt = startPlayerHubTimer();
+    try {
+      const rosters = await loadMyRosterStatusForPlayer();
+      const nextRosters = Array.isArray(rosters) ? rosters : [];
+      setPlayerTournamentRosterStatus(nextRosters);
+      return nextRosters;
+    } catch (error) {
+      setPlayerTournamentRosterStatus([]);
+      return [];
+    } finally {
+      logPlayerHubTiming("rosterDraft/player load", startedAt);
+    }
+  }, [loadMyRosterStatusForPlayer]);
+
+  const loadAdminRosterDrafts = useCallback(async () => {
+    if (!canReviewRosterDrafts || !loadRosterDraftAdmin) {
+      setAdminTournamentRosterDrafts([]);
+      setAdminTournamentRosterStatus("idle");
+      return [];
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setAdminTournamentRosterStatus("loading");
+    try {
+      const rosters = await loadRosterDraftAdmin();
+      const nextRosters = Array.isArray(rosters) ? rosters : [];
+      setAdminTournamentRosterDrafts(nextRosters);
+      setAdminTournamentRosterStatus("ready");
+      return nextRosters;
+    } catch (error) {
+      setAdminTournamentRosterDrafts([]);
+      setAdminTournamentRosterStatus("error");
+      return [];
+    } finally {
+      logPlayerHubTiming("rosterDraft/review load", startedAt);
+    }
+  }, [canReviewRosterDrafts, loadRosterDraftAdmin]);
+
+  const loadPlayerProfile = useCallback(async () => {
+    if (!loadMyPlayerProfile) {
+      setProfileStatus("ready");
+      setProfileMessage("");
+      return null;
+    }
+
+    const startedAt = startPlayerHubTimer();
+    setProfileStatus("loading");
+    setProfileMessage(copy.profileLoading);
+
+    try {
+      const loadedProfile = await loadMyPlayerProfile();
+      const normalizedProfile = normalizePlayerHubProfile({
+        ...getPlayerHubProfileDefaults(),
+        username,
+        ...(loadedProfile || {}),
+      });
+      setMyProfile(normalizedProfile);
+      setSavedProfilePreview(normalizedProfile);
+      setProfileStatus("ready");
+      setProfileMessage("");
+      return normalizedProfile;
+    } catch (error) {
+      setProfileStatus("error");
+      setProfileMessage(cleanPlayerHubError(error, copy.profileLoadFailed));
+      return null;
+    } finally {
+      logPlayerHubTiming("loadProfile", startedAt);
+    }
+  }, [copy.profileLoadFailed, copy.profileLoading, loadMyPlayerProfile, username]);
+
+  const applyPlayerHubSnapshot = useCallback(
+    (snapshot) => {
+      const safeSnapshot = snapshot || {};
+      const normalizedProfile = normalizePlayerHubProfile({
+        ...getPlayerHubProfileDefaults(),
+        username,
+        ...(safeSnapshot.profile || {}),
+      });
+      const captain = safeSnapshot.captainTeamControl || {};
+      const nextTeamProfile = captain.teamProfile || null;
+
+      setMyProfile(normalizedProfile);
+      setSavedProfilePreview(normalizedProfile);
+      setProfileStatus("ready");
+      setProfileMessage("");
+
+      setClubTeams(
+        Array.isArray(safeSnapshot.availableClubs)
+          ? safeSnapshot.availableClubs
+          : []
+      );
+      setClubTeamsStatus("ready");
+      setClubTeamsMessage("");
+
+      setAccessRequests(
+        Array.isArray(safeSnapshot.accessRequests)
+          ? safeSnapshot.accessRequests
+          : []
+      );
+      setAccessRequestsStatus("ready");
+      setAccessRequestsMessage("");
+
+      setVisibleTeamNeeds(
+        Array.isArray(safeSnapshot.teamNeeds) ? safeSnapshot.teamNeeds : []
+      );
+      setVisibleTeamNeedsStatus("ready");
+      setMyTeamNeedInterests(
+        Array.isArray(safeSnapshot.myTeamNeedInterests)
+          ? safeSnapshot.myTeamNeedInterests
+          : []
+      );
+      setConfirmedTeams(
+        Array.isArray(safeSnapshot.myTeams) ? safeSnapshot.myTeams : []
+      );
+      setTeamMembershipRequests(
+        Array.isArray(safeSnapshot.teamMembershipRequests)
+          ? safeSnapshot.teamMembershipRequests
+          : []
+      );
+      setPlayerTournamentAvailability(
+        Array.isArray(safeSnapshot.tournamentAvailability)
+          ? safeSnapshot.tournamentAvailability
+          : []
+      );
+      setPlayerTournamentSquadPlanning(
+        Array.isArray(safeSnapshot.plannedTeams)
+          ? safeSnapshot.plannedTeams
+          : []
+      );
+      setPlayerTournamentRosterStatus(
+        Array.isArray(safeSnapshot.rosterDraftsForPlayer)
+          ? safeSnapshot.rosterDraftsForPlayer
+          : []
+      );
+
+      setCanManageTeamProfile(!!captain.canManageTeamProfile);
+      setTeamProfile(nextTeamProfile);
+      setTeamNeeds(Array.isArray(captain.needs) ? captain.needs : []);
+      setCaptainTeamNeedInterests(
+        Array.isArray(captain.interests) ? captain.interests : []
+      );
+      setTeamMembers(Array.isArray(captain.members) ? captain.members : []);
+      setCaptainMembershipRequests(
+        Array.isArray(captain.membershipRequests)
+          ? captain.membershipRequests
+          : []
+      );
+      setTeamIdentityRequests(
+        Array.isArray(captain.identityRequests) ? captain.identityRequests : []
+      );
+      setTournamentPlans(
+        Array.isArray(captain.tournamentPlans) ? captain.tournamentPlans : []
+      );
+      setCaptainRosterDraftsByPlanId(
+        captain.rosterDraftsByPlanId && typeof captain.rosterDraftsByPlanId === "object"
+          ? captain.rosterDraftsByPlanId
+          : {}
+      );
+      setTeamProfileStatus("ready");
+      setTeamProfileMessage(captain.message || "");
+      setTeamProfileDraft({
+        country: nextTeamProfile?.country || normalizedProfile.country || "",
+        teamLevel: nextTeamProfile?.teamLevel || "",
+        teamDescription: nextTeamProfile?.teamDescription || "",
+        contactNote: nextTeamProfile?.contactNote || "",
+        active: nextTeamProfile?.active !== false,
+      });
+
+      setAdminCounts(safeSnapshot.adminCounts || null);
+      setSnapshotInitialLoadComplete(true);
+    },
+    [username]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadInitialPlayerHub() {
+      if (loadPlayerHubSnapshot) {
+        const snapshotStartedAt = startPlayerHubTimer();
+        try {
+          const snapshot = await loadPlayerHubSnapshot();
+          if (cancelled) return;
+          if (!isUsablePlayerHubSnapshot(snapshot)) {
+            throw new Error("Incomplete Player Hub snapshot");
+          }
+          logPlayerHubTiming("snapshot request", snapshotStartedAt);
+          applyPlayerHubSnapshot(snapshot);
+          logPlayerHubTiming("render ready", snapshotStartedAt);
+          return;
+        } catch (error) {
+          logPlayerHubTiming("snapshot failed", snapshotStartedAt);
+        }
+      }
+
+      if (cancelled) return;
+      setSnapshotInitialLoadComplete(false);
+      const fallbackStartedAt = startPlayerHubTimer();
+      Promise.allSettled([
+        loadPlayerProfile(),
+        loadActiveClubTeams(),
+        loadAccessRequests(),
+        loadTeamProfile(),
+        loadTeamNeeds(),
+        loadMyInterests(),
+        loadConfirmedTeams(),
+        loadTeamMembershipRequests(),
+        loadPlayerTournamentAvailability(),
+        loadPlayerTournamentSquadPlanning(),
+        loadPlayerRosterStatus(),
+      ]).finally(() => {
+        if (!cancelled) {
+          logPlayerHubTiming("fallback load", fallbackStartedAt);
+        }
+      });
+    }
+
+    loadInitialPlayerHub();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    applyPlayerHubSnapshot,
+    loadAccessRequests,
+    loadActiveClubTeams,
+    loadConfirmedTeams,
+    loadPlayerHubSnapshot,
+    loadPlayerProfile,
+    loadMyInterests,
+    loadPlayerRosterStatus,
+    loadPlayerTournamentAvailability,
+    loadPlayerTournamentSquadPlanning,
+    loadTeamMembershipRequests,
+    loadTeamNeeds,
+    loadTeamProfile,
+  ]);
+
+  useEffect(() => {
+    if (!canManageTeamProfile || snapshotInitialLoadComplete) return;
+
+    const startedAt = startPlayerHubTimer();
+    Promise.allSettled([
+      loadCaptainInterests(),
+      loadCaptainTeamMembers(),
+      loadCaptainMembershipRequests(),
+      loadTeamIdentityRequests(),
+      loadTournamentPlans(),
+    ]).finally(() => {
+      logPlayerHubTiming("captain details", startedAt);
+    });
+  }, [
+    canManageTeamProfile,
+    loadCaptainInterests,
+    loadCaptainMembershipRequests,
+    loadCaptainTeamMembers,
+    loadTeamIdentityRequests,
+    loadTournamentPlans,
+    snapshotInitialLoadComplete,
+  ]);
+
+  useEffect(() => {
+    const needId = String(expandedTeamNeedInterestId || "");
+    if (!needId || loadingTeamNeedInterestId === needId) return;
+
+    const expandedNeed = teamNeeds.find(
+      (need) => String(need.needId || "") === needId
+    );
+    if (!expandedNeed) return;
+
+    const existingInterests = captainTeamNeedInterests.filter(
+      (interest) => String(interest.needId || "") === needId
+    );
+    if (existingInterests.length) return;
+
+    const stats = teamNeedCounters(expandedNeed);
+    if (!stats.acceptedCount && !stats.pendingCount) return;
+
+    const autoLoadKey = `${needId}:${stats.acceptedCount}:${stats.pendingCount}`;
+    if (lastTeamNeedInterestAutoLoadKey === autoLoadKey) return;
+
+    loadCaptainInterestsForNeed(needId, autoLoadKey);
+  }, [
+    captainTeamNeedInterests,
+    expandedTeamNeedInterestId,
+    lastTeamNeedInterestAutoLoadKey,
+    loadCaptainInterestsForNeed,
+    loadingTeamNeedInterestId,
+    teamNeeds,
+  ]);
+
+  useEffect(() => {
+    if (!isAdmin && !canReviewRosterDrafts) {
+      setOpenAdminPanel("");
+    }
+  }, [canReviewRosterDrafts, isAdmin]);
+
+  function updateMyProfileField(field, value) {
+    setMyProfile((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  function clubTeamDisplayName(team) {
+    if (!team) return "";
+    const location = [team.city, team.country]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(", ");
+    return location ? `${team.name} - ${location}` : team.name;
+  }
+
+  function handleClubTeamSelection(teamId) {
+    const selectedTeam = clubTeams.find(
+      (team) => String(team.teamId || "") === String(teamId || "")
+    );
+
+    setAccessClubWarningType("");
+    setMyProfile((current) => ({
+      ...current,
+      clubTeamId: selectedTeam ? selectedTeam.teamId : "",
+      clubTeamName: selectedTeam ? selectedTeam.name : "",
+      freeAgent: selectedTeam ? false : true,
+    }));
+  }
+
+  function toggleNoFixedClubTeam(checked) {
+    setAccessClubWarningType("");
+    setMyProfile((current) => ({
+      ...current,
+      freeAgent: checked,
+      ...(checked ? { clubTeamId: "", clubTeamName: "" } : {}),
+    }));
+  }
+
+  function resetAdminClubTeamDraft() {
+    setAdminClubTeamDraft({
+      teamId: "",
+      name: "",
+      country: "",
+      city: "",
+      active: true,
+    });
+  }
+
+  function updateAdminClubTeamDraft(field, value) {
+    setAdminClubTeamDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  async function handleSaveAdminClubTeam(event) {
+    event.preventDefault();
+    if (!isAdmin || !saveClubTeamAdmin) return;
+
+    const name = String(adminClubTeamDraft.name || "").trim();
+    if (!name) {
+      setAdminClubTeamsStatus("error");
+      setAdminClubTeamsMessage("Club/team name is required.");
+      return;
+    }
+
+    setAdminClubTeamsStatus("saving");
+    setAdminClubTeamsMessage("");
+
+    try {
+      const savedTeam = await saveClubTeamAdmin({
+        ...adminClubTeamDraft,
+        name,
+      });
+      if (savedTeam) {
+        setAdminClubTeams((current) => {
+          const savedKey = String(savedTeam.teamId || "");
+          const exists = current.some(
+            (team) => String(team.teamId || "") === savedKey
+          );
+          const next = exists
+            ? current.map((team) =>
+                String(team.teamId || "") === savedKey ? savedTeam : team
+              )
+            : [savedTeam, ...current];
+          return next.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+        });
+      }
+      resetAdminClubTeamDraft();
+      setAdminClubTeamsStatus("ready");
+      setAdminClubTeamsMessage("Official club/team saved.");
+      await loadActiveClubTeams();
+    } catch (error) {
+      setAdminClubTeamsStatus("error");
+      setAdminClubTeamsMessage(
+        cleanPlayerHubError(error, "Could not save club/team.")
+      );
+    }
+  }
+
+  async function updateAdminClubTeamActive(team, active) {
+    if (!isAdmin || !updateClubTeamActiveAdmin || !team?.teamId) return;
+
+    setAdminClubTeamUpdatingId(team.teamId);
+    setAdminClubTeamsMessage("");
+
+    try {
+      const updatedTeam = await updateClubTeamActiveAdmin(team.teamId, active);
+      if (updatedTeam) {
+        setAdminClubTeams((current) =>
+          current.map((item) =>
+            String(item.teamId || "") === String(updatedTeam.teamId || "")
+              ? updatedTeam
+              : item
+          )
+        );
+      }
+      setAdminClubTeamsStatus("ready");
+      setAdminClubTeamsMessage(
+        active ? "Club/team reactivated." : "Club/team deactivated."
+      );
+      await loadActiveClubTeams();
+    } catch (error) {
+      setAdminClubTeamsStatus("error");
+      setAdminClubTeamsMessage(
+        cleanPlayerHubError(error, "Could not update club/team.")
+      );
+    } finally {
+      setAdminClubTeamUpdatingId("");
+    }
+  }
+
+  function accessRequestLabel(type) {
+    if (type === "CAPTAIN") return "Captain";
+    if (type === "TRAINER") return "Trainer";
+    if (type === "ORGANIZER") return "Organizer";
+    return type || "Access";
+  }
+
+  function accessRequestShortLabel(type) {
+    if (type === "CAPTAIN") return "team contact";
+    if (type === "TRAINER") return "team builder";
+    if (type === "ORGANIZER") return "tournaments";
+    return "approval";
+  }
+
+  function formatAccessRequestStatus(status) {
+    if (status === "PENDING") return "Pending";
+    if (status === "APPROVED") return "Approved";
+    if (status === "ACCEPTED") return "Accepted";
+    if (status === "DECLINED") return "Declined";
+    if (status === "CANCELLED") return "Cancelled";
+    if (status === "REJECTED") return "Rejected";
+    return "Not requested";
+  }
+
+  function formatTeamMembershipStatus(status) {
+    if (status === "PENDING") return "Pending captain approval";
+    if (status === "APPROVED") return "Confirmed team";
+    if (status === "REJECTED") return "Team request rejected";
+    if (status === "CANCELLED") return "Cancelled";
+    return "Not requested";
+  }
+
+  function accessRequestActionText(status, isSubmitting) {
+    if (isSubmitting) return "Sending...";
+    if (status === "PENDING") return "Pending";
+    if (status === "APPROVED") return "Approved";
+    if (status === "REJECTED") return "Request again";
+    return "Request";
+  }
+
+  function accessRequestStatusStyle(status) {
+    if (status === "APPROVED" || status === "ACCEPTED") {
+      return playerHubStyles.accessStatusApproved;
+    }
+    if (status === "REJECTED" || status === "DECLINED") {
+      return playerHubStyles.accessStatusRejected;
+    }
+    if (status === "PENDING") return playerHubStyles.accessStatusPending;
+    return playerHubStyles.accessStatusIdle;
+  }
+
+  function selectedProfileClubForRequest() {
+    if (savedProfilePreview.freeAgent || !savedProfilePreview.clubTeamId) {
+      return {
+        clubTeamId: "",
+        clubTeamName: "",
+      };
+    }
+
+    return {
+      clubTeamId: savedProfilePreview.clubTeamId,
+      clubTeamName: savedProfilePreview.clubTeamName,
+    };
+  }
+
+  async function submitAccessRequest(requestType) {
+    if (!createAccessRequest || accessRequestSubmittingType) return;
+
+    const clubPayload = selectedProfileClubForRequest();
+    setAccessRequestSubmittingType(requestType);
+    setAccessRequestsStatus("saving");
+    setAccessRequestsMessage("");
+
+    try {
+      const request = await createAccessRequest({
+        requestType,
+        ...clubPayload,
+        message: accessRequestMessageDraft,
+      });
+      if (request) {
+        setAccessRequests((current) => [request, ...current]);
+      }
+      setAccessRequestMessageDraft("");
+      setAccessRequestsStatus("ready");
+      setAccessRequestsMessage("Access request sent for admin review.");
+      setPendingAccessRequestType("");
+      setAccessClubWarningType("");
+      await loadAccessRequests();
+    } catch (error) {
+      setAccessRequestsStatus("error");
+      setAccessRequestsMessage(
+        cleanPlayerHubError(error, "Could not create access request.")
+      );
+    } finally {
+      setAccessRequestSubmittingType("");
+    }
+  }
+
+  async function handleAccessRequestCardClick(card) {
+    if (!card) return;
+
+    const latestStatus = card.latest?.status || "";
+    const requestDisabled =
+      Boolean(accessRequestSubmittingType) ||
+      latestStatus === "PENDING" ||
+      latestStatus === "APPROVED";
+
+    if (requestDisabled) return;
+
+    if (
+      needsClubTeamSetup &&
+      (card.type === "CAPTAIN" || card.type === "TRAINER")
+    ) {
+      setAccessClubWarningType(card.type);
+      return;
+    }
+
+    setAccessClubWarningType("");
+    setPendingAccessRequestType(card.type);
+    setAccessRequestMessageDraft("");
+  }
+
+  function cancelPendingAccessRequest() {
+    setPendingAccessRequestType("");
+    setAccessClubWarningType("");
+    setAccessRequestMessageDraft("");
+  }
+
+  function updateAdminAccessRequestNote(request, value) {
+    const key = String(request?.requestId || "");
+    if (!key) return;
+
+    setAdminAccessRequestNotes((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  async function reviewAdminAccessRequest(request, status) {
+    if (!isAdmin || !reviewAccessRequestAdmin || !request?.requestId) return;
+
+    const key = String(request.requestId || "");
+    const adminNote = adminAccessRequestNotes[key] || "";
+    setAdminAccessRequestUpdatingId(key);
+    setAdminAccessRequestsMessage("");
+
+    try {
+      const updatedRequest = await reviewAccessRequestAdmin(
+        request.requestId,
+        status,
+        adminNote
+      );
+      if (updatedRequest) {
+        setAdminAccessRequests((current) =>
+          current.map((item) =>
+            String(item.requestId || "") === key ? updatedRequest : item
+          )
+        );
+      }
+      setAdminAccessRequestsStatus("ready");
+      setAdminAccessRequestsMessage(
+        status === "APPROVED"
+          ? "Access request approved."
+          : "Access request rejected."
+      );
+      await loadAdminAccessRequests();
+      await loadAccessRequests();
+    } catch (error) {
+      setAdminAccessRequestsStatus("error");
+      setAdminAccessRequestsMessage(
+        cleanPlayerHubError(error, "Could not review access request.")
+      );
+    } finally {
+      setAdminAccessRequestUpdatingId("");
+    }
+  }
+
+  async function refreshMembershipAfterProfileSave(profile) {
+    const shouldRequestMembership = Boolean(
+      profile?.clubTeamId && !profile?.freeAgent
+    );
+
+    if (shouldRequestMembership && createOrUpdateTeamMembershipRequest) {
+      try {
+        const data = await createOrUpdateTeamMembershipRequest(
+          profile.clubTeamId
+        );
+        if (Array.isArray(data?.requests)) {
+          setTeamMembershipRequests(data.requests);
+        } else {
+          await loadTeamMembershipRequests();
+        }
+      } catch (error) {
+        await loadTeamMembershipRequests();
+      }
+    } else {
+      await loadTeamMembershipRequests();
+    }
+
+    await loadConfirmedTeams();
+    await loadCaptainMembershipRequests();
+    await loadAdminTeamMembershipRequests();
+  }
+
+  async function handleSaveMyProfile(event) {
+    event.preventDefault();
+    if (!saveMyPlayerProfile || profileStatus === "saving") return;
+
+    setProfileStatus("saving");
+    setProfileMessage(copy.profileSaving);
+
+    try {
+      const savedProfile = await saveMyPlayerProfile(myProfile);
+      const normalizedProfile = normalizePlayerHubProfile({
+        ...myProfile,
+        ...(savedProfile || {}),
+        username,
+      });
+      setMyProfile(normalizedProfile);
+      setSavedProfilePreview(normalizedProfile);
+      setProfileStatus("ready");
+      setProfileMessage(copy.profileSaved);
+      setShowProfileEditor(false);
+      try {
+        await refreshMembershipAfterProfileSave(normalizedProfile);
+      } catch {
+        setProfileMessage(copy.profileSaved);
+      }
+    } catch (error) {
+      setProfileStatus("error");
+      setProfileMessage(cleanPlayerHubError(error, copy.profileSaveFailed));
+    }
+  }
+
+  async function handleSaveTeamSetup(event) {
+    event.preventDefault();
+    if (!saveMyPlayerProfile || profileStatus === "saving") return;
+
+    setProfileStatus("saving");
+    setProfileMessage("Saving club/team...");
+
+    try {
+      const savedProfile = await saveMyPlayerProfile(myProfile);
+      const normalizedProfile = normalizePlayerHubProfile({
+        ...myProfile,
+        ...(savedProfile || {}),
+        username,
+      });
+      setMyProfile(normalizedProfile);
+      setSavedProfilePreview(normalizedProfile);
+      setProfileStatus("ready");
+      setProfileMessage("Club/team saved.");
+      try {
+        await refreshMembershipAfterProfileSave(normalizedProfile);
+      } catch {
+        setProfileMessage("Club/team saved.");
+      }
+    } catch (error) {
+      setProfileStatus("error");
+      setProfileMessage(cleanPlayerHubError(error, copy.profileSaveFailed));
+    }
+  }
+
+  function updateTeamProfileDraft(field, value) {
+    setTeamProfileDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  function updateTeamNeedDraft(field, value) {
+    setTeamNeedDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  function updateTournamentAdDraft(field, value) {
+    setTournamentAdDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  function teamNeedTypeLabel(type) {
+    if (type === "SUBSTITUTE") return "Substitute";
+    if (type === "TRAINING_PLAYER") return "Training player";
+    return "Player";
+  }
+
+  function isPublishedTournamentNeed(need) {
+    return (
+      String(need?.visibility || "").toLowerCase() === "published" &&
+      String(need?.needContext || "").toLowerCase() === "tournament" &&
+      (need?.isPublished === true ||
+        String(need?.isPublished || "").toLowerCase() === "true") &&
+      Boolean(need?.tournamentId || need?.tournamentName)
+    );
+  }
+
+  function teamNeedContextLabel(need) {
+    if (isPublishedTournamentNeed(need)) return "Tournament ad";
+    if (String(need?.needContext || "").toLowerCase() === "training") {
+      return "Training";
+    }
+    return "Internal";
+  }
+
+  function teamNeedContextChipStyle(need) {
+    if (isPublishedTournamentNeed(need)) return playerHubStyles.tournamentAdChip;
+    if (String(need?.needContext || "").toLowerCase() === "training") {
+      return playerHubStyles.trainingNeedChip;
+    }
+    return playerHubStyles.internalNeedChip;
+  }
+
+  function tournamentAdNeedWord(needType, count) {
+    if (needType === "SUBSTITUTE") {
+      return `substitute${Number(count) === 1 ? "" : "s"}`;
+    }
+    if (needType === "TRAINING_PLAYER") {
+      return `training player${Number(count) === 1 ? "" : "s"}`;
+    }
+    return `player${Number(count) === 1 ? "" : "s"}`;
+  }
+
+  function teamNeedCounters(need, interests = []) {
+    const count = Math.max(1, Number(need?.neededCount) || 1);
+    const acceptedFromInterests = interests.filter(
+      (interest) => interest.status === "ACCEPTED"
+    ).length;
+    const pendingFromInterests = interests.filter(
+      (interest) => interest.status === "PENDING"
+    ).length;
+    const hasInterestRows = Array.isArray(interests) && interests.length > 0;
+    const acceptedCount = hasInterestRows
+      ? acceptedFromInterests
+      : Number.isFinite(Number(need?.acceptedCount))
+      ? Number(need.acceptedCount)
+      : acceptedFromInterests;
+    const pendingCount = hasInterestRows
+      ? pendingFromInterests
+      : Number.isFinite(Number(need?.pendingCount))
+      ? Number(need.pendingCount)
+      : pendingFromInterests;
+    const remainingCount = Math.max(count - acceptedCount, 0);
+
+    return {
+      neededCount: count,
+      acceptedCount,
+      pendingCount,
+      remainingCount,
+      filled: remainingCount <= 0,
+    };
+  }
+
+  function teamNeedSummary(need, teamName = "") {
+    const { neededCount } = teamNeedCounters(need);
+    const prefix = teamName ? `${teamName} ` : "";
+    if (need?.needType === "SUBSTITUTE") {
+      return teamName
+        ? `${prefix}needs ${neededCount} substitute${
+            neededCount === 1 ? "" : "s"
+          }`
+        : `Need ${neededCount} substitute${neededCount === 1 ? "" : "s"}`;
+    }
+    if (need?.needType === "TRAINING_PLAYER") {
+      return `${prefix}${teamName ? "is looking" : "Looking"} for ${
+        neededCount === 1 ? "a" : neededCount
+      } training player${neededCount === 1 ? "" : "s"}`;
+    }
+    return teamName
+      ? `${prefix}needs ${neededCount} player${
+          neededCount === 1 ? "" : "s"
+        }`
+      : `Need ${neededCount} player${neededCount === 1 ? "" : "s"}`;
+  }
+
+  function teamNeedStatLabels(need, interests = []) {
+    const counters = teamNeedCounters(need, interests);
+    return {
+      ...counters,
+      acceptedLabel: `Accepted ${counters.acceptedCount} / ${counters.neededCount}`,
+      pendingLabel: `Pending ${counters.pendingCount}`,
+      remainingLabel: counters.filled
+        ? "Filled"
+        : `${counters.remainingCount} spot${
+            counters.remainingCount === 1 ? "" : "s"
+          } left`,
+    };
+  }
+
+  function tournamentOptionLabel(option) {
+    if (!option) return "Tournament";
+    const parts = [option.name, option.startDate, option.location]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean);
+    return parts.join(" - ");
+  }
+
+  function normalizeTournamentAvailabilityStatus(status) {
+    const value = String(status || "").trim().toUpperCase();
+    if (value === "YES" || value === "NO" || value === "MAYBE") return value;
+    return "PENDING";
+  }
+
+  function formatPlayerAvailabilityStatus(status) {
+    const value = normalizeTournamentAvailabilityStatus(status);
+    if (value === "YES") return "Going";
+    if (value === "NO") return "Not going";
+    if (value === "MAYBE") return "Maybe";
+    return "Pending";
+  }
+
+  function formatCompactDate(value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    const date = new Date(text);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      });
+    }
+    return text.split("T")[0].split(" ")[0];
+  }
+
+  function formatPreferredSquad(value) {
+    const text = String(value || "").trim().toUpperCase();
+    if (!text || text === "NO_PREFERENCE") return "";
+    if (text === "RESERVE") return "Preferred: Reserve";
+    return `Preferred: ${text}`;
+  }
+
+  function shortAccountName(value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    if (text.includes("@")) return text.split("@")[0];
+    return text;
+  }
+
+  function tournamentAvailabilityStatusStyle(status) {
+    const value = normalizeTournamentAvailabilityStatus(status);
+    if (value === "YES") return playerHubStyles.accessStatusApproved;
+    if (value === "NO") return playerHubStyles.accessStatusRejected;
+    if (value === "MAYBE") return playerHubStyles.accessStatusPending;
+    return playerHubStyles.accessStatusIdle;
+  }
+
+  function normalizeAssignedSquad(value) {
+    const text = String(value || "").trim().toUpperCase();
+    if (text === "A" || text === "B" || text === "C" || text === "RESERVE") {
+      return text;
+    }
+    return "UNASSIGNED";
+  }
+
+  function isNeutralPlanLabel(label) {
+    const value = String(label || "").trim().toUpperCase();
+    return !value || value === "TEAM_PLANNING" || value === "ALL";
+  }
+
+  function compactPlanMeta(plan) {
+    const parts = [];
+    if (plan?.className) parts.push(plan.className);
+    if (plan?.deadlineAt) parts.push(`deadline ${formatCompactDate(plan.deadlineAt)}`);
+    if (!isNeutralPlanLabel(plan?.squadLabel)) {
+      parts.push(`label ${plan.squadLabel}`);
+    }
+    return parts.join(" / ");
+  }
+
+  function plannedTeamLabel(assignedSquad) {
+    const squad = normalizeAssignedSquad(assignedSquad);
+    if (squad === "RESERVE") return "Reserve";
+    if (squad === "UNASSIGNED") return "Unassigned";
+    return squad;
+  }
+
+  function normalizeRosterStatus(status) {
+    const value = String(status || "").trim().toUpperCase();
+    if (
+      value === "SUBMITTED" ||
+      value === "APPROVED" ||
+      value === "REJECTED" ||
+      value === "LOCKED" ||
+      value === "CHANGE_REQUESTED" ||
+      value === "CANCELLED"
+    ) {
+      return value;
+    }
+    return "DRAFT";
+  }
+
+  function formatRosterStatus(status) {
+    const value = normalizeRosterStatus(status);
+    if (value === "SUBMITTED") return "Submitted";
+    if (value === "APPROVED") return "Approved";
+    if (value === "REJECTED") return "Rejected";
+    if (value === "LOCKED") return "Locked";
+    if (value === "CHANGE_REQUESTED") return "Change requested";
+    if (value === "CANCELLED") return "Cancelled";
+    return "Draft";
+  }
+
+  function rosterStatusStyle(status) {
+    const value = normalizeRosterStatus(status);
+    if (value === "APPROVED" || value === "LOCKED") {
+      return playerHubStyles.accessStatusApproved;
+    }
+    if (value === "SUBMITTED" || value === "CHANGE_REQUESTED") {
+      return playerHubStyles.accessStatusPending;
+    }
+    if (value === "REJECTED") return playerHubStyles.accessStatusRejected;
+    if (value === "CANCELLED") return playerHubStyles.accessStatusRejected;
+    return playerHubStyles.accessStatusIdle;
+  }
+
+  function tournamentPlanStats(plan, availability = []) {
+    const summary = plan?.responseSummary || {};
+    const summaryStats = {
+      yes: Number(summary.yes) || 0,
+      maybe: Number(summary.maybe) || 0,
+      no: Number(summary.no) || 0,
+      pending: Number(summary.pending) || 0,
+      total: Number(summary.total) || 0,
+    };
+    const hasSummary =
+      summaryStats.total > 0 ||
+      summaryStats.yes > 0 ||
+      summaryStats.maybe > 0 ||
+      summaryStats.no > 0 ||
+      summaryStats.pending > 0;
+    if (hasSummary) return summaryStats;
+
+    const hasRows = Array.isArray(availability) && availability.length > 0;
+    if (!hasRows) {
+      return summaryStats;
+    }
+
+    return availability.reduce(
+      (stats, item) => {
+        stats.total += 1;
+        const status = normalizeTournamentAvailabilityStatus(item.responseStatus);
+        if (status === "YES") stats.yes += 1;
+        else if (status === "MAYBE") stats.maybe += 1;
+        else if (status === "NO") stats.no += 1;
+        else stats.pending += 1;
+        return stats;
+      },
+      { yes: 0, maybe: 0, no: 0, pending: 0, total: 0 }
+    );
+  }
+
+  function updateTournamentPlanDraft(field, value) {
+    setTournamentPlanDraft((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  }
+
+  function updateTournamentAvailabilityDraft(availabilityId, field, value) {
+    const key = String(availabilityId || "");
+    setTournamentAvailabilityDrafts((current) => ({
+      ...current,
+      [key]: {
+        ...(current[key] || {}),
+        [field]: value,
+      },
+    }));
+  }
+
+  function availabilityDraftValue(item, field, fallback = "") {
+    const draft = tournamentAvailabilityDrafts[String(item?.availabilityId || "")] || {};
+    return draft[field] !== undefined ? draft[field] : item?.[field] || fallback;
+  }
+
+  function eventPlanId(event) {
+    return String(event?.planId || event?.sourcePlanId || event?.eventId || "");
+  }
+
+  function eventIdentityKey(event) {
+    const planId = eventPlanId(event).trim().toLowerCase();
+    if (planId) return `plan:${planId}`;
+
+    const tournament = String(
+      event?.tournamentId || event?.tournamentName || "tournament"
+    )
+      .trim()
+      .toLowerCase();
+    const team = String(
+      event?.teamProfileId ||
+        event?.clubTeamId ||
+        event?.clubTeamName ||
+        event?.teamName ||
+        "team"
+    )
+      .trim()
+      .toLowerCase();
+    const squad = isNeutralPlanLabel(event?.squadLabel)
+      ? "all"
+      : String(event?.squadLabel || "all").trim().toLowerCase();
+
+    return `event:${tournament}:${team}:${squad}`;
+  }
+
+  function mergeEventRows(current = {}, next = {}) {
+    const merged = { ...current };
+    Object.entries(next || {}).forEach(([key, value]) => {
+      if (value === undefined || value === null) return;
+      if (typeof value === "string" && !value.trim()) return;
+      merged[key] = value;
+    });
+    return merged;
+  }
+
+  function uniqueEventItems(items = []) {
+    const byEvent = new Map();
+    (Array.isArray(items) ? items : []).forEach((item) => {
+      if (!item) return;
+      const key = eventIdentityKey(item);
+      byEvent.set(key, mergeEventRows(byEvent.get(key), item));
+    });
+    return Array.from(byEvent.values());
+  }
+
+  function playerEventBundleSortValue(bundle) {
+    const base =
+      bundle?.availability || bundle?.roster || bundle?.planning || bundle?.base || {};
+    const availabilityStatus = normalizeTournamentAvailabilityStatus(
+      bundle?.availability?.responseStatus || bundle?.planning?.availabilityStatus
+    );
+    const rosterStatus = normalizeRosterStatus(bundle?.roster?.rosterStatus);
+    const priority =
+      availabilityStatus === "PENDING"
+        ? 400
+        : rosterStatus === "LOCKED"
+          ? 300
+          : rosterStatus === "APPROVED" || rosterStatus === "SUBMITTED"
+            ? 250
+            : normalizeAssignedSquad(
+                bundle?.planning?.assignedSquad || bundle?.roster?.assignedSquad
+              ) !== "UNASSIGNED"
+              ? 200
+              : 100;
+    const time = Date.parse(
+      base.deadlineAt ||
+        base.submittedAt ||
+        base.lockedAt ||
+        base.updatedAt ||
+        base.createdAt ||
+        ""
+    );
+    return priority * 10000000000000 + (Number.isNaN(time) ? 0 : time);
+  }
+
+  function buildPlayerEventBundles(availabilityItems, planningItems, rosterItems) {
+    const byEvent = new Map();
+    const ensureBundle = (item) => {
+      const key = eventIdentityKey(item);
+      const current = byEvent.get(key) || { key, base: {} };
+      current.base = mergeEventRows(current.base, item);
+      byEvent.set(key, current);
+      return current;
+    };
+
+    (Array.isArray(availabilityItems) ? availabilityItems : []).forEach((item) => {
+      const bundle = ensureBundle(item);
+      bundle.availability = mergeEventRows(bundle.availability, item);
+    });
+    (Array.isArray(planningItems) ? planningItems : []).forEach((item) => {
+      const bundle = ensureBundle(item);
+      bundle.planning = mergeEventRows(bundle.planning, item);
+    });
+    (Array.isArray(rosterItems) ? rosterItems : []).forEach((item) => {
+      const bundle = ensureBundle(item);
+      bundle.roster = mergeEventRows(bundle.roster, item);
+    });
+
+    return Array.from(byEvent.values()).sort(
+      (left, right) =>
+        playerEventBundleSortValue(right) - playerEventBundleSortValue(left)
+    );
+  }
+
+  function eventResponseActionLabel(status) {
+    const value = normalizeTournamentAvailabilityStatus(status);
+    if (value === "YES") return "Going";
+    if (value === "MAYBE") return "Maybe";
+    if (value === "NO") return "No";
+    return "Pending";
+  }
+
+  function eventRosterForPlanId(planId) {
+    const key = String(planId || "");
+    const captainRoster = captainRosterDraftsByPlanId[key]?.roster;
+    if (captainRoster) return captainRoster;
+    return (
+      playerTournamentRosterStatus.find(
+        (roster) => String(roster.planId || "") === key
+      ) || null
+    );
+  }
+
+  function eventStatusForPlan(event) {
+    const roster = eventRosterForPlanId(eventPlanId(event));
+    const rosterStatus = normalizeRosterStatus(roster?.rosterStatus);
+    if (roster && rosterStatus !== "CANCELLED") {
+      return formatRosterStatus(rosterStatus);
+    }
+    const planStatus = String(event?.planStatus || "").trim().toUpperCase();
+    if (planStatus === "READY") return "Ready";
+    if (planStatus === "CANCELLED") return "Closed";
+    return "Open";
+  }
+
+  function eventContextLabel(event) {
+    const roster = eventRosterForPlanId(eventPlanId(event));
+    const rosterStatus = normalizeRosterStatus(roster?.rosterStatus);
+    if (roster && rosterStatus === "LOCKED") return "Locked roster";
+    if (roster && rosterStatus === "APPROVED") return "Roster approved";
+    if (roster && rosterStatus === "SUBMITTED") return "Roster submitted";
+    if (roster && rosterStatus === "DRAFT") return "Roster draft";
+    const planStatus = String(event?.planStatus || "").trim().toUpperCase();
+    if (planStatus === "READY") return "Availability ready";
+    if (planStatus === "CANCELLED") return "Closed event";
+    return "Availability";
+  }
+
+  function eventStatusStyle(event) {
+    const label = eventStatusForPlan(event).toUpperCase();
+    if (label === "LOCKED" || label === "APPROVED" || label === "READY") {
+      return playerHubStyles.accessStatusApproved;
+    }
+    if (label === "SUBMITTED" || label === "DRAFT" || label === "OPEN") {
+      return playerHubStyles.accessStatusPending;
+    }
+    if (label === "CLOSED" || label === "REJECTED" || label === "CANCELLED") {
+      return playerHubStyles.accessStatusRejected;
+    }
+    return playerHubStyles.accessStatusIdle;
+  }
+
+  function eventMetaText(event) {
+    return [
+      event?.clubTeamName || "Team",
+      !isNeutralPlanLabel(event?.squadLabel) ? event.squadLabel : "",
+      event?.deadlineAt ? `Deadline ${formatCompactDate(event.deadlineAt)}` : "",
+    ]
+      .filter(Boolean)
+      .join(" / ");
+  }
+
+  function updateEventCommentDraft(planId, value) {
+    const key = String(planId || "");
+    setEventCommentDrafts((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  async function loadCommentsForEvent(event) {
+    const planId = eventPlanId(event);
+    if (!planId || !loadEventComments) return [];
+
+    setEventCommentStatusByPlanId((current) => ({
+      ...current,
+      [planId]: "loading",
+    }));
+
+    try {
+      const comments = await loadEventComments(planId);
+      const safeComments = Array.isArray(comments) ? comments : [];
+      setEventCommentsByPlanId((current) => ({
+        ...current,
+        [planId]: safeComments,
+      }));
+      setEventCommentStatusByPlanId((current) => ({
+        ...current,
+        [planId]: "ready",
+      }));
+      return safeComments;
+    } catch (error) {
+      setEventCommentStatusByPlanId((current) => ({
+        ...current,
+        [planId]: "error",
+      }));
+      return [];
+    }
+  }
+
+  async function toggleEventComments(event) {
+    const planId = eventPlanId(event);
+    if (!planId) return;
+    if (expandedEventCommentPlanId === planId) {
+      setExpandedEventCommentPlanId("");
+      return;
+    }
+    setExpandedEventCommentPlanId(planId);
+    await loadCommentsForEvent(event);
+  }
+
+  async function submitEventComment(event) {
+    const planId = eventPlanId(event);
+    const message = String(eventCommentDrafts[planId] || "").trim();
+    if (!planId || !message || !addEventComment) return;
+
+    setEventCommentStatusByPlanId((current) => ({
+      ...current,
+      [planId]: "sending",
+    }));
+
+    try {
+      const data = await addEventComment(planId, message);
+      setEventCommentsByPlanId((current) => ({
+        ...current,
+        [planId]: Array.isArray(data?.comments)
+          ? data.comments
+          : data?.comment
+            ? [...(current[planId] || []), data.comment]
+            : current[planId] || [],
+      }));
+      setEventCommentDrafts((current) => ({
+        ...current,
+        [planId]: "",
+      }));
+      setEventCommentStatusByPlanId((current) => ({
+        ...current,
+        [planId]: "ready",
+      }));
+    } catch (error) {
+      setEventCommentStatusByPlanId((current) => ({
+        ...current,
+        [planId]: "error",
+      }));
+    }
+  }
+
+  function renderEventStats(stats) {
+    function eventStatTone(label) {
+      const value = String(label || "").toLowerCase();
+      if (value === "going") return playerHubStyles.eventStatGoing;
+      if (value === "maybe") return playerHubStyles.eventStatMaybe;
+      if (value === "no") return playerHubStyles.eventStatNo;
+      if (value === "pending") return playerHubStyles.eventStatPending;
+      return null;
+    }
+
+    return (
+      <div style={playerHubStyles.eventStats}>
+        {[
+          ["Going", stats.yes || 0],
+          ["Maybe", stats.maybe || 0],
+          ["No", stats.no || 0],
+          ["Pending", stats.pending || 0],
+        ].map(([label, value]) => (
+          <div
+            key={label}
+            style={{
+              ...playerHubStyles.eventStat,
+              ...(eventStatTone(label) || {}),
+            }}
+          >
+            <span style={playerHubStyles.eventStatValue}>{value}</span>
+            <span style={playerHubStyles.eventStatLabel}>{label}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  function renderEventCommentsDrawer(event) {
+    const planId = eventPlanId(event);
+    if (!planId || expandedEventCommentPlanId !== planId) return null;
+
+    const comments = eventCommentsByPlanId[planId] || [];
+    const status = eventCommentStatusByPlanId[planId] || "idle";
+    const draft = eventCommentDrafts[planId] || "";
+    const visibleComments = comments.slice(-2);
+
+    return (
+      <section style={playerHubStyles.eventCommentDrawer}>
+        {status === "loading" ? (
+          <span style={playerHubStyles.mutedLine}>Loading comments...</span>
+        ) : visibleComments.length ? (
+          visibleComments.map((comment) => (
+            <article key={comment.commentId} style={playerHubStyles.commentRow}>
+              <span style={playerHubStyles.commentAuthor}>
+                {comment.displayName || comment.username || "Player"}
+              </span>
+              <span style={playerHubStyles.commentText}>{comment.message}</span>
+            </article>
+          ))
+        ) : (
+          <span style={playerHubStyles.mutedLine}>No comments yet.</span>
+        )}
+
+        <div style={playerHubStyles.commentComposer}>
+          <input
+            style={playerHubStyles.profileInput}
+            value={draft}
+            onChange={(eventValue) =>
+              updateEventCommentDraft(planId, eventValue.target.value)
+            }
+            placeholder="Write a comment..."
+          />
+          <button
+            type="button"
+            style={{
+              ...playerHubStyles.saveButton,
+              ...(status === "sending" || !String(draft).trim()
+                ? playerHubStyles.saveButtonDisabled
+                : {}),
+            }}
+            disabled={status === "sending" || !String(draft).trim()}
+            onClick={() => submitEventComment(event)}
+          >
+            {status === "sending" ? "Sending..." : "Send"}
+          </button>
+        </div>
+        {status === "error" ? (
+          <span style={playerHubStyles.profileMessage}>
+            Could not update comments.
+          </span>
+        ) : null}
+      </section>
+    );
+  }
+
+  function renderPlayerEventCard(bundle, featured = false) {
+    const event = mergeEventRows(
+      mergeEventRows(mergeEventRows(bundle?.base, bundle?.planning), bundle?.roster),
+      bundle?.availability
+    );
+    const availability = bundle?.availability;
+    const availabilityStatus = normalizeTournamentAvailabilityStatus(
+      availability?.responseStatus || bundle?.planning?.availabilityStatus
+    );
+    const isPending = Boolean(availability) && availabilityStatus === "PENDING";
+    const assignedSquad = normalizeAssignedSquad(
+      bundle?.planning?.assignedSquad || bundle?.roster?.assignedSquad
+    );
+    const plannedLabel =
+      assignedSquad === "UNASSIGNED"
+        ? ""
+        : assignedSquad === "RESERVE"
+          ? "Reserve"
+          : `Team ${plannedTeamLabel(assignedSquad)}`;
+    const rosterStatus = bundle?.roster
+      ? normalizeRosterStatus(bundle.roster.rosterStatus)
+      : "";
+    const hasRosterState = rosterStatus && rosterStatus !== "CANCELLED";
+    const statusLabel = hasRosterState
+      ? formatRosterStatus(rosterStatus)
+      : availability
+        ? formatPlayerAvailabilityStatus(availabilityStatus)
+        : plannedLabel
+          ? "Planning"
+          : "Open";
+    const statusStyle = hasRosterState
+      ? rosterStatusStyle(rosterStatus)
+      : availability
+        ? tournamentAvailabilityStatusStyle(availabilityStatus)
+        : playerHubStyles.accessStatusPending;
+    const preferredSquad = formatPreferredSquad(
+      availability?.preferredSquad || bundle?.planning?.preferredSquad
+    );
+    const stats = tournamentPlanStats(event, []);
+    const hasStats =
+      Number(stats.total || 0) > 1 ||
+      Number(stats.yes || 0) +
+        Number(stats.maybe || 0) +
+        Number(stats.no || 0) +
+        Number(stats.pending || 0) >
+        1;
+    const cardKey = bundle?.key || eventIdentityKey(event);
+    const canComment = Boolean(eventPlanId(event));
+    const eventKicker = hasRosterState
+      ? rosterStatus === "LOCKED"
+        ? "Official roster"
+        : "Roster"
+      : isPending
+        ? "Going?"
+        : "Team event";
+
+    return (
+      <section
+        key={cardKey}
+        style={{
+          ...playerHubStyles.eventCard,
+          ...(featured ? playerHubStyles.eventCardFeatured : {}),
+        }}
+      >
+        <div style={playerHubStyles.homeCardHeader}>
+          <div style={playerHubStyles.profileMeta}>
+            <span style={playerHubStyles.homeKicker}>{eventKicker}</span>
+            <strong style={playerHubStyles.eventTitle}>
+              {event.tournamentName || "Tournament"}
+            </strong>
+            <span style={playerHubStyles.eventMeta}>{eventMetaText(event)}</span>
+          </div>
+          <span
+            style={{
+              ...playerHubStyles.accessStatusChip,
+              ...statusStyle,
+            }}
+          >
+            {statusLabel}
+          </span>
+        </div>
+
+        {hasStats ? renderEventStats(stats) : null}
+
+        <div style={playerHubStyles.chipRow}>
+          {hasRosterState && availability ? (
+            <span
+              style={{
+                ...playerHubStyles.accessStatusChip,
+                ...tournamentAvailabilityStatusStyle(availabilityStatus),
+              }}
+            >
+              {formatPlayerAvailabilityStatus(availabilityStatus)}
+            </span>
+          ) : null}
+          {plannedLabel ? (
+            <span style={playerHubStyles.chip}>Planned: {plannedLabel}</span>
+          ) : null}
+          {preferredSquad ? (
+            <span style={playerHubStyles.chip}>{preferredSquad}</span>
+          ) : null}
+        </div>
+
+        {isPending ? (
+          <>
+            <div style={playerHubStyles.profileFormGrid}>
+              <label style={playerHubStyles.profileField}>
+                <span style={playerHubStyles.profileLabel}>Preferred team</span>
+                <select
+                  style={playerHubStyles.profileInput}
+                  value={availabilityDraftValue(
+                    availability,
+                    "preferredSquad",
+                    "NO_PREFERENCE"
+                  )}
+                  onChange={(eventValue) =>
+                    updateTournamentAvailabilityDraft(
+                      availability.availabilityId,
+                      "preferredSquad",
+                      eventValue.target.value
+                    )
+                  }
+                >
+                  <option value="NO_PREFERENCE">No preference</option>
+                  <option value="A">A</option>
+                  <option value="B">B</option>
+                  <option value="C">C</option>
+                  <option value="RESERVE">Reserve</option>
+                </select>
+              </label>
+              <label style={playerHubStyles.profileField}>
+                <span style={playerHubStyles.profileLabel}>Note</span>
+                <input
+                  style={playerHubStyles.profileInput}
+                  value={availabilityDraftValue(availability, "playerNote", "")}
+                  onChange={(eventValue) =>
+                    updateTournamentAvailabilityDraft(
+                      availability.availabilityId,
+                      "playerNote",
+                      eventValue.target.value
+                    )
+                  }
+                  placeholder="Optional"
+                />
+              </label>
+            </div>
+            <div style={playerHubStyles.eventActionBar}>
+              {["YES", "MAYBE", "NO"].map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  style={{
+                    ...playerHubStyles.adminActionButton,
+                    ...(status === "YES" ? playerHubStyles.addTeamMemberButton : {}),
+                    ...(tournamentPlanUpdatingId === availability.availabilityId
+                      ? playerHubStyles.adminDisabledButton
+                      : {}),
+                  }}
+                  disabled={tournamentPlanUpdatingId === availability.availabilityId}
+                  onClick={() =>
+                    handleTournamentAvailabilityResponse(availability, status)
+                  }
+                >
+                  {eventResponseActionLabel(status)}
+                </button>
+              ))}
+              {canComment ? (
+                <button
+                  type="button"
+                  style={playerHubStyles.feedTinyAction}
+                  onClick={() => toggleEventComments(event)}
+                >
+                  {expandedEventCommentPlanId === eventPlanId(event)
+                    ? "Hide comments"
+                    : "Comment"}
+                </button>
+              ) : null}
+            </div>
+          </>
+        ) : (
+          <div style={playerHubStyles.eventActionBar}>
+            {availability?.playerNote ? (
+              <span style={playerHubStyles.chip}>{availability.playerNote}</span>
+            ) : null}
+            {canComment ? (
+              <button
+                type="button"
+                style={playerHubStyles.feedTinyAction}
+                onClick={() => toggleEventComments(event)}
+              >
+                {expandedEventCommentPlanId === eventPlanId(event)
+                  ? "Hide comments"
+                  : "Comment"}
+              </button>
+            ) : null}
+          </div>
+        )}
+
+        {renderEventCommentsDrawer(event)}
+      </section>
+    );
+  }
+
+  function renderCaptainEventCard(plan, availability = []) {
+    const stats = tournamentPlanStats(plan, availability);
+    const planMeta = compactPlanMeta(plan);
+    const contextLabel = eventContextLabel(plan);
+    const visibleAvailability =
+      expandedTournamentPlanId === plan.planId ? availability : [];
+    const groups = ["YES", "MAYBE", "PENDING", "NO"].map((status) => ({
+      status,
+      items: visibleAvailability.filter(
+        (item) =>
+          normalizeTournamentAvailabilityStatus(item.responseStatus) === status
+      ),
+    }));
+
+    return (
+      <article key={plan.planId || eventIdentityKey(plan)} style={playerHubStyles.eventCard}>
+        <div style={playerHubStyles.eventTopRow}>
+          <div style={playerHubStyles.profileMeta}>
+            <span style={playerHubStyles.homeKicker}>{contextLabel}</span>
+            <strong style={playerHubStyles.eventTitle}>
+              {plan.tournamentName || "Tournament"}
+            </strong>
+            <span style={playerHubStyles.eventMeta}>
+              {eventMetaText(plan)}
+            </span>
+          </div>
+          <span
+            style={{
+              ...playerHubStyles.accessStatusChip,
+              ...eventStatusStyle(plan),
+            }}
+          >
+            {eventStatusForPlan(plan)}
+          </span>
+        </div>
+
+        {renderEventStats(stats)}
+
+        {planMeta ? (
+          <div style={playerHubStyles.chipRow}>
+            <span style={playerHubStyles.chip}>{planMeta}</span>
+          </div>
+        ) : null}
+
+        <div style={playerHubStyles.eventActionBar}>
+          <button
+            type="button"
+            style={playerHubStyles.adminActionButton}
+            onClick={() => toggleTournamentPlanResponses(plan)}
+          >
+            {expandedTournamentPlanId === plan.planId ? "Refresh" : "Responses"}
+          </button>
+          {expandedTournamentPlanId === plan.planId ? (
+            <button
+              type="button"
+              style={playerHubStyles.adminActionButton}
+              onClick={() => setExpandedTournamentPlanId("")}
+            >
+              Hide
+            </button>
+          ) : null}
+          <button
+            type="button"
+            style={playerHubStyles.adminActionButton}
+            onClick={() => toggleTournamentSquadPlanning(plan)}
+          >
+            {expandedSquadPlanId === plan.planId ? "Refresh teams" : "Plan teams"}
+          </button>
+          <button
+            type="button"
+            style={playerHubStyles.feedTinyAction}
+            onClick={() => toggleEventComments(plan)}
+          >
+            {expandedEventCommentPlanId === plan.planId
+              ? "Hide comments"
+              : "Comment"}
+          </button>
+          {plan.planStatus !== "READY" ? (
+            <button
+              type="button"
+              style={playerHubStyles.adminActionButton}
+              onClick={() => handleTournamentPlanStatus(plan, "READY")}
+            >
+              Ready
+            </button>
+          ) : null}
+          {plan.planStatus !== "CANCELLED" ? (
+            <button
+              type="button"
+              style={{
+                ...playerHubStyles.adminActionButton,
+                ...playerHubStyles.adminDangerButton,
+              }}
+              onClick={() => handleTournamentPlanStatus(plan, "CANCELLED")}
+            >
+              Cancel
+            </button>
+          ) : null}
+        </div>
+
+        {expandedTournamentPlanId === plan.planId ? (
+          <div style={playerHubStyles.accessRequestList}>
+            {groups.map((group) => (
+              <div key={group.status} style={playerHubStyles.interestGroup}>
+                <div style={playerHubStyles.interestGroupTitle}>
+                  {formatPlayerAvailabilityStatus(group.status)}
+                </div>
+                {group.items.length ? (
+                  group.items.map((item) => (
+                    <article key={item.availabilityId} style={playerHubStyles.interestRow}>
+                      <div style={playerHubStyles.interestPlayerMeta}>
+                        <strong style={playerHubStyles.interestPlayerName}>
+                          {item.playerDisplayName || item.playerUsername || "Player"}
+                        </strong>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          {[
+                            item.playerCountry || "No country",
+                            formatPreferredSquad(item.preferredSquad),
+                          ]
+                            .filter(Boolean)
+                            .join(" / ")}
+                        </span>
+                        {item.playerNote ? (
+                          <span style={playerHubStyles.cardText}>
+                            {item.playerNote}
+                          </span>
+                        ) : null}
+                      </div>
+                      <span
+                        style={{
+                          ...playerHubStyles.accessStatusChip,
+                          ...tournamentAvailabilityStatusStyle(item.responseStatus),
+                        }}
+                      >
+                        {formatPlayerAvailabilityStatus(item.responseStatus)}
+                      </span>
+                    </article>
+                  ))
+                ) : (
+                  <div style={playerHubStyles.squadEmptyRow}>none</div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {renderEventCommentsDrawer(plan)}
+      </article>
+    );
+  }
+
+  function updateTeamInterestDraft(needId, value) {
+    const key = String(needId || "");
+    setTeamInterestDrafts((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  async function submitTeamNeedInterest(need) {
+    if (!createTeamNeedInterest || !need?.needId) return;
+
+    const needId = String(need.needId || "");
+    setTeamInterestStatus("saving");
+    setTeamInterestMessage("");
+
+    try {
+      const interest = await createTeamNeedInterest(
+        needId,
+        teamInterestDrafts[needId] || ""
+      );
+      if (interest) {
+        setMyTeamNeedInterests((current) => [interest, ...current]);
+      }
+      setTeamInterestOpenNeedId("");
+      setTeamInterestDrafts((current) => ({
+        ...current,
+        [needId]: "",
+      }));
+      setTeamInterestStatus("ready");
+      setTeamInterestMessage("Interest sent.");
+      await loadTeamNeeds();
+      await loadMyInterests();
+      await loadCaptainInterests();
+      await loadAdminTeamNeedInterests();
+    } catch (error) {
+      setTeamInterestStatus("error");
+      setTeamInterestMessage(
+        cleanPlayerHubError(error, "Could not send interest.")
+      );
+    }
+  }
+
+  async function updateTeamNeedInterest(interest, status) {
+    if (!reviewTeamNeedInterest || !interest?.interestId) return;
+
+    setTeamInterestUpdatingId(interest.interestId);
+    setTeamInterestMessage("");
+
+    try {
+      const updatedInterest = await reviewTeamNeedInterest(
+        interest.interestId,
+        status
+      );
+      if (updatedInterest) {
+        setCaptainTeamNeedInterests((current) =>
+          current.map((item) =>
+            String(item.interestId || "") ===
+            String(updatedInterest.interestId || "")
+              ? updatedInterest
+              : item
+          )
+        );
+      }
+      setTeamInterestStatus("ready");
+      setTeamInterestMessage(
+        status === "ACCEPTED" ? "Interest accepted." : "Interest declined."
+      );
+      const needId = String(interest.needId || "");
+      await loadTeamProfile();
+      await loadTeamNeeds();
+      await loadCaptainInterestsForNeed(needId);
+      await loadMyInterests();
+      await loadAdminTeamNeedInterests();
+    } catch (error) {
+      setTeamInterestStatus("error");
+      setTeamInterestMessage(
+        cleanPlayerHubError(error, "Could not update interest.")
+      );
+    } finally {
+      setTeamInterestUpdatingId("");
+    }
+  }
+
+  function isInterestAlreadyTeamMember(interest) {
+    if (!interest) return false;
+    const sourceInterestId = String(interest.interestId || "");
+    const playerUsername = String(interest.playerUsername || "").toLowerCase();
+    return Boolean(
+      (sourceInterestId && activeTeamMemberByInterestId[sourceInterestId]) ||
+        (playerUsername && activeTeamMemberByPlayerUsername[playerUsername])
+    );
+  }
+
+  async function handleAddTeamMemberFromInterest(interest) {
+    if (!addTeamMemberFromInterest || !interest?.interestId) return;
+
+    setTeamMemberUpdatingId(interest.interestId);
+    setTeamMemberStatus("saving");
+    setTeamMemberMessage("");
+
+    try {
+      const data = await addTeamMemberFromInterest(interest.interestId);
+      if (Array.isArray(data?.members)) {
+        setTeamMembers(data.members);
+      } else if (data?.member) {
+        setTeamMembers((current) => [data.member, ...current]);
+      }
+      setTeamMemberStatus("ready");
+      setTeamMemberMessage("Player added to team.");
+      const needId = String(interest.needId || "");
+      await loadTeamProfile();
+      await loadTeamNeeds();
+      if (needId) {
+        await loadCaptainInterestsForNeed(needId);
+      } else {
+        await loadCaptainInterests();
+      }
+      await loadCaptainTeamMembers();
+      await loadConfirmedTeams();
+      await loadAdminTeamMembers();
+    } catch (error) {
+      setTeamMemberStatus("error");
+      setTeamMemberMessage(
+        cleanPlayerHubError(error, "Could not add team member.")
+      );
+    } finally {
+      setTeamMemberUpdatingId("");
+    }
+  }
+
+  async function handleRemoveTeamMember(member, memberStatus = "REMOVED") {
+    if (!removeTeamMember || !member?.teamMemberId) return;
+
+    const confirmed =
+      memberStatus === "ARCHIVED" ||
+      window.confirm(
+        "Remove this player from the team? This does not delete their profile."
+      );
+    if (!confirmed) return;
+
+    setTeamMemberUpdatingId(member.teamMemberId);
+    setTeamMemberStatus("saving");
+    setTeamMemberMessage("");
+
+    try {
+      const data = await removeTeamMember(member.teamMemberId, memberStatus);
+      if (Array.isArray(data?.members)) {
+        setTeamMembers(data.members);
+      } else {
+        setTeamMembers((current) =>
+          current.filter(
+            (item) =>
+              String(item.teamMemberId || "") !==
+              String(member.teamMemberId || "")
+          )
+        );
+      }
+      setTeamMemberStatus("ready");
+      setTeamMemberMessage(
+        memberStatus === "ARCHIVED"
+          ? "Team member archived."
+          : "Team member removed."
+      );
+      await loadCaptainTeamMembers();
+      await loadConfirmedTeams();
+      await loadAdminTeamMembers();
+    } catch (error) {
+      setTeamMemberStatus("error");
+      setTeamMemberMessage(
+        cleanPlayerHubError(error, "Could not update team member.")
+      );
+    } finally {
+      setTeamMemberUpdatingId("");
+    }
+  }
+
+  async function handleAdminArchiveTeamMember(member) {
+    if (!member?.teamMemberId) return;
+    const confirmed = window.confirm("Archive this team member record?");
+    if (!confirmed) return;
+
+    setAdminTeamMemberUpdatingId(member.teamMemberId);
+    try {
+      await handleRemoveTeamMember(member, "ARCHIVED");
+      await loadAdminTeamMembers();
+    } finally {
+      setAdminTeamMemberUpdatingId("");
+    }
+  }
+
+  async function handleReviewTeamMembershipRequest(request, status) {
+    if (!reviewTeamMembershipRequest || !request?.requestId) return;
+
+    setTeamMembershipUpdatingId(request.requestId);
+    setTeamMembershipStatus("saving");
+    setTeamMembershipMessage("");
+
+    try {
+      const data = await reviewTeamMembershipRequest(request.requestId, status);
+      if (Array.isArray(data?.requests)) {
+        setCaptainMembershipRequests(data.requests);
+      } else if (data?.request) {
+        setCaptainMembershipRequests((current) =>
+          current.map((item) =>
+            String(item.requestId || "") === String(data.request.requestId || "")
+              ? data.request
+              : item
+          )
+        );
+      }
+      setTeamMembershipStatus("ready");
+      setTeamMembershipMessage(
+        status === "APPROVED"
+          ? "Team membership approved."
+          : "Team membership rejected."
+      );
+      await loadCaptainMembershipRequests();
+      await loadCaptainTeamMembers();
+      await loadConfirmedTeams();
+      await loadAdminTeamMembershipRequests();
+    } catch (error) {
+      setTeamMembershipStatus("error");
+      setTeamMembershipMessage(
+        cleanPlayerHubError(error, "Could not review membership request.")
+      );
+    } finally {
+      setTeamMembershipUpdatingId("");
+    }
+  }
+
+  async function handleCancelMembershipRequest(request) {
+    if (!cancelMyTeamMembershipRequest || !request?.requestId) return;
+
+    setTeamMembershipUpdatingId(request.requestId);
+    setTeamMembershipStatus("saving");
+    setTeamMembershipMessage("");
+
+    try {
+      const data = await cancelMyTeamMembershipRequest(request.requestId);
+      if (Array.isArray(data?.requests)) {
+        setTeamMembershipRequests(data.requests);
+      }
+      setTeamMembershipStatus("ready");
+      setTeamMembershipMessage("Team membership request cancelled.");
+      await loadTeamMembershipRequests();
+      await loadAdminTeamMembershipRequests();
+    } catch (error) {
+      setTeamMembershipStatus("error");
+      setTeamMembershipMessage(
+        cleanPlayerHubError(error, "Could not cancel membership request.")
+      );
+    } finally {
+      setTeamMembershipUpdatingId("");
+    }
+  }
+
+  async function handleCreateTournamentPlan(event) {
+    event.preventDefault();
+    if (!createTournamentTeamPlan || tournamentPlanStatus === "saving") return;
+
+    const tournamentId = String(tournamentPlanDraft.tournamentId || "").trim();
+    if (!tournamentId) {
+      setTournamentPlanStatus("error");
+      setTournamentPlanMessage("Select a tournament before asking team members.");
+      return;
+    }
+
+    setTournamentPlanStatus("saving");
+    setTournamentPlanMessage("");
+
+    try {
+      const data = await createTournamentTeamPlan({
+        tournamentId,
+        squadLabel: "TEAM_PLANNING",
+        className: tournamentPlanDraft.className,
+        deadlineAt: tournamentPlanDraft.deadlineAt,
+        note: tournamentPlanDraft.note,
+        planStatus: "INVITING",
+      });
+      if (Array.isArray(data?.plans)) {
+        setTournamentPlans(data.plans);
+      } else if (data?.plan) {
+        setTournamentPlans((current) => [data.plan, ...current]);
+      }
+      if (Array.isArray(data?.availability)) {
+        setCaptainTournamentAvailability((current) => [
+          ...current.filter(
+            (item) => String(item.planId || "") !== String(data.plan?.planId || "")
+          ),
+          ...data.availability,
+        ]);
+      }
+      setTournamentPlanDraft({
+        tournamentId,
+        squadLabel: "TEAM_PLANNING",
+        customSquadLabel: "",
+        className: "",
+        deadlineAt: "",
+        note: "",
+      });
+      setTournamentPlanStatus("ready");
+      setTournamentPlanMessage("Team members asked.");
+      setShowTournamentPlanForm(false);
+      await loadTournamentPlans();
+      await loadPlayerTournamentAvailability();
+    } catch (error) {
+      setTournamentPlanStatus("error");
+      setTournamentPlanMessage(
+        cleanPlayerHubError(error, "Could not create tournament plan.")
+      );
+    }
+  }
+
+  async function handleTournamentAvailabilityResponse(item, responseStatus) {
+    if (!updateTournamentAvailabilityResponse || !item?.availabilityId) return;
+
+    setTournamentPlanUpdatingId(item.availabilityId);
+    setTournamentPlanMessage("");
+
+    try {
+      const updated = await updateTournamentAvailabilityResponse(
+        item.availabilityId,
+        responseStatus,
+        availabilityDraftValue(item, "preferredSquad", "NO_PREFERENCE"),
+        availabilityDraftValue(item, "playerNote", "")
+      );
+      if (updated) {
+        setLastAnsweredTournamentAvailabilityId(updated.availabilityId || item.availabilityId);
+        setPlayerTournamentAvailability((current) =>
+          current.map((availability) =>
+            String(availability.availabilityId || "") ===
+            String(updated.availabilityId || "")
+              ? updated
+              : availability
+          )
+        );
+      }
+      setTournamentPlanStatus("ready");
+      setTournamentPlanMessage(
+        `Availability saved: ${formatPlayerAvailabilityStatus(responseStatus)}.`
+      );
+      await loadPlayerTournamentAvailability();
+      await loadPlayerTournamentSquadPlanning();
+      const answeredPlanId = String(updated?.planId || item.planId || "");
+      if (answeredPlanId && expandedTournamentPlanId === answeredPlanId) {
+        await loadCaptainTournamentAvailability(answeredPlanId);
+      }
+      if (answeredPlanId && expandedSquadPlanId === answeredPlanId) {
+        await loadSquadPlanningForPlan(answeredPlanId);
+      }
+      await loadTournamentPlans();
+    } catch (error) {
+      setTournamentPlanStatus("error");
+      setTournamentPlanMessage(
+        cleanPlayerHubError(error, "Could not update availability.")
+      );
+    } finally {
+      setTournamentPlanUpdatingId("");
+    }
+  }
+
+  async function toggleTournamentPlanResponses(plan) {
+    const planId = String(plan?.planId || "");
+    if (!planId) return;
+
+    if (expandedTournamentPlanId === planId) {
+      await loadCaptainTournamentAvailability(planId);
+      return;
+    }
+
+    setExpandedTournamentPlanId(planId);
+    await loadCaptainTournamentAvailability(planId);
+  }
+
+  async function handleTournamentPlanStatus(plan, planStatus) {
+    if (!updateTournamentPlanStatus || !plan?.planId) return;
+
+    setTournamentPlanUpdatingId(plan.planId);
+    setTournamentPlanMessage("");
+
+    try {
+      const updatedPlan = await updateTournamentPlanStatus(plan.planId, planStatus);
+      if (updatedPlan) {
+        setTournamentPlans((current) =>
+          current.map((item) =>
+            String(item.planId || "") === String(updatedPlan.planId || "")
+              ? updatedPlan
+              : item
+          )
+        );
+      }
+      setTournamentPlanStatus("ready");
+      setTournamentPlanMessage("Tournament plan updated.");
+      await loadTournamentPlans();
+    } catch (error) {
+      setTournamentPlanStatus("error");
+      setTournamentPlanMessage(
+        cleanPlayerHubError(error, "Could not update tournament plan.")
+      );
+    } finally {
+      setTournamentPlanUpdatingId("");
+    }
+  }
+
+  function applySquadPlanningResponse(planId, data) {
+    const targetPlanId = String(planId || "");
+    const planning = Array.isArray(data?.planning) ? data.planning : [];
+    const availability = Array.isArray(data?.availability) ? data.availability : [];
+
+    setCaptainTournamentSquadPlanning((current) => [
+      ...current.filter((item) => String(item.planId || "") !== targetPlanId),
+      ...planning,
+    ]);
+    setCaptainTournamentAvailability((current) => [
+      ...current.filter((item) => String(item.planId || "") !== targetPlanId),
+      ...availability,
+    ]);
+    if (data?.plan) {
+      setTournamentPlans((current) =>
+        current.map((item) =>
+          String(item.planId || "") === String(data.plan.planId || "")
+            ? data.plan
+            : item
+        )
+      );
+    }
+  }
+
+  async function toggleTournamentSquadPlanning(plan) {
+    const planId = String(plan?.planId || "");
+    if (!planId) return;
+
+    setExpandedSquadPlanId(planId);
+    setSquadPlanningUpdatingId(`load:${planId}`);
+    setTournamentPlanMessage("");
+    try {
+      await loadSquadPlanningForPlan(planId);
+      await loadRosterDraftForPlan(planId);
+    } catch (error) {
+      setTournamentPlanMessage(
+        cleanPlayerHubError(error, "Could not load team planning.")
+      );
+    } finally {
+      setSquadPlanningUpdatingId("");
+    }
+  }
+
+  async function handleAssignTournamentSquad(plan, item, assignedSquad) {
+    if (!assignPlayerToSquad || !plan?.planId || !item?.playerUsername) return;
+
+    const updateKey = `${plan.planId}:${item.playerUsername}:${assignedSquad}`;
+    setSquadPlanningUpdatingId(updateKey);
+    setTournamentPlanMessage("");
+    try {
+      const data = await assignPlayerToSquad(
+        plan.planId,
+        item.playerUsername,
+        assignedSquad
+      );
+      applySquadPlanningResponse(plan.planId, data);
+      setTournamentPlanMessage("Team planning updated.");
+    } catch (error) {
+      setTournamentPlanMessage(
+        cleanPlayerHubError(error, "Could not update team planning.")
+      );
+    } finally {
+      setSquadPlanningUpdatingId("");
+    }
+  }
+
+  async function handleBuildRosterDraft(plan) {
+    if (!createOrUpdateRosterDraftFromSquadPlanning || !plan?.planId) return;
+
+    setRosterDraftUpdatingPlanId(plan.planId);
+    setRosterDraftMessage("");
+
+    try {
+      const data = await createOrUpdateRosterDraftFromSquadPlanning(plan.planId);
+      const roster = data?.roster || null;
+      const players = Array.isArray(data?.players) ? data.players : [];
+      setCaptainRosterDraftsByPlanId((current) => ({
+        ...current,
+        [plan.planId]: { roster, players },
+      }));
+      setRosterDraftMessage("Roster draft saved.");
+      await loadRosterDraftForPlan(plan.planId);
+      await loadPlayerRosterStatus();
+      await loadAdminRosterDrafts();
+    } catch (error) {
+      setRosterDraftMessage(
+        cleanPlayerHubError(error, "Could not create roster draft.")
+      );
+    } finally {
+      setRosterDraftUpdatingPlanId("");
+    }
+  }
+
+  async function handleCancelRosterDraft(plan) {
+    if (!cancelRosterDraft || !plan?.planId) return;
+
+    const confirmed = window.confirm(
+      "Cancel this roster draft? Planning stays unchanged."
+    );
+    if (!confirmed) return;
+
+    setRosterDraftUpdatingPlanId(plan.planId);
+    setRosterDraftMessage("");
+
+    try {
+      const data = await cancelRosterDraft(plan.planId);
+      const roster = data?.roster || null;
+      const players = Array.isArray(data?.players) ? data.players : [];
+      setCaptainRosterDraftsByPlanId((current) => ({
+        ...current,
+        [plan.planId]: { roster, players },
+      }));
+      setRosterDraftMessage("Roster draft cancelled.");
+      await loadRosterDraftForPlan(plan.planId);
+      await loadPlayerRosterStatus();
+      await loadAdminRosterDrafts();
+    } catch (error) {
+      setRosterDraftMessage(
+        cleanPlayerHubError(error, "Could not cancel roster draft.")
+      );
+    } finally {
+      setRosterDraftUpdatingPlanId("");
+    }
+  }
+
+  async function handleSubmitRosterDraft(plan) {
+    if (!submitRosterDraft || !plan?.planId) return;
+
+    setRosterDraftUpdatingPlanId(plan.planId);
+    setRosterDraftMessage("");
+
+    try {
+      const data = await submitRosterDraft(plan.planId);
+      const roster = data?.roster || null;
+      const players = Array.isArray(data?.players) ? data.players : [];
+      setCaptainRosterDraftsByPlanId((current) => ({
+        ...current,
+        [plan.planId]: { roster, players },
+      }));
+      setSubmitRosterConfirmPlanId("");
+      setRosterDraftMessage("Roster draft submitted.");
+      await loadRosterDraftForPlan(plan.planId);
+      await loadPlayerRosterStatus();
+      await loadAdminRosterDrafts();
+    } catch (error) {
+      setRosterDraftMessage(
+        cleanPlayerHubError(error, "Could not submit roster draft.")
+      );
+    } finally {
+      setRosterDraftUpdatingPlanId("");
+    }
+  }
+
+  async function handleReviewRosterDraft(roster, decision) {
+    if (!reviewRosterDraft || !roster?.rosterId) return;
+
+    const reviewKey = `${roster.rosterId}:${decision}`;
+    setAdminRosterReviewUpdatingId(reviewKey);
+    setAdminRosterReviewMessage("");
+
+    try {
+      await reviewRosterDraft(
+        roster.rosterId,
+        decision,
+        adminRosterReviewNotes[roster.rosterId] || ""
+      );
+      setAdminRosterReviewMessage(
+        decision === "APPROVED" ? "Roster draft approved." : "Roster draft rejected."
+      );
+      await loadAdminRosterDrafts();
+      await loadPlayerRosterStatus();
+      if (roster.planId) {
+        try {
+          await loadRosterDraftForPlan(roster.planId);
+        } catch (error) {
+          // Review can happen outside the captain context; admin list is authoritative here.
+        }
+      }
+    } catch (error) {
+      setAdminRosterReviewMessage(
+        cleanPlayerHubError(error, "Could not review roster draft.")
+      );
+    } finally {
+      setAdminRosterReviewUpdatingId("");
+    }
+  }
+
+  async function handleCaptainLockRoster(plan, roster) {
+    if (!lockOfficialRoster || !plan?.planId || !roster?.rosterId) return;
+
+    const confirmed = window.confirm(
+      "Lock roster? Players will see this as the official roster."
+    );
+    if (!confirmed) return;
+
+    setRosterDraftUpdatingPlanId(plan.planId);
+    setRosterDraftMessage("");
+
+    try {
+      const data = await lockOfficialRoster(roster.rosterId, "");
+      const nextRoster = data?.roster || null;
+      const players = Array.isArray(data?.players) ? data.players : [];
+      setCaptainRosterDraftsByPlanId((current) => ({
+        ...current,
+        [plan.planId]: {
+          roster: nextRoster,
+          players,
+        },
+      }));
+      setRosterDraftMessage("Roster locked.");
+      await loadRosterDraftForPlan(plan.planId);
+      await loadPlayerRosterStatus();
+      await loadAdminRosterDrafts();
+    } catch (error) {
+      setRosterDraftMessage(
+        cleanPlayerHubError(error, "Could not lock roster.")
+      );
+    } finally {
+      setRosterDraftUpdatingPlanId("");
+    }
+  }
+
+  async function toggleTeamNeedInterests(need) {
+    const needId = String(need?.needId || "");
+    if (!needId) return;
+
+    if (expandedTeamNeedInterestId === needId) {
+      setExpandedTeamNeedInterestId("");
+      return;
+    }
+
+    setExpandedTeamNeedInterestId(needId);
+    const stats = teamNeedCounters(need);
+    await loadCaptainInterestsForNeed(
+      needId,
+      `${needId}:${stats.acceptedCount}:${stats.pendingCount}`
+    );
+  }
+
+  function renderCaptainInterestGroup(title, interests) {
+    if (!interests.length) return null;
+
+    return (
+      <div style={playerHubStyles.interestGroup}>
+        <div style={playerHubStyles.interestGroupTitle}>{title}</div>
+        {interests.map((interest) => {
+          const updating = teamInterestUpdatingId === interest.interestId;
+          const alreadyTeamMember = isInterestAlreadyTeamMember(interest);
+          const addingMember = teamMemberUpdatingId === interest.interestId;
+
+          return (
+            <article key={interest.interestId} style={playerHubStyles.interestRow}>
+              <div style={playerHubStyles.interestPlayerMeta}>
+                <strong style={playerHubStyles.interestPlayerName}>
+                  {interest.playerDisplayName || interest.playerUsername}
+                </strong>
+                <span style={playerHubStyles.previewSubtitle}>
+                  {interest.playerCountry || "No country"} /{" "}
+                  {interest.playerClubTeamName || "No fixed club/team"}
+                </span>
+                {interest.message ? (
+                  <span style={playerHubStyles.cardText}>{interest.message}</span>
+                ) : null}
+              </div>
+              <div style={playerHubStyles.interestActionRow}>
+                <span
+                  style={{
+                    ...playerHubStyles.accessStatusChip,
+                    ...accessRequestStatusStyle(interest.status),
+                  }}
+                >
+                  {formatAccessRequestStatus(interest.status || "PENDING")}
+                </span>
+                {interest.status === "ACCEPTED" ? (
+                  alreadyTeamMember ? (
+                    <span style={playerHubStyles.chip}>Team member</span>
+                  ) : (
+                    <button
+                      type="button"
+                      style={{
+                        ...playerHubStyles.addTeamMemberButton,
+                        ...(addingMember
+                          ? playerHubStyles.adminDisabledButton
+                          : {}),
+                      }}
+                      disabled={addingMember}
+                      onClick={() => handleAddTeamMemberFromInterest(interest)}
+                    >
+                      {addingMember ? "Adding..." : "Add to team member list"}
+                    </button>
+                  )
+                ) : null}
+                {interest.status === "PENDING" ? (
+                  <>
+                    <button
+                      type="button"
+                      style={playerHubStyles.adminActionButton}
+                      disabled={updating}
+                      onClick={() =>
+                        updateTeamNeedInterest(interest, "ACCEPTED")
+                      }
+                    >
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      style={{
+                        ...playerHubStyles.adminActionButton,
+                        ...playerHubStyles.adminDangerButton,
+                      }}
+                      disabled={updating}
+                      onClick={() =>
+                        updateTeamNeedInterest(interest, "DECLINED")
+                      }
+                    >
+                      Decline
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderSquadPlayerRow(plan, item, planning, options = {}) {
+    const playerUsername = item.playerUsername || planning?.playerUsername || "";
+    const status = normalizeTournamentAvailabilityStatus(
+      item.responseStatus || planning?.availabilityStatus
+    );
+    const assignedSquad = normalizeAssignedSquad(planning?.assignedSquad);
+    const isAssigned = options.assigned && assignedSquad !== "UNASSIGNED";
+    const canAssign = status === "YES" || status === "MAYBE";
+    const readOnly = Boolean(options.readOnly);
+    const updatePrefix = `${plan.planId}:${playerUsername}`;
+    const preferredSquad = item.preferredSquad || planning?.preferredSquad;
+    const moveButtons = ["A", "B", "C", "RESERVE"];
+    const isCurrentUser =
+      String(playerUsername || "").trim().toLowerCase() ===
+      String(username || "").trim().toLowerCase();
+    const metaText = [
+      item.playerCountry || planning?.playerCountry || "No country",
+      formatPlayerAvailabilityStatus(status),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+    return (
+      <div
+        key={`${options.group || "squad"}:${playerUsername}`}
+        style={playerHubStyles.squadPlayerRow}
+      >
+        <div style={playerHubStyles.squadPlayerInfo}>
+          <strong style={playerHubStyles.squadPlayerName}>
+            {item.playerDisplayName || planning?.playerDisplayName || playerUsername || "Player"}
+          </strong>
+          <span style={playerHubStyles.squadPlayerMeta}>
+            {metaText}
+          </span>
+          <div style={playerHubStyles.squadBadgeRow}>
+            {preferredSquad && preferredSquad !== "NO_PREFERENCE" ? (
+              <span style={playerHubStyles.squadTinyBadge}>
+                Pref {preferredSquad}
+              </span>
+            ) : null}
+            {isCurrentUser ? (
+              <span style={playerHubStyles.squadTinyBadge}>You</span>
+            ) : null}
+          </div>
+        </div>
+        <div style={playerHubStyles.squadMoveRow}>
+          {canAssign && !options.pending && !readOnly ? (
+            <>
+              {moveButtons.map((squad) => (
+                <button
+                  key={squad}
+                  type="button"
+                  style={{
+                    ...playerHubStyles.squadMoveButton,
+                    ...(assignedSquad === squad
+                      ? playerHubStyles.squadMoveButtonActive
+                      : {}),
+                    ...(squadPlanningUpdatingId === `${updatePrefix}:${squad}`
+                      ? playerHubStyles.adminDisabledButton
+                      : {}),
+                  }}
+                  disabled={squadPlanningUpdatingId === `${updatePrefix}:${squad}`}
+                  onClick={() => handleAssignTournamentSquad(plan, item, squad)}
+                >
+                  {squad === "RESERVE" ? "Res" : squad}
+                </button>
+              ))}
+              {isAssigned ? (
+                <button
+                  type="button"
+                  style={playerHubStyles.squadMoveButton}
+                  disabled={
+                    squadPlanningUpdatingId === `${updatePrefix}:UNASSIGNED`
+                  }
+                  onClick={() =>
+                    handleAssignTournamentSquad(plan, item, "UNASSIGNED")
+                  }
+                >
+                  Remove
+                </button>
+              ) : null}
+            </>
+          ) : readOnly && isAssigned ? (
+            <span style={playerHubStyles.chip}>Locked</span>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  function renderSquadPlanningBoard(plan, availability, planning, draftData = {}) {
+    const boardRosterStatus = normalizeRosterStatus(
+      draftData?.roster?.rosterStatus
+    );
+    const boardLocked = boardRosterStatus === "LOCKED";
+    const activePlanning = planning.filter(
+      (item) => item.planningStatus !== "REMOVED"
+    );
+    const planningByUsername = activePlanning.reduce((map, item) => {
+      const playerUsername = String(item.playerUsername || "").toLowerCase();
+      if (playerUsername) map[playerUsername] = item;
+      return map;
+    }, {});
+    const removedPlayernames = planning
+      .filter((item) => item.planningStatus === "REMOVED")
+      .reduce((map, item) => {
+        const playerUsername = String(item.playerUsername || "").toLowerCase();
+        if (playerUsername) map[playerUsername] = true;
+        return map;
+      }, {});
+    const assignableAvailability = availability.filter((item) => {
+      const status = normalizeTournamentAvailabilityStatus(item.responseStatus);
+      return status === "YES" || status === "MAYBE";
+    });
+    const availablePlayers = assignableAvailability.filter((item) => {
+      const playerUsername = String(item.playerUsername || "").toLowerCase();
+      const playerPlanning = planningByUsername[playerUsername];
+      return (
+        !removedPlayernames[playerUsername] &&
+        (!playerPlanning ||
+          normalizeAssignedSquad(playerPlanning.assignedSquad) === "UNASSIGNED")
+      );
+    });
+    const pendingPlayers = availability.filter(
+      (item) => normalizeTournamentAvailabilityStatus(item.responseStatus) === "PENDING"
+    );
+    const assignedGroups = [
+      ["A", "Team A"],
+      ["B", "Team B"],
+      ["C", "Team C"],
+      ["RESERVE", "Reserve"],
+    ].map(([squad, label]) => ({
+      squad,
+      label,
+      items: activePlanning.filter(
+        (item) => normalizeAssignedSquad(item.assignedSquad) === squad
+      ),
+    }));
+    const availabilityByUsername = availability.reduce((map, item) => {
+      const playerUsername = String(item.playerUsername || "").toLowerCase();
+      if (playerUsername) map[playerUsername] = item;
+      return map;
+    }, {});
+    const goingCount = availability.filter(
+      (item) => normalizeTournamentAvailabilityStatus(item.responseStatus) === "YES"
+    ).length;
+    const maybeCount = availability.filter(
+      (item) =>
+        normalizeTournamentAvailabilityStatus(item.responseStatus) === "MAYBE"
+    ).length;
+    const assignedCount = assignedGroups.reduce(
+      (count, group) => count + group.items.length,
+      0
+    );
+    const pendingCount = pendingPlayers.length;
+
+    return (
+      <section style={playerHubStyles.squadBoard} data-testid="plan-teams-board">
+        <div style={playerHubStyles.squadBoardHeader}>
+          <div style={playerHubStyles.profileMeta}>
+            <div style={playerHubStyles.sectionTitle}>
+              Plan teams
+            </div>
+            <div style={playerHubStyles.cardText}>
+              {[
+                plan.tournamentName || "Tournament",
+                plan.clubTeamName || "Team",
+                boardLocked ? "Locked roster" : "Planning only",
+              ].join(" · ")}
+            </div>
+          </div>
+          <div style={playerHubStyles.chipRow}>
+            <span style={playerHubStyles.chip}>
+              Going: {goingCount}
+            </span>
+            <span style={playerHubStyles.chip}>
+              Maybe: {maybeCount}
+            </span>
+            <span style={playerHubStyles.chip}>
+              Assigned: {assignedCount}/{assignableAvailability.length}
+            </span>
+            <span style={playerHubStyles.chip}>
+              Pending: {pendingCount}
+            </span>
+            <span style={playerHubStyles.chip}>
+              {boardLocked ? "Locked" : "Not official roster"}
+            </span>
+            {squadPlanningUpdatingId === `load:${plan.planId}` ? (
+              <span style={playerHubStyles.chip}>Loading...</span>
+            ) : null}
+          </div>
+        </div>
+
+        <div style={playerHubStyles.squadBuilderLayout}>
+          <section style={playerHubStyles.squadColumn} data-testid="plan-available">
+            <div style={playerHubStyles.squadColumnHeader}>
+              <span>Available players</span>
+              <strong>{availablePlayers.length}</strong>
+            </div>
+            {availablePlayers.length ? (
+              availablePlayers.map((item) =>
+                renderSquadPlayerRow(
+                  plan,
+                  item,
+                  planningByUsername[String(item.playerUsername || "").toLowerCase()],
+                  {
+                    group: "available",
+                    showResponse: true,
+                    readOnly: boardLocked,
+                  }
+                )
+              )
+            ) : (
+              <div style={playerHubStyles.emptyPreview}>
+                No available players yet. Ask team members or wait for replies.
+              </div>
+            )}
+          </section>
+
+          <section style={playerHubStyles.squadTeamsGrid}>
+            {assignedGroups.map((group) => (
+              <section
+                key={group.squad}
+                style={playerHubStyles.squadTeamBox}
+                data-testid={`plan-team-${group.squad}`}
+              >
+                <div style={playerHubStyles.squadColumnHeader}>
+                  <span>{group.label}</span>
+                  <strong>{group.items.length}</strong>
+                </div>
+                {group.items.length ? (
+                  group.items.map((item) =>
+                    renderSquadPlayerRow(
+                      plan,
+                      {
+                        ...item,
+                        ...(availabilityByUsername[
+                          String(item.playerUsername || "").toLowerCase()
+                        ] || {}),
+                      },
+                      item,
+                      {
+                        group: group.squad,
+                        assigned: true,
+                        showResponse: true,
+                        readOnly: boardLocked,
+                      }
+                    )
+                  )
+                ) : (
+                  <div style={playerHubStyles.squadEmptyRow}>No players</div>
+                )}
+              </section>
+            ))}
+          </section>
+        </div>
+
+        {pendingPlayers.length ? (
+          <div style={playerHubStyles.squadPendingPanel}>
+            <button
+              type="button"
+              style={playerHubStyles.squadPendingToggle}
+              onClick={() =>
+                setExpandedSquadPendingPlanId((current) =>
+                  current === plan.planId ? "" : plan.planId
+                )
+              }
+            >
+              Pending replies: {pendingPlayers.length}
+            </button>
+            {expandedSquadPendingPlanId === plan.planId ? (
+              <section style={playerHubStyles.squadPendingList}>
+                {pendingPlayers.map((item) =>
+                  renderSquadPlayerRow(plan, item, null, {
+                    group: "pending",
+                    pending: true,
+                    showResponse: true,
+                  })
+                )}
+              </section>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
+  function renderRosterDraftPanel(plan, planning, draftData = {}) {
+    const plannedPlayers = Array.isArray(planning)
+      ? planning.filter(
+          (item) =>
+            item.planningStatus !== "REMOVED" &&
+            normalizeAssignedSquad(item.assignedSquad) !== "UNASSIGNED"
+        )
+      : [];
+    const roster = draftData?.roster || null;
+    const rosterStatus = normalizeRosterStatus(roster?.rosterStatus);
+    const rosterIsActive = Boolean(roster && rosterStatus !== "CANCELLED");
+    const rosterIsSubmitted = rosterIsActive && rosterStatus === "SUBMITTED";
+    const rosterIsApproved = rosterIsActive && rosterStatus === "APPROVED";
+    const rosterIsRejected = rosterIsActive && rosterStatus === "REJECTED";
+    const rosterIsLocked = rosterIsActive && rosterStatus === "LOCKED";
+    const rosterCanEdit =
+      !rosterIsActive || rosterStatus === "DRAFT" || rosterIsRejected;
+    const rosterCanSubmit =
+      rosterIsActive && (rosterStatus === "DRAFT" || rosterIsRejected);
+    const rosterPlayers = rosterIsActive && Array.isArray(draftData?.players)
+      ? draftData.players.filter((player) => player.playerStatus !== "REMOVED")
+      : [];
+    const players = rosterIsActive ? rosterPlayers : plannedPlayers;
+    const plannedSignature = plannedPlayers
+      .map(
+        (player) =>
+          `${String(player.playerUsername || "").toLowerCase()}:${normalizeAssignedSquad(
+            player.assignedSquad
+          )}`
+      )
+      .sort()
+      .join("|");
+    const draftSignature = rosterPlayers
+      .map(
+        (player) =>
+          `${String(player.playerUsername || "").toLowerCase()}:${normalizeAssignedSquad(
+            player.assignedSquad
+          )}`
+      )
+      .sort()
+      .join("|");
+    const planningChanged = Boolean(
+      rosterIsActive && plannedSignature && plannedSignature !== draftSignature
+    );
+    const isUpdating = rosterDraftUpdatingPlanId === plan.planId;
+    const submitConfirmOpen = submitRosterConfirmPlanId === plan.planId;
+    const groups = [
+      ["A", "Team A"],
+      ["B", "Team B"],
+      ["C", "Team C"],
+      ["RESERVE", "Reserve"],
+    ].map(([squad, label]) => ({
+      squad,
+      label,
+      items: players.filter(
+        (player) => normalizeAssignedSquad(player.assignedSquad) === squad
+      ),
+    }));
+
+    return (
+      <section style={playerHubStyles.squadBoard} data-testid="roster-draft-panel">
+        <div style={playerHubStyles.squadBoardHeader}>
+          <div style={playerHubStyles.profileMeta}>
+            <div style={playerHubStyles.sectionTitle}>
+              {rosterIsLocked
+                ? "Official roster"
+                : rosterIsActive
+                  ? "Roster draft"
+                  : "Roster draft preview"}
+            </div>
+            <div style={playerHubStyles.cardText}>
+              {plan.tournamentName || "Tournament"} · {plan.clubTeamName || "Team"}
+            </div>
+          </div>
+          <div style={playerHubStyles.chipRow}>
+            <span style={playerHubStyles.chip}>
+              {rosterIsActive ? formatRosterStatus(rosterStatus) : "Planning only"}
+            </span>
+            {rosterIsSubmitted ? (
+              <span style={playerHubStyles.chip}>Waiting for review</span>
+            ) : null}
+            {rosterIsApproved ? (
+              <span style={playerHubStyles.chip}>Ready to lock</span>
+            ) : null}
+            {rosterIsLocked ? (
+              <span style={playerHubStyles.chip}>Official roster</span>
+            ) : null}
+            {!rosterIsActive ? (
+              <span style={playerHubStyles.chip}>Not saved</span>
+            ) : null}
+            <span style={playerHubStyles.chip}>{players.length} players</span>
+          </div>
+        </div>
+
+        {planningChanged ? (
+          <div style={playerHubStyles.profileMessage}>
+            {rosterIsLocked
+              ? "Roster is locked. Planning changes will not update the official roster."
+              : rosterIsSubmitted || rosterIsApproved
+                ? "Planning changed after submitted draft. Withdraw or create new draft later."
+              : "Planning changed after draft was created."}
+          </div>
+        ) : null}
+
+        {rosterIsRejected && roster?.adminNote ? (
+          <div style={playerHubStyles.profileMessage}>
+            Admin note: {roster.adminNote}
+          </div>
+        ) : null}
+
+        {players.length ? (
+          <section style={playerHubStyles.squadTeamsGrid}>
+            {groups.map((group) => (
+              <section key={group.squad} style={playerHubStyles.squadTeamBox}>
+                <div style={playerHubStyles.squadColumnHeader}>
+                  <span>{group.label}</span>
+                  <strong>{group.items.length}</strong>
+                </div>
+                {group.items.length ? (
+                  group.items.map((player) => (
+                    <div
+                      key={`${group.squad}:${player.playerUsername}`}
+                      style={playerHubStyles.squadPlayerRow}
+                    >
+                      <div style={playerHubStyles.squadPlayerInfo}>
+                        <strong style={playerHubStyles.squadPlayerName}>
+                          {player.playerDisplayName ||
+                            player.playerUsername ||
+                            "Player"}
+                        </strong>
+                        <span style={playerHubStyles.squadPlayerMeta}>
+                          {[
+                            player.playerCountry || "No country",
+                            normalizeAssignedSquad(player.assignedSquad) ===
+                            "RESERVE"
+                              ? "Reserve"
+                              : `Team ${normalizeAssignedSquad(
+                                  player.assignedSquad
+                                )}`,
+                          ].join(" · ")}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div style={playerHubStyles.squadEmptyRow}>No players</div>
+                )}
+              </section>
+            ))}
+          </section>
+        ) : (
+          <div style={playerHubStyles.emptyPreview}>
+            Assign players to preview the roster draft here.
+          </div>
+        )}
+
+        <div style={playerHubStyles.profileActions}>
+          {rosterCanEdit ? (
+            <button
+              type="button"
+              data-testid="create-roster-draft"
+              style={{
+                ...playerHubStyles.saveButton,
+                ...(!plannedPlayers.length || isUpdating
+                  ? playerHubStyles.saveButtonDisabled
+                  : {}),
+              }}
+              disabled={!plannedPlayers.length || isUpdating}
+              onClick={() => handleBuildRosterDraft(plan)}
+            >
+              {isUpdating
+                ? "Saving..."
+                : rosterIsActive
+                  ? rosterIsRejected
+                    ? "Update draft"
+                    : "Update draft"
+                  : "Create roster draft"}
+            </button>
+          ) : rosterIsSubmitted ? (
+            <span style={playerHubStyles.chip}>Submitted</span>
+          ) : rosterIsApproved ? (
+            <button
+              type="button"
+              style={{
+                ...playerHubStyles.saveButton,
+                ...(isUpdating ? playerHubStyles.saveButtonDisabled : {}),
+              }}
+              disabled={isUpdating}
+              onClick={() => handleCaptainLockRoster(plan, roster)}
+            >
+              {isUpdating ? "Locking..." : "Lock roster"}
+            </button>
+          ) : rosterIsLocked ? (
+            <span style={playerHubStyles.chip}>Locked</span>
+          ) : (
+            <span style={playerHubStyles.chip}>{formatRosterStatus(rosterStatus)}</span>
+          )}
+          {rosterIsActive ? (
+            <>
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={() => setExpandedSquadPlanId(plan.planId)}
+              >
+                {rosterIsSubmitted || rosterIsApproved || rosterIsLocked
+                  ? "View roster"
+                  : "Edit planning"}
+              </button>
+              {rosterCanSubmit ? (
+                <>
+                  <button
+                    type="button"
+                    data-testid="submit-roster-draft"
+                    style={{
+                      ...playerHubStyles.adminActionButton,
+                      ...(isUpdating ? playerHubStyles.adminDisabledButton : {}),
+                    }}
+                    disabled={isUpdating}
+                    onClick={() => setSubmitRosterConfirmPlanId(plan.planId)}
+                  >
+                    {rosterIsRejected ? "Resubmit" : "Submit draft"}
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      ...playerHubStyles.adminActionButton,
+                      ...playerHubStyles.adminDangerButton,
+                      ...(isUpdating ? playerHubStyles.adminDisabledButton : {}),
+                    }}
+                    disabled={isUpdating}
+                    onClick={() => handleCancelRosterDraft(plan)}
+                  >
+                    Cancel draft
+                  </button>
+                </>
+              ) : null}
+            </>
+          ) : null}
+          {rosterDraftMessage ? (
+            <span style={playerHubStyles.profileMessage}>
+              {rosterDraftMessage}
+            </span>
+          ) : null}
+        </div>
+
+        {submitConfirmOpen ? (
+          <div style={playerHubStyles.profileMessage}>
+            <strong>Submit roster draft?</strong>
+            <span>
+              You can still build final official roster later. This only sends
+              the draft for review.
+            </span>
+            <div style={playerHubStyles.profileActions}>
+              <button
+                type="button"
+                style={{
+                  ...playerHubStyles.saveButton,
+                  ...(isUpdating ? playerHubStyles.saveButtonDisabled : {}),
+                }}
+                disabled={isUpdating}
+                onClick={() => handleSubmitRosterDraft(plan)}
+              >
+                {isUpdating ? "Submitting..." : "Submit"}
+              </button>
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                disabled={isUpdating}
+                onClick={() => setSubmitRosterConfirmPlanId("")}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
+  async function handleSaveTeamProfile(event) {
+    event.preventDefault();
+    if (!saveMyTeamProfile || teamProfileStatus === "saving") return;
+
+    setTeamProfileStatus("saving");
+    setTeamProfileMessage("Saving team profile...");
+
+    try {
+      const data = await saveMyTeamProfile(teamProfileDraft);
+      const nextTeamProfile = data?.teamProfile || null;
+      setTeamProfile(nextTeamProfile);
+      setTeamNeeds(Array.isArray(data?.needs) ? data.needs : []);
+      setTeamProfileDraft({
+        country: nextTeamProfile?.country || "",
+        teamLevel: nextTeamProfile?.teamLevel || "",
+        teamDescription: nextTeamProfile?.teamDescription || "",
+        contactNote: nextTeamProfile?.contactNote || "",
+        active: nextTeamProfile?.active !== false,
+      });
+      setTeamProfileStatus("ready");
+      setTeamProfileMessage("Team profile saved.");
+      setShowTeamEditor(false);
+      await loadTeamNeeds();
+      await loadAdminTeamProfiles();
+    } catch (error) {
+      setTeamProfileStatus("error");
+      setTeamProfileMessage(
+        cleanPlayerHubError(error, "Could not save team profile.")
+      );
+    }
+  }
+
+  function openTeamIdentityRequestForm() {
+    setTeamIdentityDraft({
+      requestedName: currentTeamIdentity.name || "",
+      requestedCountry: currentTeamIdentity.country || "",
+      requestedCity: currentTeamIdentity.city || "",
+      reason: "",
+    });
+    setShowTeamIdentityRequestForm(true);
+    setTeamIdentityMessage("");
+  }
+
+  async function handleSubmitTeamIdentityRequest(event) {
+    event.preventDefault();
+    if (!requestTeamIdentityChange || teamIdentityStatus === "saving") return;
+
+    setTeamIdentityStatus("saving");
+    setTeamIdentityMessage("Sending identity change request...");
+
+    try {
+      const request = await requestTeamIdentityChange(teamIdentityDraft);
+      if (request) {
+        setTeamIdentityRequests((current) => [request, ...current]);
+      }
+      setTeamIdentityStatus("ready");
+      setTeamIdentityMessage("Identity change request sent.");
+      setShowTeamIdentityRequestForm(false);
+      await loadTeamIdentityRequests();
+      await loadAdminTeamIdentityRequests();
+    } catch (error) {
+      setTeamIdentityStatus("error");
+      setTeamIdentityMessage(
+        String(error?.message || "").toLowerCase().includes("unknown action")
+          ? "Team identity request backend is not deployed yet."
+          : cleanPlayerHubError(error, "Could not send identity change request.")
+      );
+    }
+  }
+
+  async function handleSaveTeamNeed(event) {
+    event.preventDefault();
+    if (!createOrUpdateTeamNeed || teamProfileStatus === "saving") return;
+
+    setTeamProfileStatus("saving");
+    setTeamProfileMessage("Saving team need...");
+
+    try {
+      const data = await createOrUpdateTeamNeed(teamNeedDraft);
+      setTeamNeeds(Array.isArray(data?.needs) ? data.needs : []);
+      setTeamNeedDraft({
+        needType: "PLAYER",
+        neededCount: 1,
+        needText: "",
+        visibility: "internal",
+        needContext: "general",
+      });
+      setTeamProfileStatus("ready");
+      setTeamProfileMessage("Team need saved.");
+      setShowTeamNeedForm(false);
+      await loadTeamNeeds();
+      await loadCaptainInterests();
+      await loadAdminTeamProfiles();
+    } catch (error) {
+      setTeamProfileStatus("error");
+      setTeamProfileMessage(
+        cleanPlayerHubError(error, "Could not save team need.")
+      );
+    }
+  }
+
+  async function handlePublishTournamentAd(event) {
+    event.preventDefault();
+    if (!createOrUpdateTeamNeed || teamProfileStatus === "saving") return;
+
+    const selectedTournament = tournamentOptions.find(
+      (option) =>
+        String(option.id || option.tournamentId || option.name || "") ===
+        String(tournamentAdDraft.tournamentId || "")
+    );
+    const tournamentId = String(
+      selectedTournament?.id ||
+        selectedTournament?.tournamentId ||
+        tournamentAdDraft.tournamentId ||
+        ""
+    ).trim();
+    const tournamentName = String(
+      selectedTournament?.name ||
+        selectedTournament?.tournamentName ||
+        tournamentOptionLabel(selectedTournament) ||
+        ""
+    ).trim();
+
+    if (!tournamentId && !tournamentName) {
+      setTeamProfileStatus("error");
+      setTeamProfileMessage("Select a tournament before publishing a player ad.");
+      return;
+    }
+
+    setTeamProfileStatus("saving");
+    setTeamProfileMessage("Publishing player ad...");
+
+    try {
+      const data = await createOrUpdateTeamNeed({
+        ...tournamentAdDraft,
+        tournamentId,
+        tournamentName,
+        visibility: "published",
+        isPublished: true,
+        needContext: "tournament",
+        sourceType: "TOURNAMENT_AD",
+      });
+      setTeamNeeds(Array.isArray(data?.needs) ? data.needs : []);
+      setTournamentAdDraft({
+        needType: "PLAYER",
+        neededCount: 1,
+        needText: "",
+        tournamentId: "",
+        className: "",
+        squadLabel: "",
+        deadlineAt: "",
+      });
+      setTeamProfileStatus("ready");
+      setTeamProfileMessage("Tournament player ad published.");
+      setShowTournamentAdForm(false);
+      await loadTeamNeeds();
+      await loadCaptainInterests();
+      await loadAdminTeamProfiles();
+    } catch (error) {
+      setTeamProfileStatus("error");
+      setTeamProfileMessage(
+        cleanPlayerHubError(error, "Could not publish player ad.")
+      );
+    }
+  }
+
+  function toggleTeamActionPanel(panel) {
+    const isSamePanel =
+      (panel === "edit" && showTeamEditor) ||
+      (panel === "need" && showTeamNeedForm) ||
+      (panel === "ad" && showTournamentAdForm) ||
+      (panel === "plan" && showTournamentPlanForm);
+    const nextPanel = isSamePanel ? "" : panel;
+
+    setShowTeamEditor(nextPanel === "edit");
+    setShowTeamNeedForm(nextPanel === "need");
+    setShowTournamentAdForm(nextPanel === "ad");
+    setShowTournamentPlanForm(nextPanel === "plan");
+  }
+
+  async function handleCloseTeamNeed(need) {
+    if (!closeTeamNeed || !need?.needId) return;
+
+    setTeamProfileStatus("saving");
+    setTeamProfileMessage("");
+    try {
+      const closedNeed = await closeTeamNeed(need.needId);
+      setTeamNeeds((current) =>
+        current.map((item) =>
+          String(item.needId || "") === String(closedNeed?.needId || need.needId)
+            ? { ...item, ...(closedNeed || {}), status: "CLOSED" }
+            : item
+        )
+      );
+      setTeamProfileStatus("ready");
+      setTeamProfileMessage("Team need closed.");
+      await loadTeamNeeds();
+      await loadAdminTeamProfiles();
+    } catch (error) {
+      setTeamProfileStatus("error");
+      setTeamProfileMessage(
+        cleanPlayerHubError(error, "Could not close team need.")
+      );
+    }
+  }
+
+  async function updateAdminTeamProfile(teamProfile, patch) {
+    if (!isAdmin || !updateTeamProfileAdmin || !teamProfile?.teamProfileId) return;
+
+    setAdminTeamProfileUpdatingId(teamProfile.teamProfileId);
+    setAdminTeamProfileMessage("");
+    try {
+      const updatedTeamProfile = await updateTeamProfileAdmin(
+        teamProfile.teamProfileId,
+        patch
+      );
+      if (updatedTeamProfile) {
+        setAdminTeamProfiles((current) =>
+          current.map((item) =>
+            String(item.teamProfileId || "") ===
+            String(updatedTeamProfile.teamProfileId || "")
+              ? { ...item, ...updatedTeamProfile }
+              : item
+          )
+        );
+      }
+      setAdminTeamProfileStatus("ready");
+      setAdminTeamProfileMessage("Team profile updated.");
+      await loadTeamNeeds();
+    } catch (error) {
+      setAdminTeamProfileStatus("error");
+      setAdminTeamProfileMessage(
+        cleanPlayerHubError(error, "Could not update team profile.")
+      );
+    } finally {
+      setAdminTeamProfileUpdatingId("");
+    }
+  }
+
+  async function handleReviewTeamIdentityRequest(request, decision) {
+    if (
+      !isAdmin ||
+      !reviewTeamIdentityChangeRequest ||
+      !request?.requestId
+    ) {
+      return;
+    }
+
+    setAdminTeamIdentityUpdatingId(request.requestId);
+    setAdminTeamIdentityMessage("");
+
+    try {
+      await reviewTeamIdentityChangeRequest(
+        request.requestId,
+        decision,
+        adminTeamIdentityNotes[request.requestId] || ""
+      );
+      setAdminTeamIdentityStatus("ready");
+      setAdminTeamIdentityMessage(
+        decision === "APPROVED"
+          ? "Identity change approved."
+          : "Identity change rejected."
+      );
+      await loadAdminTeamIdentityRequests();
+      await loadTeamIdentityRequests();
+      await loadAdminClubTeams();
+      await loadActiveClubTeams();
+      await loadTeamProfile();
+      await loadTeamNeeds();
+      await loadAdminTeamProfiles();
+    } catch (error) {
+      setAdminTeamIdentityStatus("error");
+      setAdminTeamIdentityMessage(
+        cleanPlayerHubError(error, "Could not review identity request.")
+      );
+    } finally {
+      setAdminTeamIdentityUpdatingId("");
+    }
+  }
+
+  async function updateAdminProfileStatus(profile, patch) {
+    if (!isAdmin || !updatePlayerProfileAdminStatus || !profile?.username) return;
+
+    setAdminUpdatingUsername(profile.username);
+    setAdminReviewMessage("");
+
+    try {
+      const updatedProfile = await updatePlayerProfileAdminStatus(
+        profile.username,
+        patch
+      );
+      const safeUpdatedProfile = updatedProfile || {
+        ...profile,
+        ...(patch || {}),
+      };
+      const updatedUsername = String(
+        safeUpdatedProfile.username || profile.username
+      ).toLowerCase();
+
+      setAdminProfiles((current) =>
+        current.map((item) =>
+          String(item.username || "").toLowerCase() === updatedUsername
+            ? { ...item, ...safeUpdatedProfile }
+            : item
+        )
+      );
+      setAdminReviewStatus("ready");
+      setAdminReviewMessage("Player profile review updated.");
+    } catch (error) {
+      setAdminReviewStatus("error");
+      setAdminReviewMessage(
+        cleanPlayerHubError(error, "Could not update player profile.")
+      );
+    } finally {
+      setAdminUpdatingUsername("");
+    }
+  }
+
+  function updateAdminPasswordDraft(profile, value) {
+    const key = String(profile?.username || "").toLowerCase();
+    if (!key) return;
+
+    setAdminPasswordDrafts((current) => ({
+      ...current,
+      [key]: value,
+    }));
+  }
+
+  async function resetAdminPlayerPassword(profile) {
+    if (!isAdmin || !resetPlayerPasswordForAdmin || !profile?.username) return;
+
+    const key = String(profile.username || "").toLowerCase();
+    const newPassword = String(adminPasswordDrafts[key] || "").trim();
+
+    if (!newPassword) {
+      setAdminReviewStatus("error");
+      setAdminReviewMessage("New password is required.");
+      return;
+    }
+
+    setAdminUpdatingUsername(profile.username);
+    setAdminReviewMessage("");
+
+    try {
+      const message = await resetPlayerPasswordForAdmin(
+        profile.username,
+        newPassword
+      );
+      setAdminPasswordDrafts((current) => ({
+        ...current,
+        [key]: "",
+      }));
+      setAdminReviewStatus("ready");
+      setAdminReviewMessage(message || "Player password reset.");
+    } catch (error) {
+      setAdminReviewStatus("error");
+      setAdminReviewMessage(
+        cleanPlayerHubError(error, "Could not reset player password.")
+      );
+    } finally {
+      setAdminUpdatingUsername("");
+    }
+  }
+
+  function adminProfileStatusChips(profile) {
+    return [
+      profile.active ? "Active" : "Inactive",
+      profile.publicVisible ? "Public requested" : "Private",
+      profile.approved ? "Approved" : "Hidden",
+    ];
+  }
+
+  function adminProfileValue(value, fallback = "Not set") {
+    const text = String(value || "").trim();
+    return text || fallback;
+  }
+
+  async function confirmDeactivatePlayerAccount() {
+    if (!pendingDeactivateProfile) return;
+    const profile = pendingDeactivateProfile;
+    setPendingDeactivateProfile(null);
+    await updateAdminProfileStatus(profile, { active: false });
+  }
+
+  const primaryConfirmedTeam =
+    confirmedTeamForSelected ||
+    confirmedTeams.find((team) => team.memberStatus === "ACTIVE") ||
+    null;
+  const profileTeamLabel = primaryConfirmedTeam
+    ? primaryConfirmedTeam.clubTeamName || "Confirmed team"
+    : previewClubStatus;
+  const showTeamPendingBadge =
+    !primaryConfirmedTeam &&
+    latestTeamMembershipRequest?.status === "PENDING" &&
+    selectedProfileClubTeamId;
+  const showTeamRejectedBadge =
+    !primaryConfirmedTeam &&
+    latestTeamMembershipRequest?.status === "REJECTED" &&
+    selectedProfileClubTeamId;
+  const profileBadges = [
+    savedProfilePreview.publicVisible && !savedProfilePreview.approved
+      ? "Public requested"
+      : "",
+    showTeamPendingBadge ? "Team pending" : "",
+    showTeamRejectedBadge ? "Team rejected" : "",
+    savedProfilePreview.publicVisible && savedProfilePreview.approved
+      ? "Public"
+      : "",
+  ].filter(Boolean).slice(0, 2);
+  const homeTeamCard =
+    primaryConfirmedTeam ||
+    (selectedProfileClubTeamId && latestTeamMembershipRequest
+      ? latestTeamMembershipRequest
+      : null);
+  const plannedTeamItems = playerTournamentSquadPlanning.filter(
+    (item) => normalizeAssignedSquad(item.assignedSquad) !== "UNASSIGNED"
+  );
+  const playerDashboardEvents = buildPlayerEventBundles(
+    playerTournamentAvailability,
+    plannedTeamItems,
+    playerTournamentRosterStatus
+  );
+  const primaryPlayerEvent = playerDashboardEvents[0] || null;
+  const secondaryPlayerEvents = playerDashboardEvents.slice(1);
+  const dedupedTournamentPlans = uniqueEventItems(tournamentPlans);
+  const selectedTournamentAdOption = tournamentOptions.find(
+    (option) =>
+      String(option.id || option.tournamentId || option.name || "") ===
+      String(tournamentAdDraft.tournamentId || "")
+  );
+  const selectedTournamentAdName = selectedTournamentAdOption
+    ? String(
+        selectedTournamentAdOption?.name ||
+          selectedTournamentAdOption?.tournamentName ||
+          tournamentOptionLabel(selectedTournamentAdOption) ||
+          ""
+      ).trim()
+    : "";
+  const tournamentAdPreviewText = selectedTournamentAdName
+    ? `${
+        teamProfile?.clubTeamName || selectedProfileTeamName || "Team"
+      } needs ${Number(tournamentAdDraft.neededCount) || 1} ${tournamentAdNeedWord(
+        tournamentAdDraft.needType,
+        tournamentAdDraft.neededCount
+      )} for ${selectedTournamentAdName}.`
+    : "Select tournament first";
+  const adminDashboardCards = [
+    isAdmin
+      ? {
+          id: "players",
+          icon: "P",
+          title: "Players",
+          count:
+            adminReviewStatus === "idle"
+              ? adminCounts?.playerProfileReviewCount ?? "Open"
+              : adminProfiles.filter((profile) => profile.publicVisible).length,
+          meta: adminReviewStatus === "idle" ? "Review" : "public requests",
+          status: adminReviewStatus,
+          load: loadAdminReviewProfiles,
+        }
+      : null,
+    isAdmin
+      ? {
+          id: "access",
+          icon: "A",
+          title: "Access",
+          count:
+            adminAccessRequestsStatus === "idle"
+              ? adminCounts?.accessRequestCount ?? "Open"
+              : adminAccessRequests.filter(
+                  (request) => request.status === "PENDING"
+                ).length,
+          meta: adminAccessRequestsStatus === "idle" ? "Requests" : "pending",
+          status: adminAccessRequestsStatus,
+          load: loadAdminAccessRequests,
+        }
+      : null,
+    isAdmin
+      ? {
+          id: "clubs",
+          icon: "C",
+          title: "Clubs",
+          count:
+            adminClubTeamsStatus === "idle"
+              ? adminCounts?.officialClubsCount ?? "Open"
+              : adminClubTeams.length,
+          meta: adminClubTeamsStatus === "idle" ? "Manage" : "total",
+          status: adminClubTeamsStatus,
+          load: loadAdminClubTeams,
+        }
+      : null,
+    isAdmin
+      ? {
+          id: "identity",
+          icon: "I",
+          title: "Team identity",
+          count:
+            adminTeamIdentityStatus === "idle"
+              ? adminCounts?.teamIdentityRequestCount ?? "Open"
+              : adminTeamIdentityRequests.filter(
+                  (request) => request.status === "PENDING"
+                ).length,
+          meta: adminTeamIdentityStatus === "idle" ? "Review" : "pending",
+          status: adminTeamIdentityStatus,
+          load: loadAdminTeamIdentityRequests,
+        }
+      : null,
+    isAdmin
+      ? {
+          id: "profiles",
+          icon: "T",
+          title: "Team profiles",
+          count:
+            adminTeamProfileStatus === "idle"
+              ? adminCounts?.teamProfileReviewCount ?? "Open"
+              : adminTeamProfiles.length,
+          meta: adminTeamProfileStatus === "idle" ? "Review" : "profiles",
+          status: adminTeamProfileStatus,
+          load: loadAdminTeamProfiles,
+        }
+      : null,
+    isAdmin
+      ? {
+          id: "needs",
+          icon: "N",
+          title: "Needs",
+          count:
+            adminTeamNeedInterestStatus === "idle"
+              ? adminCounts?.teamNeedInterestReviewCount ?? "Open"
+              : adminTeamNeedInterests.length,
+          meta:
+            adminTeamNeedInterestStatus === "idle" ? "Interests" : "interests",
+          status: adminTeamNeedInterestStatus,
+          load: loadAdminTeamNeedInterests,
+        }
+      : null,
+    isAdmin
+      ? {
+          id: "members",
+          icon: "M",
+          title: "Members",
+          count:
+            adminTeamMembersStatus === "idle"
+              ? adminCounts?.teamMembersReviewCount ?? "Open"
+              : adminTeamMembers.length,
+          meta: adminTeamMembersStatus === "idle" ? "Review" : "members",
+          status: adminTeamMembersStatus,
+          load: loadAdminTeamMembers,
+        }
+      : null,
+    isAdmin
+      ? {
+          id: "membership",
+          icon: "R",
+          title: "Membership",
+          count:
+            adminTeamMembershipStatus === "idle"
+              ? adminCounts?.teamMembershipRequestsCount ?? "Open"
+              : adminTeamMembershipRequests.filter(
+                  (request) => request.status === "PENDING"
+                ).length,
+          meta: adminTeamMembershipStatus === "idle" ? "Requests" : "pending",
+          status: adminTeamMembershipStatus,
+          load: loadAdminTeamMembershipRequests,
+        }
+      : null,
+    canReviewRosterDrafts
+      ? {
+          id: "rosters",
+          icon: "O",
+          title: "Rosters",
+          count:
+            adminTournamentRosterStatus === "idle"
+              ? adminCounts?.rosterReviewCount ?? "Open"
+              : adminTournamentRosterDrafts.filter(
+                  (roster) =>
+                    normalizeRosterStatus(roster.rosterStatus) === "SUBMITTED"
+                ).length,
+          meta:
+            adminTournamentRosterStatus === "idle" ? "Review" : "submitted",
+          status: adminTournamentRosterStatus,
+          load: loadAdminRosterDrafts,
+        }
+      : null,
+  ].filter(Boolean);
+
+  function openAdminDashboardPanel(card) {
+    const isClosing = openAdminPanel === card.id;
+    setOpenAdminPanel(isClosing ? "" : card.id);
+    if (!isClosing && card.load) {
+      const startedAt = startPlayerHubTimer();
+      Promise.resolve(card.load()).finally(() => {
+        logPlayerHubTiming(`admin section ${card.id}`, startedAt);
+      });
+    }
+  }
+
+  return (
+    <div style={playerHubStyles.shell} data-testid="player-hub-root">
+      <section style={playerHubStyles.hero}>
+        <div style={playerHubStyles.heroTitleRow}>
+          <div style={playerHubStyles.titleBlock}>
+            <h2 style={playerHubStyles.title}>Player Hub</h2>
+            <p style={playerHubStyles.subtitle}>
+              Club. Squad. Roster.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {needsClubTeamSetup ? (
+        <form
+          onSubmit={handleSaveTeamSetup}
+          style={playerHubStyles.teamSetupCard}
+        >
+          <div style={playerHubStyles.profileMeta}>
+            <div style={playerHubStyles.sectionTitle}>
+              Choose your club/team
+            </div>
+            <div style={playerHubStyles.cardText}>
+              Captain confirmation comes later.
+            </div>
+          </div>
+          <div style={playerHubStyles.teamSetupControls}>
+            <select
+              style={playerHubStyles.profileInput}
+              value={myProfile.freeAgent ? "" : myProfile.clubTeamId || ""}
+              onChange={(event) => handleClubTeamSelection(event.target.value)}
+            >
+              <option value="">No fixed club/team</option>
+              {clubTeams.map((team) => (
+                <option key={team.teamId} value={team.teamId}>
+                  {clubTeamDisplayName(team)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="submit"
+              style={{
+                ...playerHubStyles.saveButton,
+                ...(profileStatus === "saving" || profileStatus === "loading"
+                  ? playerHubStyles.saveButtonDisabled
+                  : {}),
+              }}
+              disabled={profileStatus === "saving" || profileStatus === "loading"}
+            >
+              Save
+            </button>
+          </div>
+          {clubTeamsStatus === "error" && clubTeamsMessage ? (
+            <span style={playerHubStyles.profileMessage}>
+              {clubTeamsMessage}
+            </span>
+          ) : null}
+        </form>
+      ) : null}
+
+      <section style={playerHubStyles.playerHomeGrid}>
+        <section style={playerHubStyles.playerHeroCard}>
+          {hasProfilePreview ? (
+            <article style={playerHubStyles.profilePreviewCard}>
+              <div style={playerHubStyles.profilePreviewTitleRow}>
+                <div style={playerHubStyles.playerCardHero}>
+                  <div style={playerHubStyles.playerAvatarLarge}>
+                    {previewInitial}
+                  </div>
+                  <div style={playerHubStyles.previewNameBlock}>
+                    <strong style={playerHubStyles.previewName}>
+                      {previewDisplayName}
+                    </strong>
+                    <span style={playerHubStyles.previewSubtitle}>
+                      {profileTeamLabel}
+                    </span>
+                    <span style={playerHubStyles.previewSubtitle}>
+                      {savedProfilePreview.country || "No country"} /{" "}
+                      {savedProfilePreview.profileType || "Player"}
+                    </span>
+                    {showTeamRejectedBadge ? (
+                      <span style={playerHubStyles.previewSubtitle}>
+                        Team request rejected
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+                {profileBadges.length ? (
+                  <div style={playerHubStyles.chipRow}>
+                    {profileBadges.map((badge) => (
+                      <span key={badge} style={playerHubStyles.chip}>
+                        {badge}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div style={playerHubStyles.heroActions}>
+                <button
+                  type="button"
+                  style={playerHubStyles.adminActionButton}
+                  onClick={() => setShowProfileEditor((current) => !current)}
+                >
+                  {profileEditorOpen ? "Close edit" : "Edit profile"}
+                </button>
+                {latestTeamMembershipRequest?.status === "PENDING" &&
+                !confirmedTeamForSelected ? (
+                  <button
+                    type="button"
+                    style={{
+                      ...playerHubStyles.adminActionButton,
+                      ...(teamMembershipUpdatingId ===
+                      latestTeamMembershipRequest.requestId
+                        ? playerHubStyles.adminDisabledButton
+                        : {}),
+                    }}
+                    disabled={
+                      teamMembershipUpdatingId ===
+                      latestTeamMembershipRequest.requestId
+                    }
+                    onClick={() =>
+                      handleCancelMembershipRequest(latestTeamMembershipRequest)
+                    }
+                  >
+                    Cancel team request
+                  </button>
+                ) : null}
+              </div>
+            </article>
+          ) : (
+            <div style={playerHubStyles.emptyPreview}>
+              {copy.profilePreviewEmpty}
+            </div>
+          )}
+
+          <form
+            onSubmit={handleSaveMyProfile}
+            style={{
+              ...playerHubStyles.profileEditorPanel,
+              display: profileEditorOpen ? "grid" : "none",
+            }}
+          >
+            <div style={playerHubStyles.editorTabs}>
+              {[
+                ["basic", "Basic"],
+                ["team", "Team"],
+                ["options", "Options"],
+              ].map(([tab, label]) => (
+                <button
+                  key={tab}
+                  type="button"
+                  style={{
+                    ...playerHubStyles.editorTab,
+                    ...(activeProfileEditorTab === tab
+                      ? playerHubStyles.editorTabActive
+                      : {}),
+                  }}
+                  onClick={() => setActiveProfileEditorTab(tab)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <section
+              style={{
+                ...playerHubStyles.editorSection,
+                display:
+                  activeProfileEditorTab === "basic" ? "grid" : "none",
+              }}
+            >
+              <div style={playerHubStyles.sectionTitle}>Basic</div>
+              <div style={playerHubStyles.profileFormGrid}>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>Display name</span>
+                  <input
+                    style={playerHubStyles.profileInput}
+                    value={myProfile.displayName}
+                    onChange={(event) =>
+                      updateMyProfileField("displayName", event.target.value)
+                    }
+                    placeholder="Your player name"
+                  />
+                </label>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>Country</span>
+                  <input
+                    style={playerHubStyles.profileInput}
+                    value={myProfile.country}
+                    onChange={(event) =>
+                      updateMyProfileField("country", event.target.value)
+                    }
+                    placeholder="Country"
+                  />
+                </label>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>Profile type</span>
+                  <select
+                    style={playerHubStyles.profileInput}
+                    value={myProfile.profileType}
+                    onChange={(event) =>
+                      updateMyProfileField("profileType", event.target.value)
+                    }
+                  >
+                    {profileTypeOptions.map((profileType) => (
+                      <option key={profileType} value={profileType}>
+                        {profileType}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>Email</span>
+                  <input
+                    type="email"
+                    style={playerHubStyles.profileInput}
+                    value={myProfile.email}
+                    onChange={(event) =>
+                      updateMyProfileField("email", event.target.value)
+                    }
+                    placeholder="Optional"
+                  />
+                </label>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>Phone</span>
+                  <input
+                    type="tel"
+                    style={playerHubStyles.profileInput}
+                    value={myProfile.phone}
+                    onChange={(event) =>
+                      updateMyProfileField("phone", event.target.value)
+                    }
+                    placeholder="Optional"
+                  />
+                </label>
+              </div>
+            </section>
+
+            <section
+              style={{
+                ...playerHubStyles.editorSection,
+                display: activeProfileEditorTab === "team" ? "grid" : "none",
+              }}
+            >
+              <div style={playerHubStyles.sectionTitle}>Team</div>
+              <div style={playerHubStyles.profileFormGrid}>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>Select club/team</span>
+                  <select
+                    style={playerHubStyles.profileInput}
+                    value={myProfile.freeAgent ? "" : myProfile.clubTeamId || ""}
+                    onChange={(event) =>
+                      handleClubTeamSelection(event.target.value)
+                    }
+                  >
+                    <option value="">No fixed club/team</option>
+                    {clubTeams.map((team) => (
+                      <option key={team.teamId} value={team.teamId}>
+                        {clubTeamDisplayName(team)}
+                      </option>
+                    ))}
+                  </select>
+                  {mySelectedTeamNoLongerActive ? (
+                    <span style={playerHubStyles.profileMessage}>
+                      Selected team is no longer active.
+                    </span>
+                  ) : null}
+                </label>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>Team note</span>
+                  <input
+                    style={playerHubStyles.profileInput}
+                    value={myProfile.teamNote}
+                    onChange={(event) =>
+                      updateMyProfileField("teamNote", event.target.value)
+                    }
+                    placeholder="Optional"
+                  />
+                </label>
+              </div>
+              <label style={playerHubStyles.checkboxRow}>
+                <input
+                  type="checkbox"
+                  checked={myProfile.freeAgent}
+                  onChange={(event) =>
+                    toggleNoFixedClubTeam(event.target.checked)
+                  }
+                />
+                <span>No fixed club/team</span>
+              </label>
+            </section>
+
+            <section
+              style={{
+                ...playerHubStyles.editorSection,
+                display:
+                  activeProfileEditorTab === "options" ? "grid" : "none",
+              }}
+            >
+              <div style={playerHubStyles.sectionTitle}>Options</div>
+              <label style={playerHubStyles.profileField}>
+                <span style={playerHubStyles.profileLabel}>Availability note</span>
+                <textarea
+                  style={playerHubStyles.profileTextareaCompact}
+                  value={myProfile.availability}
+                  onChange={(event) =>
+                    updateMyProfileField("availability", event.target.value)
+                  }
+                  placeholder="Optional"
+                />
+              </label>
+
+              <div style={playerHubStyles.choiceGrid}>
+                <div style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>
+                    Available for other teams?
+                  </span>
+                  <div style={playerHubStyles.segmentedControl}>
+                    <button
+                      type="button"
+                      style={{
+                        ...playerHubStyles.segmentButton,
+                        ...(myProfile.canGuestForTeams
+                          ? playerHubStyles.segmentButtonActive
+                          : {}),
+                      }}
+                      onClick={() =>
+                        updateMyProfileField("canGuestForTeams", true)
+                      }
+                    >
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      style={{
+                        ...playerHubStyles.segmentButton,
+                        ...(!myProfile.canGuestForTeams
+                          ? playerHubStyles.segmentButtonActive
+                          : {}),
+                      }}
+                      onClick={() =>
+                        updateMyProfileField("canGuestForTeams", false)
+                      }
+                    >
+                      No
+                    </button>
+                  </div>
+                </div>
+
+                <div style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>
+                    Interested in abroad tournaments?
+                  </span>
+                  <div style={playerHubStyles.segmentedControl}>
+                    <button
+                      type="button"
+                      style={{
+                        ...playerHubStyles.segmentButton,
+                        ...(myProfile.interestedAbroad
+                          ? playerHubStyles.segmentButtonActive
+                          : {}),
+                      }}
+                      onClick={() =>
+                        updateMyProfileField("interestedAbroad", true)
+                      }
+                    >
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      style={{
+                        ...playerHubStyles.segmentButton,
+                        ...(!myProfile.interestedAbroad
+                          ? playerHubStyles.segmentButtonActive
+                          : {}),
+                      }}
+                      onClick={() =>
+                        updateMyProfileField("interestedAbroad", false)
+                      }
+                    >
+                      No
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <label style={playerHubStyles.checkboxRow}>
+                <input
+                  type="checkbox"
+                  checked={myProfile.publicVisible}
+                  onChange={(event) =>
+                    updateMyProfileField("publicVisible", event.target.checked)
+                  }
+                />
+                <span>Request public visibility</span>
+              </label>
+            </section>
+
+            <div style={playerHubStyles.profileActions}>
+              <button
+                type="submit"
+                style={{
+                  ...playerHubStyles.saveButton,
+                  ...(profileStatus === "saving" || profileStatus === "loading"
+                    ? playerHubStyles.saveButtonDisabled
+                    : {}),
+                }}
+                disabled={profileStatus === "saving" || profileStatus === "loading"}
+              >
+                {profileStatus === "saving"
+                  ? copy.profileSaving
+                  : copy.profileSaveButton}
+              </button>
+              {profileMessage ? (
+                <span style={playerHubStyles.profileMessage}>
+                  {profileMessage}
+                </span>
+              ) : null}
+            </div>
+          </form>
+
+          <details style={playerHubStyles.accountDetails}>
+            <summary style={playerHubStyles.accountSummary}>
+              Account & access
+            </summary>
+            <section style={playerHubStyles.editorSection}>
+              <div style={playerHubStyles.accessCompactList}>
+                {accessRequestSummary.map((card) => {
+                  const latestStatus = card.latest?.status || "";
+                  const isSubmitting = accessRequestSubmittingType === card.type;
+                  const requestDisabled =
+                    Boolean(accessRequestSubmittingType) ||
+                    latestStatus === "PENDING" ||
+                    latestStatus === "APPROVED";
+                  const canRequest =
+                    !latestStatus || latestStatus === "REJECTED";
+
+                  return (
+                    <div
+                      key={`summary-${card.type}`}
+                      style={playerHubStyles.accessCompactRow}
+                    >
+                      <div style={playerHubStyles.compactRowMain}>
+                        <span style={playerHubStyles.compactRowTitle}>
+                          {card.label}
+                        </span>
+                        <span style={playerHubStyles.compactRowMeta}>
+                          {accessRequestShortLabel(card.type)}
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          ...playerHubStyles.accessStatusChip,
+                          ...accessRequestStatusStyle(latestStatus),
+                        }}
+                      >
+                        {formatAccessRequestStatus(latestStatus)}
+                      </span>
+                      {canRequest ? (
+                        <button
+                          type="button"
+                          style={{
+                            ...playerHubStyles.accessMiniButton,
+                            ...(requestDisabled
+                              ? playerHubStyles.adminDisabledButton
+                              : {}),
+                          }}
+                          disabled={requestDisabled}
+                          onClick={() => handleAccessRequestCardClick(card)}
+                        >
+                          {accessRequestActionText(latestStatus, isSubmitting)}
+                        </button>
+                      ) : (
+                        <span />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {accessClubWarningType ? (
+                <div style={playerHubStyles.accessWarning}>
+                  Select a club/team first if this request is connected to a club.
+                </div>
+              ) : null}
+
+              {pendingAccessRequestType ? (
+                <form
+                  style={playerHubStyles.accessInlineForm}
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    submitAccessRequest(pendingAccessRequestType);
+                  }}
+                >
+                  <div style={playerHubStyles.profileMeta}>
+                    <strong style={playerHubStyles.previewTitle}>
+                      Request {accessRequestLabel(pendingAccessRequestType)}
+                    </strong>
+                    <span style={playerHubStyles.previewSubtitle}>
+                      Optional note to admin
+                    </span>
+                  </div>
+                  <textarea
+                    style={playerHubStyles.profileTextareaCompact}
+                    value={accessRequestMessageDraft}
+                    onChange={(event) =>
+                      setAccessRequestMessageDraft(event.target.value)
+                    }
+                    placeholder="Short message..."
+                  />
+                  <div style={playerHubStyles.accessActionRow}>
+                    <button
+                      type="submit"
+                      style={{
+                        ...playerHubStyles.saveButton,
+                        ...(accessRequestSubmittingType
+                          ? playerHubStyles.saveButtonDisabled
+                          : {}),
+                      }}
+                      disabled={Boolean(accessRequestSubmittingType)}
+                    >
+                      {accessRequestSubmittingType ? "Sending..." : "Submit request"}
+                    </button>
+                    <button
+                      type="button"
+                      style={playerHubStyles.adminActionButton}
+                      onClick={cancelPendingAccessRequest}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : null}
+
+              {accessRequestsMessage ? (
+                <div
+                  role={accessRequestsStatus === "error" ? "alert" : "status"}
+                  style={{
+                    ...playerHubStyles.adminFeedbackBanner,
+                    ...(accessRequestsStatus === "error"
+                      ? playerHubStyles.adminFeedbackError
+                      : playerHubStyles.adminFeedbackSuccess),
+                  }}
+                >
+                  <span style={playerHubStyles.adminFeedbackTitle}>
+                    {accessRequestsStatus === "error"
+                      ? "Could not request"
+                      : "Request"}
+                  </span>
+                  <span>{accessRequestsMessage}</span>
+                </div>
+              ) : null}
+
+              {accessRequests.length ? (
+                <div style={playerHubStyles.accessRequestList}>
+                  <span style={playerHubStyles.mutedLine}>History</span>
+                  {accessRequests.map((request) => (
+                    <article
+                      key={request.requestId}
+                      style={playerHubStyles.accessRequestRow}
+                    >
+                      <div style={playerHubStyles.profileMeta}>
+                        <strong style={playerHubStyles.previewTitle}>
+                          {accessRequestLabel(request.requestType)}
+                        </strong>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          {request.createdAt
+                            ? new Date(request.createdAt).toLocaleDateString()
+                            : "No date"}
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          ...playerHubStyles.accessStatusChip,
+                          ...accessRequestStatusStyle(request.status),
+                        }}
+                      >
+                        {formatAccessRequestStatus(request.status || "PENDING")}
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <span style={playerHubStyles.mutedLine}>
+                  No previous requests.
+                </span>
+              )}
+            </section>
+          </details>
+        </section>
+
+        {primaryPlayerEvent ? renderPlayerEventCard(primaryPlayerEvent, true) : null}
+      </section>
+
+      {secondaryPlayerEvents.length ? (
+        <section style={playerHubStyles.feedPanel}>
+          <div style={playerHubStyles.feedHeader}>
+            <div style={playerHubStyles.profileMeta}>
+              <div style={playerHubStyles.sectionTitle}>Team events</div>
+            </div>
+            <span style={playerHubStyles.chip}>{secondaryPlayerEvents.length}</span>
+          </div>
+          <div style={playerHubStyles.eventGrid}>
+            {secondaryPlayerEvents
+              .slice(0, 3)
+              .map((eventBundle) => renderPlayerEventCard(eventBundle))}
+          </div>
+        </section>
+      ) : null}
+
+      <section style={playerHubStyles.compactHomeGrid}>
+        {homeTeamCard ? (
+          <section style={playerHubStyles.homeCard}>
+            <div style={playerHubStyles.homeCardHeader}>
+              <div style={playerHubStyles.profileMeta}>
+                <span style={playerHubStyles.homeKicker}>Team</span>
+                <strong style={playerHubStyles.previewTitle}>
+                  {homeTeamCard.clubTeamName || selectedProfileTeamName || "Team"}
+                </strong>
+                <span style={playerHubStyles.previewSubtitle}>
+                  {primaryConfirmedTeam
+                    ? [
+                        primaryConfirmedTeam.teamCountry ||
+                          primaryConfirmedTeam.country ||
+                          savedProfilePreview.country,
+                        shortAccountName(
+                          primaryConfirmedTeam.captainDisplayName ||
+                            primaryConfirmedTeam.captainUsername ||
+                            primaryConfirmedTeam.confirmedBy
+                        )
+                          ? `Captain: ${shortAccountName(
+                              primaryConfirmedTeam.captainDisplayName ||
+                                primaryConfirmedTeam.captainUsername ||
+                                primaryConfirmedTeam.confirmedBy
+                            )}`
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" / ")
+                    : [
+                        savedProfilePreview.country,
+                        "Waiting for captain approval",
+                      ]
+                        .filter(Boolean)
+                        .join(" / ")}
+                </span>
+              </div>
+              <span
+                style={{
+                  ...playerHubStyles.accessStatusChip,
+                  ...accessRequestStatusStyle(
+                    primaryConfirmedTeam
+                      ? "APPROVED"
+                      : latestTeamMembershipRequest?.status
+                  ),
+                }}
+              >
+                {primaryConfirmedTeam
+                  ? "Confirmed"
+                  : formatTeamMembershipStatus(
+                      latestTeamMembershipRequest?.status
+                    )}
+              </span>
+            </div>
+          </section>
+        ) : null}
+
+      </section>
+      {canManageTeamProfile ? (
+      <section style={playerHubStyles.profileCard} data-testid="team-control">
+        <div style={playerHubStyles.profileHeader}>
+          <div style={playerHubStyles.profileMeta}>
+            <div style={playerHubStyles.sectionTitle}>Team control</div>
+            <div style={playerHubStyles.cardText}>
+              Events, members, roster.
+            </div>
+          </div>
+          <div style={playerHubStyles.chipRow}>
+            {pendingCaptainMembershipRequests.length ? (
+              <span style={playerHubStyles.chip}>
+                {pendingCaptainMembershipRequests.length} membership request
+                {pendingCaptainMembershipRequests.length === 1 ? "" : "s"}
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+          <>
+          <article style={playerHubStyles.teamControlHero}>
+            <div style={playerHubStyles.teamControlHeroTop}>
+              <div style={playerHubStyles.playerCardHero}>
+                <div style={playerHubStyles.playerAvatarLarge}>
+                  {(teamProfile?.clubTeamName || selectedProfileTeamName || "T")
+                    .slice(0, 1)
+                    .toUpperCase()}
+                </div>
+                <div style={playerHubStyles.previewNameBlock}>
+                  <strong style={playerHubStyles.previewName}>
+                    {teamProfile?.clubTeamName ||
+                      selectedProfileTeamName ||
+                      "Selected club/team"}
+                  </strong>
+                  <span style={playerHubStyles.previewSubtitle}>
+                    {currentTeamIdentity.country ||
+                      savedProfilePreview.country ||
+                      "No country"}{" "}
+                    / Captain:{" "}
+                    {teamProfile?.captainDisplayName ||
+                      savedProfilePreview.displayName ||
+                      username}
+                  </span>
+                </div>
+              </div>
+              <div style={playerHubStyles.chipRow}>
+                <span style={playerHubStyles.chip}>
+                  {teamProfile?.active === false ? "Inactive" : "Active"}
+                </span>
+                <span style={playerHubStyles.chip}>
+                  {teamMembers.length} member{teamMembers.length === 1 ? "" : "s"}
+                </span>
+                <span style={playerHubStyles.chip}>
+                  {openTeamNeeds.length} open need
+                  {openTeamNeeds.length === 1 ? "" : "s"}
+                </span>
+              </div>
+            </div>
+            <div style={playerHubStyles.teamControlActions}>
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={() => toggleTeamActionPanel("edit")}
+              >
+                {showTeamEditor ? "Close edit" : "Edit team"}
+              </button>
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={() => toggleTeamActionPanel("need")}
+              >
+                {showTeamNeedForm ? "Close need" : "Add internal need"}
+              </button>
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={() => toggleTeamActionPanel("ad")}
+              >
+                {showTournamentAdForm ? "Close ad" : "Publish player ad"}
+              </button>
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={() => toggleTeamActionPanel("plan")}
+              >
+                {showTournamentPlanForm ? "Close plan" : "Ask availability"}
+              </button>
+            </div>
+          </article>
+
+          {pendingCaptainMembershipRequests.length || teamMembershipMessage ? (
+          <section style={playerHubStyles.teamControlWidePanel}>
+            <div style={playerHubStyles.profileHeader}>
+              <div style={playerHubStyles.profileMeta}>
+                <div style={playerHubStyles.sectionTitle}>
+                  Team membership requests
+                </div>
+              </div>
+              <span style={playerHubStyles.chip}>
+                {pendingCaptainMembershipRequests.length} pending
+              </span>
+            </div>
+            {teamMembershipMessage ? (
+              <span style={playerHubStyles.profileMessage}>
+                {teamMembershipMessage}
+              </span>
+            ) : null}
+            {pendingCaptainMembershipRequests.length ? (
+              <div style={playerHubStyles.accessRequestList}>
+                {pendingCaptainMembershipRequests.map((request) => {
+                  const updating =
+                    teamMembershipUpdatingId === request.requestId;
+
+                  return (
+                    <article
+                      key={request.requestId}
+                      style={playerHubStyles.teamControlRow}
+                    >
+                      <div style={playerHubStyles.interestPlayerMeta}>
+                        <strong style={playerHubStyles.interestPlayerName}>
+                          {request.playerDisplayName ||
+                            request.playerUsername ||
+                            "Player"}
+                        </strong>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          {request.playerCountry || "No country"} /{" "}
+                          {request.playerEmail || "No email"} /{" "}
+                          {request.playerPhone || "No phone"}
+                        </span>
+                      </div>
+                      <div style={playerHubStyles.teamControlActionsRow}>
+                        <span
+                          style={{
+                            ...playerHubStyles.accessStatusChip,
+                            ...accessRequestStatusStyle(request.status),
+                          }}
+                        >
+                          Pending
+                        </span>
+                        <button
+                          type="button"
+                          style={{
+                            ...playerHubStyles.addTeamMemberButton,
+                            ...(updating
+                              ? playerHubStyles.adminDisabledButton
+                              : {}),
+                          }}
+                          disabled={updating}
+                          onClick={() =>
+                            handleReviewTeamMembershipRequest(
+                              request,
+                              "APPROVED"
+                            )
+                          }
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          style={{
+                            ...playerHubStyles.adminActionButton,
+                            ...playerHubStyles.adminDangerButton,
+                            ...(updating
+                              ? playerHubStyles.adminDisabledButton
+                              : {}),
+                          }}
+                          disabled={updating}
+                          onClick={() =>
+                            handleReviewTeamMembershipRequest(
+                              request,
+                              "REJECTED"
+                            )
+                          }
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : null}
+          </section>
+          ) : null}
+
+          <div style={playerHubStyles.teamControlGrid}>
+            <form
+              onSubmit={handleSaveTeamProfile}
+              style={{
+                ...playerHubStyles.actionDrawer,
+                display: showTeamEditor ? "grid" : "none",
+              }}
+            >
+              <div style={playerHubStyles.profileHeader}>
+                <div style={playerHubStyles.profileMeta}>
+                  <div style={playerHubStyles.sectionTitle}>
+                    Edit team
+                  </div>
+                  <div style={playerHubStyles.cardText}>
+                    {currentTeamIdentity.name ||
+                      "Selected club/team"}
+                  </div>
+                </div>
+                <span style={playerHubStyles.chip}>
+                  {teamProfile?.active === false ? "Inactive" : "Active"}
+                </span>
+              </div>
+
+              <div style={playerHubStyles.profileFormGrid}>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>Team name</span>
+                  <input
+                    style={playerHubStyles.profileInput}
+                    value={currentTeamIdentity.name || "Selected club/team"}
+                    readOnly
+                  />
+                </label>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>Country</span>
+                  <input
+                    style={playerHubStyles.profileInput}
+                    value={currentTeamIdentity.country || ""}
+                    placeholder="No country"
+                    readOnly
+                  />
+                </label>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>City</span>
+                  <input
+                    style={playerHubStyles.profileInput}
+                    value={currentTeamIdentity.city || ""}
+                    placeholder="No city"
+                    readOnly
+                  />
+                </label>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>Team level</span>
+                  <input
+                    style={playerHubStyles.profileInput}
+                    value={teamProfileDraft.teamLevel}
+                    onChange={(event) =>
+                      updateTeamProfileDraft("teamLevel", event.target.value)
+                    }
+                    placeholder="Optional"
+                  />
+                </label>
+              </div>
+
+              <div style={playerHubStyles.profileMessage}>
+                Official identity changes require admin approval.
+              </div>
+              <div style={playerHubStyles.profileActions}>
+                {pendingTeamIdentityRequest ? (
+                  <span style={playerHubStyles.chip}>
+                    Identity change pending
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    style={playerHubStyles.adminActionButton}
+                    onClick={openTeamIdentityRequestForm}
+                  >
+                    Request identity change
+                  </button>
+                )}
+              </div>
+
+              {showTeamIdentityRequestForm ? (
+                <section style={playerHubStyles.editorSection}>
+                  <div style={playerHubStyles.profileHeader}>
+                    <div style={playerHubStyles.profileMeta}>
+                      <div style={playerHubStyles.sectionTitle}>
+                        Request identity change
+                      </div>
+                      <div style={playerHubStyles.cardText}>
+                        Current data stays unchanged until admin approval.
+                      </div>
+                    </div>
+                  </div>
+                  <div style={playerHubStyles.profileFormGrid}>
+                    <label style={playerHubStyles.profileField}>
+                      <span style={playerHubStyles.profileLabel}>
+                        New team name
+                      </span>
+                      <input
+                        style={playerHubStyles.profileInput}
+                        value={teamIdentityDraft.requestedName}
+                        onChange={(event) =>
+                          setTeamIdentityDraft((current) => ({
+                            ...current,
+                            requestedName: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label style={playerHubStyles.profileField}>
+                      <span style={playerHubStyles.profileLabel}>Country</span>
+                      <input
+                        style={playerHubStyles.profileInput}
+                        value={teamIdentityDraft.requestedCountry}
+                        onChange={(event) =>
+                          setTeamIdentityDraft((current) => ({
+                            ...current,
+                            requestedCountry: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label style={playerHubStyles.profileField}>
+                      <span style={playerHubStyles.profileLabel}>City</span>
+                      <input
+                        style={playerHubStyles.profileInput}
+                        value={teamIdentityDraft.requestedCity}
+                        onChange={(event) =>
+                          setTeamIdentityDraft((current) => ({
+                            ...current,
+                            requestedCity: event.target.value,
+                          }))
+                        }
+                        placeholder="Optional"
+                      />
+                    </label>
+                  </div>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Reason</span>
+                    <textarea
+                      style={playerHubStyles.profileTextareaCompact}
+                      value={teamIdentityDraft.reason}
+                      onChange={(event) =>
+                        setTeamIdentityDraft((current) => ({
+                          ...current,
+                          reason: event.target.value,
+                        }))
+                      }
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <div style={playerHubStyles.profileActions}>
+                    <button
+                      type="button"
+                      style={{
+                        ...playerHubStyles.saveButton,
+                        ...(teamIdentityStatus === "saving"
+                          ? playerHubStyles.saveButtonDisabled
+                          : {}),
+                      }}
+                      disabled={teamIdentityStatus === "saving"}
+                      onClick={handleSubmitTeamIdentityRequest}
+                    >
+                      {teamIdentityStatus === "saving"
+                        ? "Sending..."
+                        : "Submit request"}
+                    </button>
+                    <button
+                      type="button"
+                      style={playerHubStyles.adminActionButton}
+                      onClick={() => setShowTeamIdentityRequestForm(false)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </section>
+              ) : null}
+
+              {teamIdentityMessage ? (
+                <span style={playerHubStyles.profileMessage}>
+                  {teamIdentityMessage}
+                </span>
+              ) : null}
+
+              <label style={playerHubStyles.profileField}>
+                <span style={playerHubStyles.profileLabel}>
+                  Short team description
+                </span>
+                <textarea
+                  style={playerHubStyles.profileTextareaCompact}
+                  value={teamProfileDraft.teamDescription}
+                  onChange={(event) =>
+                    updateTeamProfileDraft(
+                      "teamDescription",
+                      event.target.value
+                    )
+                  }
+                  placeholder="Optional"
+                />
+              </label>
+
+              <label style={playerHubStyles.profileField}>
+                <span style={playerHubStyles.profileLabel}>Contact note</span>
+                <input
+                  style={playerHubStyles.profileInput}
+                  value={teamProfileDraft.contactNote}
+                  onChange={(event) =>
+                    updateTeamProfileDraft("contactNote", event.target.value)
+                  }
+                  placeholder="Optional"
+                />
+              </label>
+
+              <label style={playerHubStyles.checkboxRow}>
+                <input
+                  type="checkbox"
+                  checked={teamProfileDraft.active}
+                  onChange={(event) =>
+                    updateTeamProfileDraft("active", event.target.checked)
+                  }
+                />
+                <span>Team profile active</span>
+              </label>
+
+              <div style={playerHubStyles.profileActions}>
+                <button
+                  type="submit"
+                  style={{
+                    ...playerHubStyles.saveButton,
+                    ...(teamProfileStatus === "saving"
+                      ? playerHubStyles.saveButtonDisabled
+                      : {}),
+                  }}
+                  disabled={teamProfileStatus === "saving"}
+                >
+                  {teamProfileStatus === "saving" ? "Saving..." : "Save team"}
+                </button>
+                {teamProfileMessage ? (
+                  <span style={playerHubStyles.profileMessage}>
+                    {teamProfileMessage}
+                  </span>
+                ) : null}
+              </div>
+            </form>
+
+            <section
+              style={playerHubStyles.teamControlPanel}
+              data-testid="team-open-needs"
+            >
+              <div style={playerHubStyles.profileHeader}>
+                <div style={playerHubStyles.sectionTitle}>Needs</div>
+                <span style={playerHubStyles.chip}>{teamNeeds.length}</span>
+              </div>
+              <form
+                onSubmit={handleSaveTeamNeed}
+                style={{
+                  ...playerHubStyles.actionDrawer,
+                  display: showTeamNeedForm ? "grid" : "none",
+                }}
+              >
+                <div style={playerHubStyles.actionDrawerHeader}>
+                  <div style={playerHubStyles.profileMeta}>
+                    <strong style={playerHubStyles.actionDrawerTitle}>
+                      Add internal need
+                    </strong>
+                    <span style={playerHubStyles.actionDrawerHint}>
+                      Internal only.
+                    </span>
+                  </div>
+                  <span
+                    style={{
+                      ...playerHubStyles.chip,
+                      ...playerHubStyles.internalNeedChip,
+                    }}
+                  >
+                    Internal
+                  </span>
+                </div>
+                <div style={playerHubStyles.profileFormGrid}>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Need type</span>
+                    <select
+                      style={playerHubStyles.profileInput}
+                      value={teamNeedDraft.needType}
+                      onChange={(event) =>
+                        updateTeamNeedDraft("needType", event.target.value)
+                      }
+                    >
+                      <option value="PLAYER">Player</option>
+                      <option value="SUBSTITUTE">Substitute</option>
+                      <option value="TRAINING_PLAYER">Training player</option>
+                    </select>
+                  </label>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Needed count</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="20"
+                      style={playerHubStyles.profileInput}
+                      value={teamNeedDraft.neededCount}
+                      onChange={(event) =>
+                        updateTeamNeedDraft("neededCount", event.target.value)
+                      }
+                    />
+                  </label>
+                </div>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>Need text</span>
+                  <input
+                    style={playerHubStyles.profileInput}
+                    value={teamNeedDraft.needText}
+                    onChange={(event) =>
+                      updateTeamNeedDraft("needText", event.target.value)
+                    }
+                    placeholder="Short note"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  style={{
+                    ...playerHubStyles.saveButton,
+                    justifySelf: "start",
+                    ...(teamProfileStatus === "saving"
+                      ? playerHubStyles.saveButtonDisabled
+                      : {}),
+                  }}
+                  disabled={teamProfileStatus === "saving"}
+                >
+                  Add need
+                </button>
+              </form>
+              <form
+                onSubmit={handlePublishTournamentAd}
+                style={{
+                  ...playerHubStyles.actionDrawer,
+                  display: showTournamentAdForm ? "grid" : "none",
+                }}
+              >
+                <div style={playerHubStyles.actionDrawerHeader}>
+                  <div style={playerHubStyles.profileMeta}>
+                    <strong style={playerHubStyles.actionDrawerTitle}>
+                      Publish player ad
+                    </strong>
+                    <span style={playerHubStyles.actionDrawerHint}>
+                      {tournamentAdPreviewText}
+                    </span>
+                  </div>
+                  <span
+                    style={{
+                      ...playerHubStyles.chip,
+                      ...playerHubStyles.tournamentAdChip,
+                    }}
+                  >
+                    Tournament ad
+                  </span>
+                </div>
+                <div style={playerHubStyles.profileFormGrid}>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Tournament</span>
+                    <select
+                      style={playerHubStyles.profileInput}
+                      value={tournamentAdDraft.tournamentId}
+                      onChange={(event) =>
+                        updateTournamentAdDraft("tournamentId", event.target.value)
+                      }
+                    >
+                      <option value="">Select tournament</option>
+                      {tournamentOptions.map((option) => {
+                        const value = String(
+                          option.id || option.tournamentId || option.name || ""
+                        );
+                        return (
+                          <option key={`ad-${value}`} value={value}>
+                            {tournamentOptionLabel(option)}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Need type</span>
+                    <select
+                      style={playerHubStyles.profileInput}
+                      value={tournamentAdDraft.needType}
+                      onChange={(event) =>
+                        updateTournamentAdDraft("needType", event.target.value)
+                      }
+                    >
+                      <option value="PLAYER">Player</option>
+                      <option value="SUBSTITUTE">Substitute</option>
+                      <option value="TRAINING_PLAYER">Training player</option>
+                    </select>
+                  </label>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Needed count</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="20"
+                      style={playerHubStyles.profileInput}
+                      value={tournamentAdDraft.neededCount}
+                      onChange={(event) =>
+                        updateTournamentAdDraft("neededCount", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Class</span>
+                    <input
+                      style={playerHubStyles.profileInput}
+                      value={tournamentAdDraft.className}
+                      onChange={(event) =>
+                        updateTournamentAdDraft("className", event.target.value)
+                      }
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Squad</span>
+                    <input
+                      style={playerHubStyles.profileInput}
+                      value={tournamentAdDraft.squadLabel}
+                      onChange={(event) =>
+                        updateTournamentAdDraft("squadLabel", event.target.value)
+                      }
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Deadline</span>
+                    <input
+                      type="datetime-local"
+                      style={playerHubStyles.profileInput}
+                      value={tournamentAdDraft.deadlineAt}
+                      onChange={(event) =>
+                        updateTournamentAdDraft("deadlineAt", event.target.value)
+                      }
+                    />
+                  </label>
+                </div>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>Note</span>
+                  <input
+                    style={playerHubStyles.profileInput}
+                    value={tournamentAdDraft.needText}
+                    onChange={(event) =>
+                      updateTournamentAdDraft("needText", event.target.value)
+                    }
+                    placeholder="Visible to players"
+                  />
+                </label>
+                <div style={playerHubStyles.profileActions}>
+                  <button
+                    type="submit"
+                    style={{
+                      ...playerHubStyles.saveButton,
+                      ...(teamProfileStatus === "saving" ||
+                      !String(tournamentAdDraft.tournamentId || "").trim()
+                        ? playerHubStyles.saveButtonDisabled
+                        : {}),
+                    }}
+                    disabled={
+                      teamProfileStatus === "saving" ||
+                      !String(tournamentAdDraft.tournamentId || "").trim()
+                    }
+                  >
+                    Publish player ad
+                  </button>
+                  <span style={playerHubStyles.profileMessage}>
+                    {!tournamentOptions.length
+                      ? "No tournaments available yet."
+                      : !String(tournamentAdDraft.tournamentId || "").trim()
+                        ? "Select tournament first."
+                        : "Visible to players after publishing."}
+                  </span>
+                </div>
+              </form>
+
+              {teamNeeds.length ? (
+                <div style={playerHubStyles.accessRequestList}>
+                  {teamNeeds.map((need) => {
+                    const interestsForNeed =
+                      captainInterestsByNeedId[need.needId] || [];
+                    const stats = teamNeedStatLabels(need, interestsForNeed);
+                    const acceptedPercent = Math.min(
+                      100,
+                      Math.round(
+                        (stats.acceptedCount / Math.max(1, stats.neededCount)) *
+                          100
+                      )
+                    );
+                    const acceptedInterests = interestsForNeed.filter(
+                      (interest) => interest.status === "ACCEPTED"
+                    );
+                    const pendingInterests = interestsForNeed.filter(
+                      (interest) => interest.status === "PENDING"
+                    );
+                    const declinedInterests = interestsForNeed.filter(
+                      (interest) => interest.status === "DECLINED"
+                    );
+                    const otherInterests = interestsForNeed.filter(
+                      (interest) =>
+                        !["ACCEPTED", "PENDING", "DECLINED"].includes(
+                          interest.status
+                        )
+                    );
+
+                    return (
+                      <div key={need.needId} style={playerHubStyles.accessRequestList}>
+                        <article style={playerHubStyles.teamControlRow}>
+                          <div style={playerHubStyles.compactRowMain}>
+                            <span style={playerHubStyles.compactRowTitle}>
+                              {teamNeedSummary(need)}
+                            </span>
+                            <span style={playerHubStyles.compactRowMeta}>
+                              {[
+                                teamNeedContextLabel(need),
+                                need.tournamentName,
+                                need.needText,
+                                `${stats.acceptedCount}/${stats.neededCount} accepted`,
+                                stats.filled
+                                  ? "Filled"
+                                  : `${stats.remainingCount} spots left`,
+                                stats.pendingCount
+                                  ? `${stats.pendingCount} pending`
+                                  : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")}
+                            </span>
+                            <div style={playerHubStyles.progressTrack}>
+                              <div
+                                style={{
+                                  ...playerHubStyles.progressFill,
+                                  width: `${acceptedPercent}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+                          <div style={playerHubStyles.teamControlActionsRow}>
+                            <span
+                              style={{
+                                ...playerHubStyles.chip,
+                                ...teamNeedContextChipStyle(need),
+                              }}
+                            >
+                              {teamNeedContextLabel(need)}
+                            </span>
+                            <span style={playerHubStyles.chip}>
+                              {need.status === "OPEN" ? "Open" : "Closed"}
+                            </span>
+                            <button
+                              type="button"
+                              style={playerHubStyles.adminActionButton}
+                              onClick={() => toggleTeamNeedInterests(need)}
+                            >
+                              {expandedTeamNeedInterestId === need.needId
+                                ? "Hide"
+                                : "View"}
+                            </button>
+                            {need.status === "OPEN" ? (
+                              <button
+                                type="button"
+                                style={playerHubStyles.adminActionButton}
+                                onClick={() => handleCloseTeamNeed(need)}
+                              >
+                                Close
+                              </button>
+                            ) : null}
+                          </div>
+                        </article>
+                        {expandedTeamNeedInterestId === need.needId ? (
+                          <div style={playerHubStyles.accessRequestList}>
+                            {loadingTeamNeedInterestId === need.needId ? (
+                              <div style={playerHubStyles.emptyPreview}>
+                                Loading interests...
+                              </div>
+                            ) : interestsForNeed.length ? (
+                              <>
+                                {renderCaptainInterestGroup(
+                                  "Accepted",
+                                  acceptedInterests
+                                )}
+                                {renderCaptainInterestGroup(
+                                  "Pending",
+                                  pendingInterests
+                                )}
+                                {renderCaptainInterestGroup(
+                                  "Declined",
+                                  declinedInterests
+                                )}
+                                {renderCaptainInterestGroup(
+                                  "Other",
+                                  otherInterests
+                                )}
+                              </>
+                            ) : (
+                              <div style={playerHubStyles.emptyPreview}>
+                                No interested players yet.
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <span style={playerHubStyles.mutedLine}>No team needs yet.</span>
+              )}
+            </section>
+
+            <section style={playerHubStyles.teamControlPanel}>
+              <div style={playerHubStyles.profileHeader}>
+                <div style={playerHubStyles.profileMeta}>
+                  <div style={playerHubStyles.sectionTitle}>Members</div>
+                </div>
+                <span style={playerHubStyles.chip}>{teamMembers.length}</span>
+              </div>
+              {teamMemberMessage ? (
+                <span style={playerHubStyles.profileMessage}>
+                  {teamMemberMessage}
+                </span>
+              ) : null}
+              {teamMembers.length ? (
+                <div style={playerHubStyles.accessRequestList}>
+                  {teamMembers.map((member) => {
+                    const updating =
+                      teamMemberUpdatingId === member.teamMemberId;
+
+                    return (
+                      <article
+                        key={member.teamMemberId}
+                        style={playerHubStyles.teamControlRow}
+                      >
+                        <div style={playerHubStyles.compactRowMain}>
+                          <strong style={playerHubStyles.compactRowTitle}>
+                            {member.playerDisplayName ||
+                              member.playerUsername ||
+                              "Player"}
+                          </strong>
+                          <span style={playerHubStyles.compactRowMeta}>
+                            {member.playerCountry || "No country"} /{" "}
+                            {member.playerClubTeamName || "No fixed club/team"}
+                          </span>
+                        </div>
+                        <div style={playerHubStyles.teamControlActionsRow}>
+                          <span style={playerHubStyles.chip}>Confirmed</span>
+                          <button
+                            type="button"
+                            style={{
+                              ...playerHubStyles.adminActionButton,
+                              ...playerHubStyles.adminDangerButton,
+                              ...(updating
+                                ? playerHubStyles.adminDisabledButton
+                                : {}),
+                            }}
+                            disabled={updating}
+                            onClick={() => handleRemoveTeamMember(member)}
+                          >
+                            {updating ? "Removing..." : "Remove"}
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <span style={playerHubStyles.mutedLine}>
+                  No confirmed team members yet.
+                </span>
+              )}
+            </section>
+
+            <section
+              style={playerHubStyles.teamControlWidePanel}
+              data-testid="tournament-plans"
+            >
+              <div style={playerHubStyles.profileHeader}>
+                <div style={playerHubStyles.profileMeta}>
+                  <div style={playerHubStyles.sectionTitle}>
+                    Team events
+                  </div>
+                </div>
+                <div style={playerHubStyles.teamControlActionsRow}>
+                  <span style={playerHubStyles.chip}>
+                    {dedupedTournamentPlans.length}
+                  </span>
+                </div>
+              </div>
+
+              <form
+                onSubmit={handleCreateTournamentPlan}
+                style={{
+                  ...playerHubStyles.actionDrawer,
+                  display: showTournamentPlanForm ? "grid" : "none",
+                }}
+              >
+                <div style={playerHubStyles.actionDrawerHeader}>
+                  <div style={playerHubStyles.profileMeta}>
+                    <strong style={playerHubStyles.actionDrawerTitle}>
+                      Ask availability
+                    </strong>
+                    <span style={playerHubStyles.actionDrawerHint}>
+                      Ask confirmed members.
+                    </span>
+                  </div>
+                  <span style={playerHubStyles.chip}>Availability</span>
+                </div>
+                <div style={playerHubStyles.profileFormGrid}>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Tournament</span>
+                    <select
+                      style={playerHubStyles.profileInput}
+                      value={tournamentPlanDraft.tournamentId}
+                      onChange={(event) =>
+                        updateTournamentPlanDraft(
+                          "tournamentId",
+                          event.target.value
+                        )
+                      }
+                    >
+                      <option value="">Select tournament</option>
+                      {tournamentOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {tournamentOptionLabel(option)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Class</span>
+                    <input
+                      style={playerHubStyles.profileInput}
+                      value={tournamentPlanDraft.className}
+                      onChange={(event) =>
+                        updateTournamentPlanDraft("className", event.target.value)
+                      }
+                      placeholder="Optional"
+                    />
+                  </label>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Deadline</span>
+                    <input
+                      type="datetime-local"
+                      style={playerHubStyles.profileInput}
+                      value={tournamentPlanDraft.deadlineAt}
+                      onChange={(event) =>
+                        updateTournamentPlanDraft("deadlineAt", event.target.value)
+                      }
+                    />
+                  </label>
+                </div>
+                <label style={playerHubStyles.profileField}>
+                  <span style={playerHubStyles.profileLabel}>Note</span>
+                  <input
+                    style={playerHubStyles.profileInput}
+                    value={tournamentPlanDraft.note}
+                    onChange={(event) =>
+                      updateTournamentPlanDraft("note", event.target.value)
+                    }
+                    placeholder="Optional message to players"
+                  />
+                </label>
+                <div style={playerHubStyles.profileActions}>
+                  <button
+                    type="submit"
+                    style={{
+                      ...playerHubStyles.saveButton,
+                      ...(tournamentPlanStatus === "saving" ||
+                      !String(tournamentPlanDraft.tournamentId || "").trim()
+                        ? playerHubStyles.saveButtonDisabled
+                        : {}),
+                    }}
+                    disabled={
+                      tournamentPlanStatus === "saving" ||
+                      !String(tournamentPlanDraft.tournamentId || "").trim()
+                    }
+                  >
+                    {tournamentPlanStatus === "saving"
+                      ? "Asking..."
+                      : "Ask team members"}
+                  </button>
+                  {!tournamentOptions.length ? (
+                    <span style={playerHubStyles.profileMessage}>
+                      No tournaments available yet.
+                    </span>
+                  ) : !String(tournamentPlanDraft.tournamentId || "").trim() ? (
+                    <span style={playerHubStyles.profileMessage}>
+                      Select a tournament before asking team members.
+                    </span>
+                  ) : null}
+                  {tournamentPlanMessage ? (
+                    <span style={playerHubStyles.profileMessage}>
+                      {tournamentPlanMessage}
+                    </span>
+                  ) : null}
+                </div>
+              </form>
+
+              {dedupedTournamentPlans.length ? (
+                <div style={playerHubStyles.accessRequestList}>
+                  {dedupedTournamentPlans.map((plan) => {
+                    const availability =
+                      captainAvailabilityByPlanId[plan.planId] || [];
+                    return renderCaptainEventCard(plan, availability);
+                  })}
+                </div>
+              ) : (
+                <span style={playerHubStyles.mutedLine}>No team events yet.</span>
+              )}
+            </section>
+          </div>
+          {expandedSquadPlan ? (
+            <section style={playerHubStyles.teamPlanningWorkspace}>
+              {renderSquadPlanningBoard(
+                expandedSquadPlan,
+                expandedSquadAvailability,
+                expandedSquadPlanning,
+                captainRosterDraftsByPlanId[expandedSquadPlan.planId]
+              )}
+              {renderRosterDraftPanel(
+                expandedSquadPlan,
+                expandedSquadPlanning,
+                captainRosterDraftsByPlanId[expandedSquadPlan.planId]
+              )}
+            </section>
+          ) : null}
+          </>
+      </section>
+      ) : null}
+
+      {visibleTeamNeeds.length ||
+      visibleTeamNeedsStatus === "loading" ||
+      teamInterestMessage ? (
+      <section style={playerHubStyles.profileCard}>
+        <div style={playerHubStyles.profileHeader}>
+          <div style={playerHubStyles.profileMeta}>
+            <div style={playerHubStyles.sectionTitle}>
+              Player ads
+            </div>
+          </div>
+          <span style={playerHubStyles.chip}>
+            {visibleTeamNeeds.length}
+          </span>
+        </div>
+
+        {visibleTeamNeeds.length ? (
+          <div style={playerHubStyles.previewGrid}>
+            {visibleTeamNeeds.map((need) => {
+              const interestStatus =
+                need.myInterestStatus ||
+                myInterestStatusByNeedId[need.needId] ||
+                "";
+              const stats = teamNeedStatLabels(need);
+              const teamName = need.clubTeamName || "Team";
+              const acceptedPercent = Math.min(
+                100,
+                Math.round(
+                  (stats.acceptedCount / Math.max(1, stats.neededCount)) * 100
+                )
+              );
+
+              return (
+                <article key={need.needId} style={playerHubStyles.teamNeedCard}>
+                  <div style={playerHubStyles.profileMeta}>
+                    <div style={playerHubStyles.previewType}>
+                      {teamNeedTypeLabel(need.needType)}
+                    </div>
+                    <strong style={playerHubStyles.previewTitle}>
+                      {teamNeedSummary(need, teamName)}
+                    </strong>
+                    {need.tournamentName ? (
+                      <span style={playerHubStyles.previewSubtitle}>
+                        {need.tournamentName}
+                      </span>
+                    ) : null}
+                    {[need.className, need.squadLabel, need.country]
+                      .filter(Boolean)
+                      .length ? (
+                      <span style={playerHubStyles.previewSubtitle}>
+                        {[need.className, need.squadLabel, need.country]
+                          .filter(Boolean)
+                          .join(" / ")}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div style={playerHubStyles.chipRow}>
+                    <span
+                      style={{
+                        ...playerHubStyles.chip,
+                        ...playerHubStyles.tournamentAdChip,
+                      }}
+                    >
+                      Tournament ad
+                    </span>
+                    <span style={playerHubStyles.chip}>
+                      {need.status === "OPEN" ? "Open" : "Closed"}
+                    </span>
+                    {interestStatus ? (
+                      <span
+                        style={{
+                          ...playerHubStyles.accessStatusChip,
+                          ...accessRequestStatusStyle(interestStatus),
+                        }}
+                      >
+                        {formatAccessRequestStatus(interestStatus)}
+                      </span>
+                    ) : null}
+                    {stats.filled ? (
+                      <span
+                        style={{
+                          ...playerHubStyles.accessStatusChip,
+                          ...playerHubStyles.accessStatusApproved,
+                        }}
+                      >
+                        Filled
+                      </span>
+                    ) : null}
+                  </div>
+                  {need.needText ? (
+                    <span style={playerHubStyles.cardText}>{need.needText}</span>
+                  ) : null}
+                  <div style={playerHubStyles.progressTrack}>
+                    <div
+                      style={{
+                        ...playerHubStyles.progressFill,
+                        width: `${acceptedPercent}%`,
+                      }}
+                    />
+                  </div>
+                  {!need.ownTeamNeed ? (
+                    <div style={playerHubStyles.chipRow}>
+                      <span style={playerHubStyles.chip}>
+                        Accepted {stats.acceptedCount}/{stats.neededCount}
+                      </span>
+                      <span style={playerHubStyles.chip}>
+                        {stats.remainingLabel}
+                      </span>
+                    </div>
+                  ) : null}
+                  {need.ownTeamNeed ? (
+                    <div style={playerHubStyles.chipRow}>
+                      <span style={playerHubStyles.chip}>Your team need</span>
+                      <span style={playerHubStyles.chip}>
+                        Accepted {stats.acceptedCount}/{stats.neededCount}
+                      </span>
+                      <span style={playerHubStyles.chip}>
+                        {stats.remainingLabel}
+                      </span>
+                    </div>
+                  ) : interestStatus ? (
+                    <button
+                      type="button"
+                      style={{
+                        ...playerHubStyles.adminActionButton,
+                        ...playerHubStyles.adminDisabledButton,
+                      }}
+                      disabled
+                    >
+                      {formatAccessRequestStatus(interestStatus)}
+                    </button>
+                  ) : stats.filled ? (
+                    <button
+                      type="button"
+                      style={{
+                        ...playerHubStyles.adminActionButton,
+                        ...playerHubStyles.adminDisabledButton,
+                      }}
+                      disabled
+                    >
+                      Filled
+                    </button>
+                  ) : (
+                    <div style={playerHubStyles.section}>
+                      {teamInterestOpenNeedId === need.needId ? (
+                        <label style={playerHubStyles.profileField}>
+                          <span style={playerHubStyles.profileLabel}>
+                            Optional message
+                          </span>
+                          <textarea
+                            style={playerHubStyles.profileTextareaCompact}
+                            value={teamInterestDrafts[need.needId] || ""}
+                            onChange={(event) =>
+                              updateTeamInterestDraft(
+                                need.needId,
+                                event.target.value
+                              )
+                            }
+                            placeholder="Short message..."
+                          />
+                        </label>
+                      ) : null}
+                      <button
+                        type="button"
+                        style={playerHubStyles.adminActionButton}
+                        disabled={teamInterestStatus === "saving"}
+                        onClick={() =>
+                          teamInterestOpenNeedId === need.needId
+                            ? submitTeamNeedInterest(need)
+                            : setTeamInterestOpenNeedId(need.needId)
+                        }
+                      >
+                        {teamInterestStatus === "saving" &&
+                        teamInterestOpenNeedId === need.needId
+                          ? "Sending..."
+                          : teamInterestOpenNeedId === need.needId
+                            ? "Send interest"
+                            : "I'm interested"}
+                      </button>
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        ) : visibleTeamNeedsStatus === "loading" ? (
+          <div style={playerHubStyles.emptyPreview}>Loading player ads...</div>
+        ) : (
+          <div style={playerHubStyles.emptyPreview}>
+            No published tournament player ads yet.
+          </div>
+        )}
+        {teamInterestMessage ? (
+          <div
+            role={teamInterestStatus === "error" ? "alert" : "status"}
+            style={{
+              ...playerHubStyles.adminFeedbackBanner,
+              ...(teamInterestStatus === "error"
+                ? playerHubStyles.adminFeedbackError
+                : playerHubStyles.adminFeedbackSuccess),
+            }}
+          >
+            <span style={playerHubStyles.adminFeedbackTitle}>
+              {teamInterestStatus === "error" ? "Interest failed" : "Interest"}
+            </span>
+            <span>{teamInterestMessage}</span>
+          </div>
+        ) : null}
+      </section>
+      ) : null}
+
+      {adminDashboardCards.length ? (
+        <section style={playerHubStyles.adminReviewCard}>
+          <div style={playerHubStyles.adminReviewTop}>
+            <div style={playerHubStyles.profileMeta}>
+              <div style={playerHubStyles.sectionTitle}>Admin dashboard</div>
+              <div style={playerHubStyles.cardText}>
+                Open one review area at a time. Details load on demand.
+              </div>
+            </div>
+          </div>
+          <div style={playerHubStyles.adminDashboardGrid}>
+            {adminDashboardCards.map((card) => {
+              const active = openAdminPanel === card.id;
+              const loading = card.status === "loading";
+              const numericCount = Number(card.count);
+              const muted =
+                !active && !loading && Number.isFinite(numericCount) && numericCount === 0;
+
+              return (
+                <article
+                  key={card.id}
+                  style={{
+                    ...playerHubStyles.adminDashboardTile,
+                    ...(active ? playerHubStyles.adminDashboardTileActive : {}),
+                    ...(muted ? playerHubStyles.adminDashboardTileMuted : {}),
+                  }}
+                >
+                  <div style={playerHubStyles.homeCardHeader}>
+                    <span style={playerHubStyles.adminDashboardIcon}>
+                      {card.icon}
+                    </span>
+                    <span
+                      style={{
+                        ...playerHubStyles.accessStatusChip,
+                        ...(card.status === "error"
+                          ? playerHubStyles.accessStatusRejected
+                          : {}),
+                      }}
+                    >
+                      {loading ? "Loading" : active ? "Open" : "Closed"}
+                    </span>
+                  </div>
+                  <div style={playerHubStyles.profileMeta}>
+                    <strong style={playerHubStyles.previewTitle}>
+                      {card.title}
+                    </strong>
+                    <span style={playerHubStyles.adminDashboardCount}>
+                      {loading ? "..." : card.count}
+                    </span>
+                    <span style={playerHubStyles.previewSubtitle}>
+                      {card.meta}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    style={playerHubStyles.adminActionButton}
+                    onClick={() => openAdminDashboardPanel(card)}
+                    disabled={loading}
+                  >
+                    {active ? "Close" : "Open"}
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      {isAdmin && openAdminPanel === "players" ? (
+        <details open style={playerHubStyles.adminAccordion}>
+          <summary style={playerHubStyles.adminAccordionSummary}>
+            <span>Player profile review</span>
+            <span style={playerHubStyles.chip}>{adminProfiles.length}</span>
+          </summary>
+          <div style={playerHubStyles.adminAccordionBody}>
+          <div style={playerHubStyles.adminReviewTop}>
+            <div style={playerHubStyles.profileMeta}>
+              <div style={playerHubStyles.sectionTitle}>
+                Player profile review
+              </div>
+              <div style={playerHubStyles.cardText}>
+                Admin-only beta review for self-registered player accounts.
+                This does not grant Team Builder or Tournament access.
+              </div>
+            </div>
+            <button
+              type="button"
+              style={playerHubStyles.adminActionButton}
+              onClick={loadAdminReviewProfiles}
+              disabled={adminReviewStatus === "loading"}
+            >
+              {adminReviewStatus === "loading" ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+
+          {adminReviewMessage ? (
+            <div style={playerHubStyles.profileMessage}>
+              {adminReviewMessage}
+            </div>
+          ) : null}
+
+          {adminProfiles.length ? (
+            <div style={playerHubStyles.adminReviewGrid}>
+              {adminProfiles.map((profile) => {
+                const isUpdating =
+                  adminUpdatingUsername &&
+                  String(adminUpdatingUsername).toLowerCase() ===
+                    String(profile.username || "").toLowerCase();
+                const passwordDraftKey = String(
+                  profile.username || ""
+                ).toLowerCase();
+                const passwordDraft =
+                  adminPasswordDrafts[passwordDraftKey] || "";
+
+                return (
+                  <article
+                    key={profile.username || profile.profileId}
+                    style={playerHubStyles.adminReviewProfileCard}
+                  >
+                    <div style={playerHubStyles.profilePreviewTitleRow}>
+                      <div style={playerHubStyles.profileMeta}>
+                        <div style={playerHubStyles.previewType}>
+                          {adminProfileValue(profile.profileType, "Player")}
+                        </div>
+                        <strong style={playerHubStyles.previewTitle}>
+                          {adminProfileValue(
+                            profile.displayName,
+                            "Unnamed player"
+                          )}
+                        </strong>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          Username: {adminProfileValue(profile.username)}
+                        </span>
+                      </div>
+                      <div style={playerHubStyles.chipRow}>
+                        {adminProfileStatusChips(profile).map((chip) => (
+                          <span key={chip} style={playerHubStyles.chip}>
+                            {chip}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div style={playerHubStyles.detailGrid}>
+                      {[
+                        ["First name", adminProfileValue(profile.firstName)],
+                        ["Last name", adminProfileValue(profile.lastName)],
+                        ["Email", adminProfileValue(profile.email)],
+                        ["Country", adminProfileValue(profile.country)],
+                        [
+                          "Club/team",
+                          profile.freeAgent
+                            ? "No fixed club/team"
+                            : adminProfileValue(
+                                profile.clubTeamName || profile.clubOrTeam,
+                                "Not listed / no fixed team"
+                              ),
+                        ],
+                        ["Team note", adminProfileValue(profile.teamNote)],
+                        [
+                          "Public request",
+                          profile.publicVisible ? "Yes" : "No",
+                        ],
+                        ["Approved", profile.approved ? "Yes" : "No"],
+                        ["Active", profile.active ? "Yes" : "No"],
+                      ].map(([label, value]) => (
+                        <div key={label} style={playerHubStyles.detail}>
+                          <span style={playerHubStyles.detailLabel}>
+                            {label}
+                          </span>
+                          <span style={playerHubStyles.detailValue}>
+                            {value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div style={playerHubStyles.adminPasswordRow}>
+                      <input
+                        type="password"
+                        style={playerHubStyles.profileInput}
+                        value={passwordDraft}
+                        onChange={(event) =>
+                          updateAdminPasswordDraft(profile, event.target.value)
+                        }
+                        placeholder="New password"
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        style={{
+                          ...playerHubStyles.adminActionButton,
+                          ...(isUpdating || !String(passwordDraft).trim()
+                            ? playerHubStyles.adminDisabledButton
+                            : {}),
+                        }}
+                        disabled={isUpdating || !String(passwordDraft).trim()}
+                        onClick={() => resetAdminPlayerPassword(profile)}
+                      >
+                        Reset password
+                      </button>
+                    </div>
+
+                    <div style={playerHubStyles.adminActionRow}>
+                      <button
+                        type="button"
+                        style={{
+                          ...playerHubStyles.adminActionButton,
+                          ...(isUpdating || profile.approved
+                            ? playerHubStyles.adminDisabledButton
+                            : {}),
+                        }}
+                        disabled={isUpdating || profile.approved}
+                        onClick={() =>
+                          updateAdminProfileStatus(profile, {
+                            approved: true,
+                            publicVisible: true,
+                          })
+                        }
+                      >
+                        {profile.approved
+                          ? "Approved public profile"
+                          : "Approve public profile"}
+                      </button>
+                      <button
+                        type="button"
+                        style={{
+                          ...playerHubStyles.adminActionButton,
+                          ...(isUpdating || !profile.approved
+                            ? playerHubStyles.adminDisabledButton
+                            : {}),
+                        }}
+                        disabled={isUpdating || !profile.approved}
+                        onClick={() =>
+                          updateAdminProfileStatus(profile, { approved: false })
+                        }
+                      >
+                        {profile.approved ? "Remove approval" : "No approval"}
+                      </button>
+                      <button
+                        type="button"
+                        style={{
+                          ...playerHubStyles.adminActionButton,
+                          ...playerHubStyles.adminDangerButton,
+                          ...(isUpdating ||
+                          (!profile.publicVisible && !profile.approved)
+                            ? playerHubStyles.adminDisabledButton
+                            : {}),
+                        }}
+                        disabled={
+                          isUpdating ||
+                          (!profile.publicVisible && !profile.approved)
+                        }
+                        onClick={() =>
+                          updateAdminProfileStatus(profile, {
+                            publicVisible: false,
+                            approved: false,
+                          })
+                        }
+                      >
+                        {!profile.publicVisible && !profile.approved
+                          ? "Hidden"
+                          : "Hide public profile"}
+                      </button>
+                      <button
+                        type="button"
+                        style={{
+                          ...playerHubStyles.adminActionButton,
+                          ...(profile.active
+                            ? playerHubStyles.adminDangerButton
+                            : {}),
+                          ...(isUpdating ? playerHubStyles.adminDisabledButton : {}),
+                        }}
+                        disabled={isUpdating}
+                        onClick={() => {
+                          if (profile.active) {
+                            setPendingDeactivateProfile(profile);
+                            return;
+                          }
+
+                          updateAdminProfileStatus(profile, { active: true });
+                        }}
+                      >
+                        {profile.active
+                          ? "Deactivate player account"
+                          : "Reactivate player account"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : adminReviewStatus === "loading" ? null : (
+            <div style={playerHubStyles.emptyPreview}>
+              No player profiles to review yet.
+            </div>
+          )}
+          </div>
+        </details>
+      ) : null}
+
+      {isAdmin && openAdminPanel === "access" ? (
+        <details open style={playerHubStyles.adminAccordion}>
+          <summary style={playerHubStyles.adminAccordionSummary}>
+            <span>Access request review</span>
+            <span style={playerHubStyles.chip}>{adminAccessRequests.length}</span>
+          </summary>
+          <div style={playerHubStyles.adminAccordionBody}>
+          <div style={playerHubStyles.adminReviewTop}>
+            <div style={playerHubStyles.profileMeta}>
+              <div style={playerHubStyles.sectionTitle}>
+                Access request review
+              </div>
+              <div style={playerHubStyles.cardText}>
+                Admin-only review. Trainer approval enables Team Builder;
+                organizer approval enables Tournaments. Captain approval is
+                request-only for now.
+              </div>
+            </div>
+            <button
+              type="button"
+              style={playerHubStyles.adminActionButton}
+              onClick={loadAdminAccessRequests}
+              disabled={adminAccessRequestsStatus === "loading"}
+            >
+              {adminAccessRequestsStatus === "loading" ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+
+          {adminAccessRequestsMessage ? (
+            <div
+              role={adminAccessRequestsStatus === "error" ? "alert" : "status"}
+              style={{
+                ...playerHubStyles.adminFeedbackBanner,
+                ...(adminAccessRequestsStatus === "error"
+                  ? playerHubStyles.adminFeedbackError
+                  : playerHubStyles.adminFeedbackSuccess),
+              }}
+            >
+              <span style={playerHubStyles.adminFeedbackTitle}>
+                {adminAccessRequestsStatus === "error" ? "Review failed" : "Review"}
+              </span>
+              <span>{adminAccessRequestsMessage}</span>
+            </div>
+          ) : null}
+
+          {adminAccessRequests.length ? (
+            <div style={playerHubStyles.adminReviewGrid}>
+              {adminAccessRequests.map((request) => {
+                const isUpdating =
+                  String(adminAccessRequestUpdatingId || "") ===
+                  String(request.requestId || "");
+                const isPending = request.status === "PENDING";
+                const noteValue =
+                  adminAccessRequestNotes[request.requestId] ??
+                  request.adminNote ??
+                  "";
+
+                return (
+                  <article
+                    key={request.requestId}
+                    style={playerHubStyles.adminReviewProfileCard}
+                  >
+                    <div style={playerHubStyles.profilePreviewTitleRow}>
+                      <div style={playerHubStyles.profileMeta}>
+                        <div style={playerHubStyles.previewType}>
+                          {accessRequestLabel(request.requestType)}
+                        </div>
+                        <strong style={playerHubStyles.previewTitle}>
+                          {adminProfileValue(
+                            request.displayName,
+                            request.username || "User"
+                          )}
+                        </strong>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          {adminProfileValue(request.email || request.username)}
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          ...playerHubStyles.accessStatusChip,
+                          ...accessRequestStatusStyle(request.status),
+                        }}
+                      >
+                        {request.status || "PENDING"}
+                      </span>
+                    </div>
+
+                    <div style={playerHubStyles.detailGrid}>
+                      {[
+                        ["Club/team", adminProfileValue(request.clubTeamName)],
+                        ["Message", adminProfileValue(request.message)],
+                        [
+                          "Created",
+                          request.createdAt
+                            ? new Date(request.createdAt).toLocaleDateString()
+                            : "No date",
+                        ],
+                        [
+                          "Reviewed",
+                          request.reviewedAt
+                            ? new Date(request.reviewedAt).toLocaleDateString()
+                            : "Not reviewed",
+                        ],
+                      ].map(([label, value]) => (
+                        <div key={label} style={playerHubStyles.detail}>
+                          <span style={playerHubStyles.detailLabel}>
+                            {label}
+                          </span>
+                          <span style={playerHubStyles.detailValue}>
+                            {value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {request.warning ? (
+                      <div style={playerHubStyles.accessWarning}>
+                        {request.warning}
+                      </div>
+                    ) : null}
+
+                    <label style={playerHubStyles.profileField}>
+                      <span style={playerHubStyles.profileLabel}>Admin note</span>
+                      <input
+                        style={playerHubStyles.profileInput}
+                        value={noteValue}
+                        onChange={(event) =>
+                          updateAdminAccessRequestNote(
+                            request,
+                            event.target.value
+                          )
+                        }
+                        placeholder="Optional note"
+                        disabled={!isPending || isUpdating}
+                      />
+                    </label>
+
+                    <div style={playerHubStyles.adminActionRow}>
+                      <button
+                        type="button"
+                        style={{
+                          ...playerHubStyles.adminActionButton,
+                          ...(isUpdating || !isPending
+                            ? playerHubStyles.adminDisabledButton
+                            : {}),
+                        }}
+                        disabled={isUpdating || !isPending}
+                        onClick={() =>
+                          reviewAdminAccessRequest(request, "APPROVED")
+                        }
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        style={{
+                          ...playerHubStyles.adminActionButton,
+                          ...playerHubStyles.adminDangerButton,
+                          ...(isUpdating || !isPending
+                            ? playerHubStyles.adminDisabledButton
+                            : {}),
+                        }}
+                        disabled={isUpdating || !isPending}
+                        onClick={() =>
+                          reviewAdminAccessRequest(request, "REJECTED")
+                        }
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : adminAccessRequestsStatus === "loading" ? null : (
+            <div style={playerHubStyles.emptyPreview}>
+              No pending requests.
+            </div>
+          )}
+          </div>
+        </details>
+      ) : null}
+
+      {isAdmin && openAdminPanel === "clubs" ? (
+        <details open style={playerHubStyles.adminAccordion}>
+          <summary style={playerHubStyles.adminAccordionSummary}>
+            <span>Official clubs/teams</span>
+            <span style={playerHubStyles.chip}>{adminClubTeams.length}</span>
+          </summary>
+          <div style={playerHubStyles.adminAccordionBody}>
+          <div style={playerHubStyles.adminReviewTop}>
+            <div style={playerHubStyles.profileMeta}>
+              <div style={playerHubStyles.sectionTitle}>
+                Official clubs/teams
+              </div>
+              <div style={playerHubStyles.cardText}>
+                Admin-controlled selectable list for player profiles. This does
+                not create official membership yet.
+              </div>
+            </div>
+            <button
+              type="button"
+              style={playerHubStyles.adminActionButton}
+              onClick={loadAdminClubTeams}
+              disabled={adminClubTeamsStatus === "loading"}
+            >
+              {adminClubTeamsStatus === "loading" ? "Loading..." : "Refresh"}
+            </button>
+          </div>
+
+          <form
+            onSubmit={handleSaveAdminClubTeam}
+            style={playerHubStyles.clubTeamAdminForm}
+          >
+            <input
+              style={playerHubStyles.profileInput}
+              value={adminClubTeamDraft.name}
+              onChange={(event) =>
+                updateAdminClubTeamDraft("name", event.target.value)
+              }
+              placeholder="Club/team name"
+              required
+            />
+            <input
+              style={playerHubStyles.profileInput}
+              value={adminClubTeamDraft.country}
+              onChange={(event) =>
+                updateAdminClubTeamDraft("country", event.target.value)
+              }
+              placeholder="Country optional"
+            />
+            <input
+              style={playerHubStyles.profileInput}
+              value={adminClubTeamDraft.city}
+              onChange={(event) =>
+                updateAdminClubTeamDraft("city", event.target.value)
+              }
+              placeholder="City optional"
+            />
+            <label style={playerHubStyles.checkboxRow}>
+              <input
+                type="checkbox"
+                checked={adminClubTeamDraft.active}
+                onChange={(event) =>
+                  updateAdminClubTeamDraft("active", event.target.checked)
+                }
+              />
+              <span>Active</span>
+            </label>
+            <div style={playerHubStyles.adminActionRow}>
+              <button
+                type="submit"
+                style={{
+                  ...playerHubStyles.saveButton,
+                  ...(adminClubTeamsStatus === "saving"
+                    ? playerHubStyles.saveButtonDisabled
+                    : {}),
+                }}
+                disabled={adminClubTeamsStatus === "saving"}
+              >
+                {adminClubTeamsStatus === "saving"
+                  ? "Saving..."
+                  : adminClubTeamDraft.teamId
+                    ? "Save changes"
+                    : "Add club/team"}
+              </button>
+              {adminClubTeamDraft.teamId ? (
+                <button
+                  type="button"
+                  style={playerHubStyles.adminActionButton}
+                  onClick={resetAdminClubTeamDraft}
+                >
+                  Cancel edit
+                </button>
+              ) : null}
+            </div>
+          </form>
+
+          {adminClubTeamsMessage ? (
+            <div
+              role={adminClubTeamsStatus === "error" ? "alert" : "status"}
+              style={{
+                ...playerHubStyles.adminFeedbackBanner,
+                ...(adminClubTeamsStatus === "error"
+                  ? playerHubStyles.adminFeedbackError
+                  : playerHubStyles.adminFeedbackSuccess),
+              }}
+            >
+              <span style={playerHubStyles.adminFeedbackTitle}>
+                {adminClubTeamsStatus === "error" ? "Could not save" : "Updated"}
+              </span>
+              <span>{adminClubTeamsMessage}</span>
+            </div>
+          ) : null}
+
+          {adminClubTeams.length ? (
+            <div style={playerHubStyles.clubTeamAdminList}>
+              {adminClubTeams.map((team) => {
+                const isUpdating =
+                  String(adminClubTeamUpdatingId || "") ===
+                  String(team.teamId || "");
+                const rowActionDisabled =
+                  isUpdating || adminClubTeamsStatus === "saving";
+
+                return (
+                  <article
+                    key={team.teamId}
+                    style={playerHubStyles.clubTeamAdminRow}
+                  >
+                    <div style={playerHubStyles.profileMeta}>
+                      <strong style={playerHubStyles.previewTitle}>
+                        {team.name}
+                      </strong>
+                      <span style={playerHubStyles.previewSubtitle}>
+                        {[team.city, team.country]
+                          .map((part) => String(part || "").trim())
+                          .filter(Boolean)
+                          .join(", ") || "No location"}
+                      </span>
+                    </div>
+                    <div style={playerHubStyles.chipRow}>
+                      <span
+                        style={{
+                          ...playerHubStyles.clubTeamStatusChip,
+                          ...(team.active
+                            ? playerHubStyles.clubTeamStatusActive
+                            : playerHubStyles.clubTeamStatusInactive),
+                        }}
+                      >
+                        {team.active ? "Active" : "Inactive"}
+                      </span>
+                    </div>
+                    <div style={playerHubStyles.adminActionRow}>
+                      <button
+                        type="button"
+                        style={{
+                          ...playerHubStyles.adminActionButton,
+                          ...(rowActionDisabled
+                            ? playerHubStyles.adminDisabledButton
+                            : {}),
+                        }}
+                        disabled={rowActionDisabled}
+                        onClick={() =>
+                          setAdminClubTeamDraft({
+                            teamId: team.teamId || "",
+                            name: team.name || "",
+                            country: team.country || "",
+                            city: team.city || "",
+                            active: !!team.active,
+                          })
+                        }
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        style={{
+                          ...playerHubStyles.adminActionButton,
+                          ...(team.active
+                            ? playerHubStyles.adminDangerButton
+                            : {}),
+                          ...(rowActionDisabled
+                            ? playerHubStyles.adminDisabledButton
+                            : {}),
+                        }}
+                        disabled={rowActionDisabled}
+                        onClick={() =>
+                          updateAdminClubTeamActive(team, !team.active)
+                        }
+                      >
+                        {team.active ? "Deactivate" : "Reactivate"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : adminClubTeamsStatus === "loading" ? null : (
+            <div style={playerHubStyles.emptyPreview}>
+              No official clubs/teams added yet.
+            </div>
+          )}
+          </div>
+        </details>
+      ) : null}
+
+      {isAdmin && openAdminPanel === "identity" ? (
+        <details open style={playerHubStyles.adminAccordion}>
+          <summary style={playerHubStyles.adminAccordionSummary}>
+            <span>Team identity requests</span>
+            <span style={playerHubStyles.chip}>
+              {
+                adminTeamIdentityRequests.filter(
+                  (request) => request.status === "PENDING"
+                ).length
+              }
+            </span>
+          </summary>
+          <div style={playerHubStyles.adminAccordionBody}>
+            <div style={playerHubStyles.adminReviewTop}>
+              <div style={playerHubStyles.profileMeta}>
+                <div style={playerHubStyles.sectionTitle}>
+                  Team identity requests
+                </div>
+                <div style={playerHubStyles.cardText}>
+                  Admin approval for official team name, country and city changes.
+                </div>
+              </div>
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={loadAdminTeamIdentityRequests}
+                disabled={adminTeamIdentityStatus === "loading"}
+              >
+                {adminTeamIdentityStatus === "loading"
+                  ? "Loading..."
+                  : "Refresh"}
+              </button>
+            </div>
+
+            {adminTeamIdentityMessage ? (
+              <div style={playerHubStyles.profileMessage}>
+                {adminTeamIdentityMessage}
+              </div>
+            ) : null}
+
+            {adminTeamIdentityRequests.length ? (
+              <div style={playerHubStyles.accessRequestList}>
+                {adminTeamIdentityRequests.map((request) => {
+                  const updating =
+                    adminTeamIdentityUpdatingId === request.requestId;
+                  const currentLabel = [
+                    request.currentName || "Team",
+                    request.currentCountry,
+                    request.currentCity,
+                  ]
+                    .filter(Boolean)
+                    .join(" / ");
+                  const requestedLabel = [
+                    request.requestedName || "Team",
+                    request.requestedCountry,
+                    request.requestedCity,
+                  ]
+                    .filter(Boolean)
+                    .join(" / ");
+
+                  return (
+                    <article
+                      key={request.requestId}
+                      style={playerHubStyles.teamControlRow}
+                    >
+                      <div style={playerHubStyles.interestPlayerMeta}>
+                        <strong style={playerHubStyles.interestPlayerName}>
+                          {request.currentName || "Team"} {"->"}{" "}
+                          {request.requestedName || "Team"}
+                        </strong>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          {currentLabel} -> {requestedLabel}
+                        </span>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          Requested by: {request.requestedByUsername || "Unknown"}
+                        </span>
+                        {request.reason ? (
+                          <span style={playerHubStyles.previewSubtitle}>
+                            Reason: {request.reason}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div style={playerHubStyles.teamControlActionsRow}>
+                        <span
+                          style={{
+                            ...playerHubStyles.accessStatusChip,
+                            ...accessRequestStatusStyle(request.status),
+                          }}
+                        >
+                          {formatAccessRequestStatus(request.status)}
+                        </span>
+                        {request.status === "PENDING" ? (
+                          <>
+                            <input
+                              style={playerHubStyles.profileInput}
+                              value={
+                                adminTeamIdentityNotes[request.requestId] || ""
+                              }
+                              onChange={(event) =>
+                                setAdminTeamIdentityNotes((current) => ({
+                                  ...current,
+                                  [request.requestId]: event.target.value,
+                                }))
+                              }
+                              placeholder="Admin note"
+                            />
+                            <button
+                              type="button"
+                              style={{
+                                ...playerHubStyles.addTeamMemberButton,
+                                ...(updating
+                                  ? playerHubStyles.adminDisabledButton
+                                  : {}),
+                              }}
+                              disabled={updating}
+                              onClick={() =>
+                                handleReviewTeamIdentityRequest(
+                                  request,
+                                  "APPROVED"
+                                )
+                              }
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              style={{
+                                ...playerHubStyles.adminActionButton,
+                                ...playerHubStyles.adminDangerButton,
+                                ...(updating
+                                  ? playerHubStyles.adminDisabledButton
+                                  : {}),
+                              }}
+                              disabled={updating}
+                              onClick={() =>
+                                handleReviewTeamIdentityRequest(
+                                  request,
+                                  "REJECTED"
+                                )
+                              }
+                            >
+                              Reject
+                            </button>
+                          </>
+                        ) : request.adminNote ? (
+                          <span style={playerHubStyles.previewSubtitle}>
+                            {request.adminNote}
+                          </span>
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : adminTeamIdentityStatus === "loading" ? null : (
+              <div style={playerHubStyles.emptyPreview}>
+                No team identity requests.
+              </div>
+            )}
+          </div>
+        </details>
+      ) : null}
+
+      {isAdmin && openAdminPanel === "profiles" ? (
+        <details open style={playerHubStyles.adminAccordion}>
+          <summary style={playerHubStyles.adminAccordionSummary}>
+            <span>Team profile review</span>
+            <span style={playerHubStyles.chip}>{adminTeamProfiles.length}</span>
+          </summary>
+          <div style={playerHubStyles.adminAccordionBody}>
+            <div style={playerHubStyles.adminReviewTop}>
+              <div style={playerHubStyles.profileMeta}>
+                <div style={playerHubStyles.sectionTitle}>
+                  Team profile review
+                </div>
+                <div style={playerHubStyles.cardText}>
+                  Admin-only beta review for captain-managed team profiles.
+                </div>
+              </div>
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={loadAdminTeamProfiles}
+                disabled={adminTeamProfileStatus === "loading"}
+              >
+                {adminTeamProfileStatus === "loading" ? "Loading..." : "Refresh"}
+              </button>
+            </div>
+
+            {adminTeamProfileMessage ? (
+              <div style={playerHubStyles.profileMessage}>
+                {adminTeamProfileMessage}
+              </div>
+            ) : null}
+
+            {adminTeamProfiles.length ? (
+              <div style={playerHubStyles.adminReviewGrid}>
+                {adminTeamProfiles.map((teamProfileItem) => {
+                  const isUpdating =
+                    String(adminTeamProfileUpdatingId || "") ===
+                    String(teamProfileItem.teamProfileId || "");
+
+                  return (
+                    <article
+                      key={teamProfileItem.teamProfileId}
+                      style={playerHubStyles.adminReviewProfileCard}
+                    >
+                      <div style={playerHubStyles.profilePreviewTitleRow}>
+                        <div style={playerHubStyles.profileMeta}>
+                          <strong style={playerHubStyles.previewTitle}>
+                            {teamProfileItem.clubTeamName || "Team"}
+                          </strong>
+                          <span style={playerHubStyles.previewSubtitle}>
+                            Captain:{" "}
+                            {teamProfileItem.captainDisplayName ||
+                              teamProfileItem.captainUsername ||
+                              "Unknown"}
+                          </span>
+                          <span style={playerHubStyles.previewSubtitle}>
+                            {teamProfileItem.country || "No country"} / needs{" "}
+                            {teamProfileItem.openNeedsCount || 0}
+                          </span>
+                        </div>
+                        <div style={playerHubStyles.chipRow}>
+                          <span style={playerHubStyles.chip}>
+                            {teamProfileItem.active ? "Active" : "Inactive"}
+                          </span>
+                          <span style={playerHubStyles.chip}>
+                            {teamProfileItem.approved ? "Approved" : "Hidden"}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={playerHubStyles.adminActionRow}>
+                        <button
+                          type="button"
+                          style={{
+                            ...playerHubStyles.adminActionButton,
+                            ...(teamProfileItem.active
+                              ? playerHubStyles.adminDangerButton
+                              : {}),
+                            ...(isUpdating ? playerHubStyles.adminDisabledButton : {}),
+                          }}
+                          disabled={isUpdating}
+                          onClick={() =>
+                            updateAdminTeamProfile(teamProfileItem, {
+                              active: !teamProfileItem.active,
+                            })
+                          }
+                        >
+                          {teamProfileItem.active ? "Deactivate" : "Reactivate"}
+                        </button>
+                        <button
+                          type="button"
+                          style={{
+                            ...playerHubStyles.adminActionButton,
+                            ...(isUpdating ? playerHubStyles.adminDisabledButton : {}),
+                          }}
+                          disabled={isUpdating}
+                          onClick={() =>
+                            updateAdminTeamProfile(teamProfileItem, {
+                              approved: !teamProfileItem.approved,
+                            })
+                          }
+                        >
+                          {teamProfileItem.approved
+                            ? "Remove approval"
+                            : "Approve"}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : adminTeamProfileStatus === "loading" ? null : (
+              <div style={playerHubStyles.emptyPreview}>
+                No team profiles yet.
+              </div>
+            )}
+          </div>
+        </details>
+      ) : null}
+
+      {isAdmin && openAdminPanel === "needs" ? (
+        <details open style={playerHubStyles.adminAccordion}>
+          <summary style={playerHubStyles.adminAccordionSummary}>
+            <span>Team need interest review</span>
+            <span style={playerHubStyles.chip}>
+              {adminTeamNeedInterests.length}
+            </span>
+          </summary>
+          <div style={playerHubStyles.adminAccordionBody}>
+            <div style={playerHubStyles.adminReviewTop}>
+              <div style={playerHubStyles.profileMeta}>
+                <div style={playerHubStyles.sectionTitle}>
+                  Team need interest review
+                </div>
+                <div style={playerHubStyles.cardText}>
+                  Interest overview.
+                </div>
+              </div>
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={loadAdminTeamNeedInterests}
+                disabled={adminTeamNeedInterestStatus === "loading"}
+              >
+                {adminTeamNeedInterestStatus === "loading"
+                  ? "Loading..."
+                  : "Refresh"}
+              </button>
+            </div>
+
+            {adminTeamNeedInterests.length ? (
+              <div style={playerHubStyles.adminReviewGrid}>
+                {adminTeamNeedInterests.map((interest) => (
+                  <article
+                    key={interest.interestId}
+                    style={playerHubStyles.adminReviewProfileCard}
+                  >
+                    <div style={playerHubStyles.profileMeta}>
+                      <strong style={playerHubStyles.previewTitle}>
+                        {interest.clubTeamName || "Team"}
+                      </strong>
+                      <span style={playerHubStyles.previewSubtitle}>
+                        Player:{" "}
+                        {interest.playerDisplayName ||
+                          interest.playerUsername ||
+                          "Unknown"}
+                      </span>
+                      <span style={playerHubStyles.previewSubtitle}>
+                        {interest.createdAt
+                          ? new Date(interest.createdAt).toLocaleDateString()
+                          : "No date"}
+                      </span>
+                    </div>
+                    <div style={playerHubStyles.chipRow}>
+                      <span style={playerHubStyles.chip}>
+                        {interest.status || "PENDING"}
+                      </span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : adminTeamNeedInterestStatus === "loading" ? null : (
+              <div style={playerHubStyles.emptyPreview}>
+                No team need interests yet.
+              </div>
+            )}
+          </div>
+        </details>
+      ) : null}
+
+      {isAdmin && openAdminPanel === "members" ? (
+        <details open style={playerHubStyles.adminAccordion}>
+          <summary style={playerHubStyles.adminAccordionSummary}>
+            <span>Team members review</span>
+            <span style={playerHubStyles.chip}>{adminTeamMembers.length}</span>
+          </summary>
+          <div style={playerHubStyles.adminAccordionBody}>
+            <div style={playerHubStyles.adminReviewTop}>
+              <div style={playerHubStyles.profileMeta}>
+                <div style={playerHubStyles.sectionTitle}>
+                  Team members review
+                </div>
+                <div style={playerHubStyles.cardText}>
+                  Confirmed team members.
+                </div>
+              </div>
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={loadAdminTeamMembers}
+                disabled={adminTeamMembersStatus === "loading"}
+              >
+                {adminTeamMembersStatus === "loading" ? "Loading..." : "Refresh"}
+              </button>
+            </div>
+
+            {adminTeamMembers.length ? (
+              <div style={playerHubStyles.adminReviewGrid}>
+                {adminTeamMembers.map((member) => {
+                  const isUpdating =
+                    String(adminTeamMemberUpdatingId || "") ===
+                    String(member.teamMemberId || "");
+
+                  return (
+                    <article
+                      key={member.teamMemberId}
+                      style={playerHubStyles.adminReviewProfileCard}
+                    >
+                      <div style={playerHubStyles.profileMeta}>
+                        <strong style={playerHubStyles.previewTitle}>
+                          {member.clubTeamName || "Team"}
+                        </strong>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          Captain: {member.captainUsername || "Unknown"}
+                        </span>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          Player:{" "}
+                          {member.playerDisplayName ||
+                            member.playerUsername ||
+                            "Unknown"}
+                        </span>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          {member.confirmedAt
+                            ? new Date(member.confirmedAt).toLocaleDateString()
+                            : "No confirmed date"}
+                        </span>
+                      </div>
+                      <div style={playerHubStyles.chipRow}>
+                        <span style={playerHubStyles.chip}>
+                          {member.memberStatus === "ACTIVE"
+                            ? "Active"
+                            : member.memberStatus === "REMOVED"
+                              ? "Removed"
+                              : "Archived"}
+                        </span>
+                        {member.memberStatus === "ACTIVE" ? (
+                          <button
+                            type="button"
+                            style={{
+                              ...playerHubStyles.adminActionButton,
+                              ...playerHubStyles.adminDangerButton,
+                              ...(isUpdating
+                                ? playerHubStyles.adminDisabledButton
+                                : {}),
+                            }}
+                            disabled={isUpdating}
+                            onClick={() => handleAdminArchiveTeamMember(member)}
+                          >
+                            {isUpdating ? "Archiving..." : "Archive"}
+                          </button>
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : adminTeamMembersStatus === "loading" ? null : (
+              <div style={playerHubStyles.emptyPreview}>
+                No team members yet.
+              </div>
+            )}
+          </div>
+        </details>
+      ) : null}
+
+      {isAdmin && openAdminPanel === "membership" ? (
+        <details open style={playerHubStyles.adminAccordion}>
+          <summary style={playerHubStyles.adminAccordionSummary}>
+            <span>Team membership requests</span>
+            <span style={playerHubStyles.chip}>
+              {adminTeamMembershipRequests.length}
+            </span>
+          </summary>
+          <div style={playerHubStyles.adminAccordionBody}>
+            <div style={playerHubStyles.adminReviewTop}>
+              <div style={playerHubStyles.profileMeta}>
+                <div style={playerHubStyles.sectionTitle}>
+                  Team membership requests
+                </div>
+                <div style={playerHubStyles.cardText}>
+                  Players asking captains to confirm club/team membership.
+                </div>
+              </div>
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={loadAdminTeamMembershipRequests}
+                disabled={adminTeamMembershipStatus === "loading"}
+              >
+                {adminTeamMembershipStatus === "loading"
+                  ? "Loading..."
+                  : "Refresh"}
+              </button>
+            </div>
+
+            {adminTeamMembershipRequests.length ? (
+              <div style={playerHubStyles.adminReviewGrid}>
+                {adminTeamMembershipRequests.map((request) => (
+                  <article
+                    key={request.requestId}
+                    style={playerHubStyles.adminReviewProfileCard}
+                  >
+                    <div style={playerHubStyles.profileMeta}>
+                      <strong style={playerHubStyles.previewTitle}>
+                        {request.clubTeamName || "Team"}
+                      </strong>
+                      <span style={playerHubStyles.previewSubtitle}>
+                        Player:{" "}
+                        {request.playerDisplayName ||
+                          request.playerUsername ||
+                          "Unknown"}
+                      </span>
+                      <span style={playerHubStyles.previewSubtitle}>
+                        Requested:{" "}
+                        {request.requestedAt
+                          ? new Date(request.requestedAt).toLocaleDateString()
+                          : "No date"}
+                      </span>
+                      <span style={playerHubStyles.previewSubtitle}>
+                        Reviewed:{" "}
+                        {request.reviewedBy
+                          ? `${request.reviewedBy} / ${
+                              request.reviewedAt
+                                ? new Date(
+                                    request.reviewedAt
+                                  ).toLocaleDateString()
+                                : "No date"
+                            }`
+                          : "Not reviewed"}
+                      </span>
+                    </div>
+                    <div style={playerHubStyles.chipRow}>
+                      <span
+                        style={{
+                          ...playerHubStyles.accessStatusChip,
+                          ...accessRequestStatusStyle(request.status),
+                        }}
+                      >
+                        {formatTeamMembershipStatus(request.status)}
+                      </span>
+                      {request.alreadyConfirmed ? (
+                        <span style={playerHubStyles.chip}>Team member</span>
+                      ) : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : adminTeamMembershipStatus === "loading" ? null : (
+              <div style={playerHubStyles.emptyPreview}>
+                No team membership requests yet.
+              </div>
+            )}
+          </div>
+        </details>
+      ) : null}
+
+      {canReviewRosterDrafts && openAdminPanel === "rosters" ? (
+        <details open style={playerHubStyles.adminAccordion}>
+          <summary style={playerHubStyles.adminAccordionSummary}>
+            <span>Roster review</span>
+            <span style={playerHubStyles.chip}>
+              {adminTournamentRosterDrafts.length}
+            </span>
+          </summary>
+          <div style={playerHubStyles.adminAccordionBody}>
+            <div style={playerHubStyles.adminReviewTop}>
+              <div style={playerHubStyles.profileMeta}>
+                <div style={playerHubStyles.sectionTitle}>
+                  Review queue
+                </div>
+                <div style={playerHubStyles.cardText}>
+                  Submitted and approved drafts.
+                </div>
+              </div>
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={loadAdminRosterDrafts}
+                disabled={adminTournamentRosterStatus === "loading"}
+              >
+                {adminTournamentRosterStatus === "loading"
+                  ? "Loading..."
+                  : "Refresh"}
+              </button>
+            </div>
+
+            {adminRosterReviewMessage ? (
+              <div style={playerHubStyles.profileMessage}>
+                {adminRosterReviewMessage}
+              </div>
+            ) : null}
+
+            {adminTournamentRosterDrafts.length ? (
+              <div style={playerHubStyles.adminReviewGrid}>
+                {adminTournamentRosterDrafts.map((roster) => {
+                  const status = normalizeRosterStatus(roster.rosterStatus);
+                  const noteValue = adminRosterReviewNotes[roster.rosterId] || "";
+                  const isReviewUpdating = adminRosterReviewUpdatingId.startsWith(
+                    `${roster.rosterId}:`
+                  );
+                  return (
+                    <article
+                      key={roster.rosterId}
+                      style={playerHubStyles.adminReviewProfileCard}
+                    >
+                      <div style={playerHubStyles.profileMeta}>
+                        <strong style={playerHubStyles.previewTitle}>
+                          {roster.tournamentName || "Tournament"}
+                        </strong>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          {roster.clubTeamName || "Team"}
+                          {!isNeutralPlanLabel(roster.squadLabel)
+                            ? ` / Squad ${roster.squadLabel}`
+                            : ""}
+                        </span>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          Captain: {roster.captainUsername || "Unknown"}
+                        </span>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          Players: {roster.playerCount || 0}
+                          {roster.submittedAt
+                            ? ` / submitted ${new Date(
+                                roster.submittedAt
+                              ).toLocaleDateString()}`
+                            : ""}
+                        </span>
+                        {roster.adminNote ? (
+                          <span style={playerHubStyles.previewSubtitle}>
+                            Note: {roster.adminNote}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div style={playerHubStyles.chipRow}>
+                        <span
+                          style={{
+                            ...playerHubStyles.accessStatusChip,
+                            ...rosterStatusStyle(status),
+                          }}
+                        >
+                          {formatRosterStatus(status)}
+                        </span>
+                      </div>
+                      <details>
+                        <summary style={playerHubStyles.adminActionButton}>
+                          View
+                        </summary>
+                        <div style={playerHubStyles.squadPendingList}>
+                          {Array.isArray(roster.players) && roster.players.length ? (
+                            roster.players.map((player) => (
+                              <div
+                                key={player.rosterPlayerId || player.playerUsername}
+                                style={playerHubStyles.squadPlayerRow}
+                              >
+                                <div style={playerHubStyles.squadPlayerInfo}>
+                                  <strong style={playerHubStyles.squadPlayerName}>
+                                    {player.playerDisplayName ||
+                                      player.playerUsername ||
+                                      "Player"}
+                                  </strong>
+                                  <span style={playerHubStyles.squadPlayerMeta}>
+                                    {[
+                                      player.playerCountry || "No country",
+                                      normalizeAssignedSquad(player.assignedSquad) ===
+                                      "RESERVE"
+                                        ? "Reserve"
+                                        : `Team ${normalizeAssignedSquad(
+                                            player.assignedSquad
+                                          )}`,
+                                    ].join(" / ")}
+                                  </span>
+                                </div>
+                              </div>
+                            ))
+                          ) : (
+                            <div style={playerHubStyles.squadEmptyRow}>
+                              No players
+                            </div>
+                          )}
+                        </div>
+                      </details>
+                      {status === "SUBMITTED" ? (
+                        <div style={playerHubStyles.profileMeta}>
+                          <textarea
+                            value={noteValue}
+                            onChange={(event) =>
+                              setAdminRosterReviewNotes((current) => ({
+                                ...current,
+                                [roster.rosterId]: event.target.value,
+                              }))
+                            }
+                            placeholder="Admin note optional"
+                            style={playerHubStyles.profileTextareaCompact}
+                            rows={2}
+                          />
+                          <div style={playerHubStyles.profileActions}>
+                            <button
+                              type="button"
+                              style={playerHubStyles.adminActionButton}
+                              disabled={isReviewUpdating}
+                              onClick={() =>
+                                handleReviewRosterDraft(roster, "APPROVED")
+                              }
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              style={{
+                                ...playerHubStyles.adminActionButton,
+                                ...playerHubStyles.adminDangerButton,
+                              }}
+                              disabled={isReviewUpdating}
+                              onClick={() =>
+                                handleReviewRosterDraft(roster, "REJECTED")
+                              }
+                            >
+                              Reject
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                      {status === "APPROVED" ? (
+                        <div style={playerHubStyles.chipRow}>
+                          <span style={playerHubStyles.chip}>
+                            Captain can lock this roster.
+                          </span>
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
+              </div>
+            ) : adminTournamentRosterStatus === "loading" ? null : (
+              <div style={playerHubStyles.emptyPreview}>
+                No roster drafts yet.
+              </div>
+            )}
+          </div>
+        </details>
+      ) : null}
+
+      {pendingDeactivateProfile ? (
+        <div
+          style={playerHubStyles.confirmOverlay}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="deactivate-player-title"
+        >
+          <div style={playerHubStyles.confirmDialog}>
+            <div style={playerHubStyles.profileMeta}>
+              <strong
+                id="deactivate-player-title"
+                style={playerHubStyles.cardTitle}
+              >
+                Deactivate this player account?
+              </strong>
+              <div style={playerHubStyles.cardText}>
+                The player will not be able to use the app until reactivated.
+              </div>
+              <div style={playerHubStyles.detail}>
+                <span style={playerHubStyles.detailLabel}>Player</span>
+                <span style={playerHubStyles.detailValue}>
+                  {adminProfileValue(
+                    pendingDeactivateProfile.displayName,
+                    pendingDeactivateProfile.email ||
+                      pendingDeactivateProfile.username ||
+                      "Player"
+                  )}
+                </span>
+              </div>
+            </div>
+            <div style={playerHubStyles.confirmActions}>
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={() => setPendingDeactivateProfile(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...playerHubStyles.adminActionButton,
+                  ...playerHubStyles.adminDangerButton,
+                }}
+                onClick={confirmDeactivatePlayerAccount}
+              >
+                Deactivate account
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}

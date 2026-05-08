@@ -1,5 +1,46 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import html2canvas from "html2canvas";
+import PlayerHubPage from "./modules/playerHub/PlayerHubPage";
+import {
+  PUBLIC_THEME_PRESETS,
+  getDefaultPublicLiveTheme,
+  getDefaultPublicTheme,
+  getPublicCardThemeStyle,
+  getPublicThemeStyle,
+  getTournamentPublicCardImageUrl,
+  getTournamentPublicCardTheme,
+  getTournamentPublicLiveBackgroundUrl,
+  getTournamentPublicLiveLogoUrl,
+  getTournamentPublicLiveTheme,
+  getTournamentPublicLogoUrl,
+  getTournamentPublicOrganizerName,
+  hexToRgba,
+  isValidHexColor,
+  normalizePublicLiveTheme,
+  normalizePublicTheme,
+} from "./constants/publicThemes";
+import { TRANSLATIONS } from "./constants/translations";
+import {
+  buildStoragePayload,
+  getLanguageStorageKey,
+  getPlayerViewModeStorageKey,
+  getRoundStorageKey,
+  getToolbarSettingsStorageKey,
+  readStorageWithTtl,
+} from "./utils/storageUtils";
+import {
+  displayPlayerName,
+  getSkillOptions,
+  getSkillStyle,
+  normalizeTeamName,
+  normalizeTeams,
+} from "./utils/playerUtils";
+import {
+  buildGroupPositionSource,
+  getTournamentGroupCode,
+  getTournamentGroupColor,
+  getTournamentSourceGroupCode,
+} from "./utils/tournamentUtils";
 
 const API =
   "https://script.google.com/macros/s/AKfycbx9FWReNsr6vJam6b02OCf96K482opSh_SPZVSeBqoTs65M7S2E1ZGZXt9qGUMzpE2dDw/exec";
@@ -177,154 +218,6 @@ function SvgIcon({ type, size = 16, strokeWidth = 2, style }) {
   return null;
 }
 
-const TOURNAMENT_GROUP_COLORS = [
-  {
-    soft: "#eff6ff",
-    border: "#bfdbfe",
-    accent: "#2563eb",
-    text: "#1e3a8a",
-    publicSoft: "rgba(37,99,235,0.16)",
-    publicBorder: "rgba(147,197,253,0.28)",
-    publicText: "#bfdbfe",
-  },
-  {
-    soft: "#ecfdf5",
-    border: "#a7f3d0",
-    accent: "#059669",
-    text: "#065f46",
-    publicSoft: "rgba(5,150,105,0.16)",
-    publicBorder: "rgba(167,243,208,0.28)",
-    publicText: "#bbf7d0",
-  },
-  {
-    soft: "#f5f3ff",
-    border: "#ddd6fe",
-    accent: "#7c3aed",
-    text: "#5b21b6",
-    publicSoft: "rgba(124,58,237,0.16)",
-    publicBorder: "rgba(196,181,253,0.28)",
-    publicText: "#ddd6fe",
-  },
-  {
-    soft: "#fff7ed",
-    border: "#fed7aa",
-    accent: "#ea580c",
-    text: "#9a3412",
-    publicSoft: "rgba(234,88,12,0.16)",
-    publicBorder: "rgba(253,186,116,0.28)",
-    publicText: "#fed7aa",
-  },
-  {
-    soft: "#fdf2f8",
-    border: "#fbcfe8",
-    accent: "#db2777",
-    text: "#9d174d",
-    publicSoft: "rgba(219,39,119,0.16)",
-    publicBorder: "rgba(251,207,232,0.28)",
-    publicText: "#fbcfe8",
-  },
-  {
-    soft: "#f0fdfa",
-    border: "#99f6e4",
-    accent: "#0d9488",
-    text: "#115e59",
-    publicSoft: "rgba(13,148,136,0.16)",
-    publicBorder: "rgba(153,246,228,0.28)",
-    publicText: "#99f6e4",
-  },
-];
-
-const PUBLIC_THEME_PRESETS = {
-  "classic-green": {
-    label: { en: "Classic Green", no: "Klassisk grønn" },
-    background: "#031f16",
-    surface: "#082a20",
-    panel: "#0f3d2f",
-    primary: "#22c55e",
-    accent: "#facc15",
-    text: "#ffffff",
-    mutedText: "#d7f7e6",
-    border: "#22c55e",
-  },
-  "dark-cup": {
-    label: { en: "Dark Cup", no: "Mørk cup" },
-    background: "#050816",
-    surface: "#101827",
-    panel: "#182235",
-    primary: "#38bdf8",
-    accent: "#c084fc",
-    text: "#ffffff",
-    mutedText: "#cbd5e1",
-    border: "#38bdf8",
-  },
-  "orange-trophy": {
-    label: { en: "Orange Trophy", no: "Oransje trofé" },
-    background: "#190a03",
-    surface: "#341407",
-    panel: "#4a1d09",
-    primary: "#f97316",
-    accent: "#facc15",
-    text: "#fff7ed",
-    mutedText: "#fed7aa",
-    border: "#fb923c",
-  },
-  "blue-arena": {
-    label: { en: "Blue Arena", no: "Blå arena" },
-    background: "#06172e",
-    surface: "#0b2447",
-    panel: "#123463",
-    primary: "#3b82f6",
-    accent: "#67e8f9",
-    text: "#ffffff",
-    mutedText: "#bfdbfe",
-    border: "#60a5fa",
-  },
-  "gold-premium": {
-    label: { en: "Gold Premium", no: "Gull premium" },
-    background: "#11100a",
-    surface: "#1f1b10",
-    panel: "#2e2612",
-    primary: "#facc15",
-    accent: "#fb923c",
-    text: "#fffbea",
-    mutedText: "#fde68a",
-    border: "#eab308",
-  },
-  "red-black": {
-    label: { en: "Red Black", no: "Rød/svart" },
-    background: "#120305",
-    surface: "#1f080d",
-    panel: "#2f1016",
-    primary: "#ef4444",
-    accent: "#f97316",
-    text: "#ffffff",
-    mutedText: "#fecaca",
-    border: "#f87171",
-  },
-  "clean-white": {
-    label: { en: "Clean White", no: "Ren hvit" },
-    background: "#f8fafc",
-    surface: "#ffffff",
-    panel: "#ffffff",
-    primary: "#166534",
-    accent: "#2563eb",
-    text: "#0f172a",
-    mutedText: "#475569",
-    border: "#cbd5e1",
-  },
-  "club-custom": {
-    label: { en: "Club Custom", no: "Klubbtilpasset" },
-    background: "#08111f",
-    surface: "#111827",
-    panel: "#1f2937",
-    primary: "#22c55e",
-    accent: "#3b82f6",
-    text: "#ffffff",
-    mutedText: "#d1d5db",
-    border: "#22c55e",
-  },
-};
-
 const CLUB_OPTIONS = [
   "Bergen Vest",
   "Drammen",
@@ -346,14 +239,6 @@ const DEFAULT_VISIBLE_ACTIONS = {
   lockToggle: true,
   export: false,
 };
-
-function getToolbarSettingsStorageKey(username) {
-  return `volleyball-visible-actions-${String(username || "guest").trim()}`;
-}
-
-function getLanguageStorageKey(username) {
-  return `volleyball-language-${String(username || "guest").trim()}`;
-}
 
 function readAccessBoolean(value, fallback = false) {
   if (value === undefined || value === null || value === "") return fallback;
@@ -422,512 +307,6 @@ function normalizeUserWithAccess(user = {}) {
     canUseTournaments: access.tournaments,
     isAdmin: access.admin,
   };
-}
-
-const TRANSLATIONS = {
-  en: {
-    trainer: "Trainer",
-    logout: "Logout",
-    loginOk: "Login ok.",
-    trainerLogin: "Sign in",
-    loginRequired: "Sign in to continue",
-    username: "Username",
-    password: "Password",
-    login: "Login",
-    loggingIn: "Logging in...",
-    players: "Players",
-    teams: "Teams",
-    numberOfTeams: "Number of Teams",
-    selected: "Selected",
-    skillView: "Skill View",
-    skillScale: "Skill Scale",
-    sort: "Sort",
-    club: "Club",
-    all: "All",
-    addPlayer: "Add Player",
-    archived: "Archived",
-    manage: "Manage",
-    done: "Done",
-    savePlayer: "Save Player",
-    edit: "Edit",
-    archive: "Archive",
-    restore: "Restore",
-    noArchivedPlayers: "No archived players.",
-    newRound: "New Round",
-    saveRound: "Save Round",
-    matchMode: "Match Mode",
-    modeShort: "Mode",
-    hideMatch: "Hide Match",
-    clearSaved: "Clear Saved",
-    showSkill: "Show Skill",
-    hideSkill: "Hide Skill",
-    toolbarSettings: "Toolbar Settings",
-    removePlayer: "Remove Player",
-    moveHere: "Move Here",
-    lock: "Lock",
-    unlock: "Unlock",
-    editPlayer: "Edit Player",
-    cancel: "Cancel",
-    save: "Save",
-    close: "Close",
-    removePlayerFromCurrentTeams: "Remove player from current teams",
-    noPlayersToRemove: "No players to remove",
-    addPlayerToCurrentTeams: "Add player to current teams",
-    noPlayersAvailable: "No players available",
-    add: "Add",
-    noClub: "No Club",
-    export: "Export",
-    skillToggleLabel: "Skill Toggle",
-    lockToggleLabel: "Lock Toggle",
-    generateTeams: "Generate Teams",
-    generating: "Generating...",
-    hideArchived: "Hide Archived",
-    archivedPlayers: "Archived Players",
-    saving: "Saving...",
-    selectClub: "Select club",
-    customClubName: "Custom club name",
-    playerName: "Player name",
-    saveShare: "Save / Share",
-    method: "Method",
-    courts: "Courts",
-    prevRound: "Prev Round",
-    nextRound: "Next Round",
-    noMatchesAvailable: "No matches available.",
-    selectMove: "Select move",
-    createTrainer: "Create Trainer",
-    newTrainer: "New Trainer",
-    creating: "Creating...",
-    trainerUsernamePlaceholder: "Trainer username",
-    trainerPasswordPlaceholder: "Trainer password",
-    selectTrainer: "Select trainer",
-    openSheet: "Open sheet",
-    activeStatus: "Active",
-    inactiveStatus: "Inactive",
-    deactivate: "Deactivate",
-    activate: "Activate",
-    resetPassword: "Reset Password",
-    newPassword: "New password",
-    archivedTrainers: "Archived Trainers",
-    createTrainerSubtitle: "Creates a new trainer and Google Sheet automatically",
-    skillViewNumbers: "Numbers",
-    skillViewColors: "Colors",
-    copyPlayers: "Copy players",
-    blankSheet: "Blank sheet",
-    copyPlayersFromMainSheet: "Copy players from main sheet",
-    copyPlayersFromExistingTrainer: "Copy players from existing trainer",
-    usernameLabel: "Username:",
-    spreadsheetIdLabel: "Spreadsheet ID:",
-    copyModeLabel: "Copy mode:",
-    openTrainerSheet: "Open trainer sheet",
-    trainerUsersTitle: "Trainer Users",
-    trainerUsersSubtitle: "Admin can activate, deactivate, reset passwords and archive trainers",
-    adminAccessTitle: "Module access",
-    adminAccessSubtitle: "Choose which app modules each user can open.",
-    accessTeamBuilder: "Team Builder",
-    accessTournaments: "Tournaments",
-    accessAdmin: "Admin",
-    accessOn: "ON",
-    accessOff: "OFF",
-    accessSaved: "Access updated.",
-    noModuleAccess: "Your account does not have access yet.",
-    noActiveTrainers: "No active trainers yet.",
-    archivedTrainersSubtitle: "Archived trainers can be restored later",
-    noArchivedTrainers: "No archived trainers.",
-    archivedStatus: "Archived",
-    playersLoginRequired: "Sign in to continue.",
-    teamsLoginRequired: "Sign in to continue.",
-    roundLabel: "Round",
-    ofLabel: "of",
-    courtLabel: "Court",
-    vsLabel: "vs",
-    enterUsernamePassword: "Please enter username and password.",
-    loginFailed: "Login failed.",
-    selectTrainerToCopy: "Select a trainer to copy from.",
-    couldNotCreateTrainer: "Could not create trainer.",
-    trainerCreated: "Trainer created.",
-    trainerActivated: "Trainer activated.",
-    trainerDeactivated: "Trainer deactivated.",
-    enterNewPasswordFirst: "Enter a new password first.",
-    couldNotResetPassword: "Could not reset password.",
-    passwordResetOk: "Password reset ok.",
-    archiveTrainerConfirm: "Are you sure you want to archive trainer",
-    trainerArchived: "Trainer archived.",
-    couldNotArchiveTrainer: "Could not archive trainer.",
-    trainerRestored: "Trainer restored.",
-    couldNotRestoreTrainer: "Could not restore trainer.",
-    archivePlayerConfirm: "Archive player",
-    couldNotArchivePlayer: "Could not archive player.",
-    playerArchived: "Player archived.",
-    couldNotRestorePlayer: "Could not restore player.",
-    playerRestored: "Player restored.",
-    roundSavedForSixHours: "Round saved for 6 hours on this device.",
-    couldNotSaveRound: "Could not save round.",
-    savedRoundCleared: "Saved round cleared on this device.",
-    couldNotSavePlayer: "Could not save player.",
-    couldNotUpdatePlayer: "Could not update player.",
-    pointsLabel: "pt",
-    appTitle: "Make Teams Pro",
-    appSubtitle: "Thines Vijay",
-    matchPattern: "Pattern",
-    matchShuffle: "Shuffle",
-    otherClub: "Other",
-    loadingShort: "...",
-    landingBrandSubtitle: "Tournament management for volleyball organizers",
-    landingOrganizerLogin: "Organizer login",
-    landingLoginHelper: "Manage your tournaments.",
-    landingHeroTitle: "Run better volleyball tournaments",
-    landingHeroCopy:
-      "Create teams, schedules, scores and public tournament pages in one place.",
-    landingChipLiveSchedule: "Live schedule",
-    landingChipPublicPage: "Public page",
-    landingChipGroupKnockout: "Group + knockout",
-    landingChipOrganizerTools: "Organizer tools",
-    landingUpcomingTitle: "Upcoming tournaments",
-    landingOpenTournament: "View details",
-    landingNoPublicTournaments: "No public tournaments yet.",
-    landingPublishedAppear: "Published tournaments will appear here.",
-    landingAllCountries: "All countries",
-    landingAllTypes: "All types",
-    landingStatusUpcoming: "Upcoming",
-    landingStatusLive: "Live",
-    landingStatusPast: "Past",
-    landingStatusCompleted: "Completed",
-    landingEventPlatform: "Public tournament platform",
-    landingControlTitle: "Live tournament control",
-    landingControlSubtitle: "Schedules, scores and public sharing.",
-    landingControlGroups: "Groups",
-    landingControlScores: "Scores",
-    landingControlPublicLink: "Public link",
-    landingControlSchedulePreview: "Mini schedule",
-    landingControlCourtCount: "3 courts",
-    landingControlMatchCount: "12 matches",
-    landingShowcaseKicker: "Product preview",
-    landingShowcaseSubtitle: "Team Builder + Tournaments",
-    landingShowcaseCreateTeams: "Create teams",
-    landingShowcaseBuildTournaments: "Build tournaments",
-    landingShowcaseLiveSchedule: "Live schedule",
-    landingShowcasePublicLive: "Public live view",
-    landingShowcaseStandingsFinals: "Standings & finals",
-    landingShowcaseCustomTheme: "Custom public theme",
-    landingShowcasePlayerPool: "Player pool",
-    landingShowcaseGeneratedTeams: "Generated teams",
-    landingShowcaseClasses: "Classes",
-    landingShowcasePublicPage: "Public page",
-    landingShowcaseFinished: "Finished",
-    teamBuilder: "Team Builder",
-  },
-  no: {
-    trainer: "Trener",
-    logout: "Logg ut",
-    loginOk: "Innlogging ok.",
-    trainerLogin: "Logg inn",
-    loginRequired: "Logg inn for å fortsette",
-    username: "Brukernavn",
-    password: "Passord",
-    login: "Logg inn",
-    loggingIn: "Logger inn...",
-    players: "Spillere",
-    teams: "Lag",
-    numberOfTeams: "Antall lag",
-    selected: "Valgt",
-    skillView: "Visning",
-    skillScale: "Nivåskala",
-    sort: "Sortering",
-    club: "Klubb",
-    all: "Alle",
-    addPlayer: "Legg til spiller",
-    archived: "Arkiv",
-    manage: "Administrer",
-    done: "Ferdig",
-    savePlayer: "Lagre spiller",
-    edit: "Rediger",
-    archive: "Arkiver",
-    restore: "Gjenopprett",
-    noArchivedPlayers: "Ingen arkiverte spillere.",
-    newRound: "Ny runde",
-    saveRound: "Lagre runde",
-    matchMode: "Kampmodus",
-    modeShort: "Modus",
-    hideMatch: "Skjul kampmodus",
-    clearSaved: "Tøm lagret",
-    showSkill: "Vis nivå",
-    hideSkill: "Skjul nivå",
-    toolbarSettings: "Verktøylinje",
-    removePlayer: "Fjern spiller",
-    moveHere: "Flytt hit",
-    lock: "Lås",
-    unlock: "Lås opp",
-    editPlayer: "Rediger spiller",
-    cancel: "Avbryt",
-    save: "Lagre",
-    close: "Lukk",
-    removePlayerFromCurrentTeams: "Fjern spiller fra dagens lag",
-    noPlayersToRemove: "Ingen spillere å fjerne",
-    addPlayerToCurrentTeams: "Legg til spiller i dagens lag",
-    noPlayersAvailable: "Ingen tilgjengelige spillere",
-    add: "Legg til",
-    noClub: "Ingen klubb",
-    export: "Eksporter",
-    skillToggleLabel: "Nivå-knapp",
-    lockToggleLabel: "Lås-knapp",
-    generateTeams: "Generer lag",
-    generating: "Genererer...",
-    hideArchived: "Skjul arkiv",
-    archivedPlayers: "Arkiverte spillere",
-    saving: "Lagrer...",
-    selectClub: "Velg klubb",
-    customClubName: "Tilpasset klubbnavn",
-    playerName: "Spillernavn",
-    saveShare: "Lagre / Del",
-    method: "Metode",
-    courts: "Baner",
-    prevRound: "Forrige runde",
-    nextRound: "Neste runde",
-    noMatchesAvailable: "Ingen kamper tilgjengelig.",
-    selectMove: "Velg flytt",
-    createTrainer: "Opprett trener",
-    newTrainer: "Ny trener",
-    creating: "Oppretter...",
-    trainerUsernamePlaceholder: "Trener-brukernavn",
-    trainerPasswordPlaceholder: "Trener-passord",
-    selectTrainer: "Velg trener",
-    openSheet: "Åpne ark",
-    activeStatus: "Aktiv",
-    inactiveStatus: "Inaktiv",
-    deactivate: "Deaktiver",
-    activate: "Aktiver",
-    resetPassword: "Nullstill passord",
-    newPassword: "Nytt passord",
-    archivedTrainers: "Arkiverte trenere",
-    createTrainerSubtitle: "Opprett en ny trener og Google Sheet automatisk",
-    skillViewNumbers: "Tall",
-    skillViewColors: "Farger",
-    copyPlayers: "Kopier spillere",
-    blankSheet: "Tomt ark",
-    copyPlayersFromMainSheet: "Kopier spillere fra hovedarket",
-    copyPlayersFromExistingTrainer: "Kopier spillere fra eksisterende trener",
-    usernameLabel: "Brukernavn:",
-    spreadsheetIdLabel: "Google Sheet ID:",
-    copyModeLabel: "Kopieringsmodus:",
-    openTrainerSheet: "Åpne trenerark",
-    trainerUsersTitle: "Trenere",
-    trainerUsersSubtitle: "Admin kan aktivere, deaktivere, tilbakestille passord og arkivere trenere",
-    adminAccessTitle: "Modultilgang",
-    adminAccessSubtitle: "Velg hvilke moduler hver bruker kan åpne.",
-    accessTeamBuilder: "Lagbygger",
-    accessTournaments: "Turneringer",
-    accessAdmin: "Admin",
-    accessOn: "PÅ",
-    accessOff: "AV",
-    accessSaved: "Tilgang oppdatert.",
-    noModuleAccess: "Kontoen din har ikke tilgang ennå.",
-    noActiveTrainers: "Ingen aktive trenere ennå.",
-    archivedTrainersSubtitle: "Arkiverte trenere kan gjenopprettes senere",
-    noArchivedTrainers: "Ingen arkiverte trenere.",
-    archivedStatus: "Arkivert",
-    playersLoginRequired: "Logg inn for å fortsette.",
-    teamsLoginRequired: "Logg inn for å fortsette.",
-    roundLabel: "Runde",
-    ofLabel: "av",
-    courtLabel: "Bane",
-    vsLabel: "mot",
-    enterUsernamePassword: "Vennligst skriv inn brukernavn og passord.",
-    loginFailed: "Innlogging mislyktes.",
-    selectTrainerToCopy: "Velg en trener å kopiere fra.",
-    couldNotCreateTrainer: "Kunne ikke opprette trener.",
-    trainerCreated: "Trener opprettet.",
-    trainerActivated: "Trener aktivert.",
-    trainerDeactivated: "Trener deaktivert.",
-    enterNewPasswordFirst: "Skriv inn nytt passord først.",
-    couldNotResetPassword: "Kunne ikke tilbakestille passord.",
-    passwordResetOk: "Passord tilbakestilt ok.",
-    archiveTrainerConfirm: "Er du sikker på at du vil arkivere trener",
-    trainerArchived: "Trener arkivert.",
-    couldNotArchiveTrainer: "Kunne ikke arkivere trener.",
-    trainerRestored: "Trener gjenopprettet.",
-    couldNotRestoreTrainer: "Kunne ikke gjenopprette trener.",
-    archivePlayerConfirm: "Arkiver spiller",
-    couldNotArchivePlayer: "Kunne ikke arkivere spiller.",
-    playerArchived: "Spiller arkivert.",
-    couldNotRestorePlayer: "Kunne ikke gjenopprette spiller.",
-    playerRestored: "Spiller gjenopprettet.",
-    roundSavedForSixHours: "Runde lagret i 6 timer på denne enheten.",
-    couldNotSaveRound: "Kunne ikke lagre runde.",
-    savedRoundCleared: "Lagret runde slettet fra denne enheten.",
-    couldNotSavePlayer: "Kunne ikke lagre spiller.",
-    couldNotUpdatePlayer: "Kunne ikke oppdatere spiller.",
-    pointsLabel: "poeng",
-    appTitle: "Make Teams Pro",
-    appSubtitle: "Thines Vijay",
-    matchPattern: "Mønster",
-    matchShuffle: "Bland",
-    otherClub: "Annet",
-    loadingShort: "...",
-    landingBrandSubtitle: "Turneringsadministrasjon for volleyballarrangører",
-    landingOrganizerLogin: "Arrangørinnlogging",
-    landingLoginHelper: "Administrer turneringene dine.",
-    landingHeroTitle: "Kjør bedre volleyballturneringer",
-    landingHeroCopy:
-      "Lag grupper, kampoppsett, resultater og offentlige turneringssider på ett sted.",
-    landingChipLiveSchedule: "Live kampoppsett",
-    landingChipPublicPage: "Offentlig side",
-    landingChipGroupKnockout: "Gruppe + sluttspill",
-    landingChipOrganizerTools: "Arrangørverktøy",
-    landingUpcomingTitle: "Kommende turneringer",
-    landingOpenTournament: "Se turnering",
-    landingNoPublicTournaments: "Ingen offentlige turneringer enda.",
-    landingPublishedAppear: "Publiserte turneringer vises her.",
-    landingAllCountries: "Alle land",
-    landingAllTypes: "Alle typer",
-    landingStatusUpcoming: "Kommende",
-    landingStatusLive: "Live",
-    landingStatusPast: "Tidligere",
-    landingStatusCompleted: "Ferdig",
-    landingEventPlatform: "Offentlig turneringsplattform",
-    landingControlTitle: "Live turneringskontroll",
-    landingControlSubtitle: "Kampoppsett, score og offentlig deling.",
-    landingControlGroups: "Grupper",
-    landingControlScores: "Score",
-    landingControlPublicLink: "Offentlig lenke",
-    landingControlSchedulePreview: "Mini kampoppsett",
-    landingShowcaseKicker: "Produktvisning",
-    landingShowcaseSubtitle: "Lagbygger + Turneringer",
-    landingShowcaseCreateTeams: "Lag lag",
-    landingShowcaseBuildTournaments: "Bygg turneringer",
-    landingShowcaseLiveSchedule: "Live kampoppsett",
-    landingShowcasePublicLive: "Offentlig live-visning",
-    landingShowcaseStandingsFinals: "Tabell og finaler",
-    landingShowcaseCustomTheme: "Egen offentlig stil",
-    landingShowcasePlayerPool: "Spillerliste",
-    landingShowcaseGeneratedTeams: "Genererte lag",
-    landingShowcaseClasses: "Klasser",
-    landingShowcasePublicPage: "Offentlig side",
-    landingShowcaseFinished: "Ferdig",
-    landingControlCourtCount: "3 baner",
-    landingControlMatchCount: "12 kamper",
-    teamBuilder: "Lagbygger",
-  },
-};
-
-TRANSLATIONS.dk = {
-  ...TRANSLATIONS.en,
-  logout: "Log ud",
-  loginOk: "Login ok.",
-  trainerLogin: "Log ind",
-  loginRequired: "Log ind for at fortsætte",
-  username: "Brugernavn",
-  password: "Adgangskode",
-  login: "Log ind",
-  loggingIn: "Logger ind...",
-  enterUsernamePassword: "Indtast brugernavn og adgangskode.",
-  loginFailed: "Login mislykkedes.",
-  appTitle: "Make Teams Pro",
-  appSubtitle: "Thines Vijay",
-  landingBrandSubtitle: "Turneringsstyring for volleyballarrangører",
-  landingOrganizerLogin: "Arrangørlogin",
-  landingLoginHelper: "Administrer dine turneringer.",
-  landingUpcomingTitle: "Kommende turneringer",
-  landingOpenTournament: "Se turnering",
-  landingNoPublicTournaments: "Ingen offentlige turneringer endnu.",
-  landingPublishedAppear: "Offentliggjorte turneringer vises her.",
-  landingAllCountries: "Alle lande",
-  landingAllTypes: "Alle typer",
-  landingStatusUpcoming: "Kommende",
-  landingStatusLive: "Live",
-  landingStatusPast: "Tidligere",
-  landingStatusCompleted: "Færdig",
-  landingShowcaseCreateTeams: "Lav hold",
-  landingShowcaseBuildTournaments: "Byg turneringer",
-  landingShowcaseLiveSchedule: "Live kampprogram",
-  landingShowcasePublicLive: "Offentlig livevisning",
-  landingShowcaseStandingsFinals: "Stilling og finaler",
-  landingShowcaseCustomTheme: "Eget offentligt tema",
-  landingShowcasePlayerPool: "Spillerliste",
-  landingShowcaseGeneratedTeams: "Genererede hold",
-  landingShowcaseClasses: "Klasser",
-  landingShowcasePublicPage: "Offentlig side",
-  landingShowcaseFinished: "Færdig",
-  teamBuilder: "Holdbygger",
-};
-
-function getPlayerViewModeStorageKey(username) {
-  return `volleyball-player-view-mode-${String(username || "guest").trim()}`;
-}
-
-function normalizeTeamName(index, existingName, language = "en") {
-  const trimmed = String(existingName || "").trim();
-  const fallbackLetter = String.fromCharCode(65 + index);
-  const prefix = language === "no" ? "Lag" : "Team";
-
-  if (!trimmed) {
-    return `${prefix} ${fallbackLetter}`;
-  }
-
-  const match = trimmed.match(/^(Team|Lag)\s+([A-Z])$/i);
-  if (match) {
-    return `${prefix} ${match[2].toUpperCase()}`;
-  }
-
-  return trimmed;
-}
-
-function normalizeTeams(rawTeams, language = "en") {
-  if (!Array.isArray(rawTeams)) return [];
-
-  return rawTeams.map((team, index) => ({
-    ...team,
-    name: normalizeTeamName(index, team?.name, language),
-    players: Array.isArray(team?.players)
-      ? team.players.map((player) => ({
-          ...player,
-          skill: Number(player.skill) || 1,
-          locked: Boolean(player.locked),
-          cannot: Array.isArray(player.cannot) ? player.cannot : [],
-          club: String(player.club || "").trim(),
-        }))
-      : [],
-  }));
-}
-
-function buildStoragePayload(teams, teamCount) {
-  return {
-    expiresAt: Date.now(),
-    teamCount,
-    teams,
-  };
-}
-
-function getRoundStorageKey(baseKey, auth) {
-  const username =
-    auth?.loggedIn && auth?.username ? String(auth.username).trim() : "guest";
-  return `${baseKey}-${username}`;
-}
-
-function readStorageWithTtl(key, ttlMs, language = "en") {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw);
-    if (!parsed?.expiresAt || !parsed?.teams) {
-      localStorage.removeItem(key);
-      return null;
-    }
-
-    if (Date.now() - parsed.expiresAt > ttlMs) {
-      localStorage.removeItem(key);
-      return null;
-    }
-
-    return {
-      teams: normalizeTeams(parsed.teams, language),
-      teamCount: Number(parsed.teamCount) || 2,
-    };
-  } catch (error) {
-    console.error("Could not read storage:", error);
-    localStorage.removeItem(key);
-    return null;
-  }
 }
 
 function createRoundRobinSchedule(teamNames) {
@@ -1034,43 +413,6 @@ function buildBalancedMatchRounds(teamNames, requestedCourtCount = 2) {
   });
 }
 
-function getSkillOptions(scale) {
-  const parsedScale = Number(scale) || 5;
-  const maxScale = Math.max(1, parsedScale);
-  return Array.from({ length: maxScale }, (_, index) => index + 1);
-}
-
-function getSkillStyle(skill, skillView, skillScale) {
-  const value = Number(skill) || 1;
-  const maxScale = Math.max(1, Number(skillScale) || 5);
-  const normalized = Math.max(
-    0,
-    Math.min(1, (value - 1) / Math.max(maxScale - 1, 1))
-  );
-
-  if (skillView === "colors") {
-    if (normalized <= 0.2) {
-      return { background: "#dc2626", color: "#fff", text: "" };
-    }
-    if (normalized <= 0.4) {
-      return { background: "#f97316", color: "#fff", text: "" };
-    }
-    if (normalized <= 0.6) {
-      return { background: "#eab308", color: "#111827", text: "" };
-    }
-    if (normalized <= 0.8) {
-      return { background: "#22c55e", color: "#fff", text: "" };
-    }
-    return { background: "#2563eb", color: "#fff", text: "" };
-  }
-
-  return {
-    background: "#111827",
-    color: "#fff",
-    text: String(value),
-  };
-}
-
 function buildQueryString(params) {
   const searchParams = new URLSearchParams();
 
@@ -1080,6 +422,62 @@ function buildQueryString(params) {
   });
 
   return searchParams.toString();
+}
+
+function getDedupedPublicHeroTextLines(values) {
+  const seen = new Set();
+
+  return values
+    .flatMap((value) => (Array.isArray(value) ? value : [value]))
+    .flatMap((value) => String(value || "").split(/\r?\n/))
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .filter((value) => {
+      const normalized = value.replace(/\s+/g, " ").toLowerCase();
+      if (seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+}
+
+function getSelectedPublicClass(tournament, selectedClassId, fallbackClass = null) {
+  const safeSelectedId = String(
+    selectedClassId || fallbackClass?.id || ""
+  ).trim();
+  const rawClass = Array.isArray(tournament?.series)
+    ? tournament.series.find(
+        (series) => String(series.id || "").trim() === safeSelectedId
+      )
+    : null;
+
+  if (!rawClass && !fallbackClass) return null;
+
+  return {
+    ...(fallbackClass || {}),
+    ...(rawClass || {}),
+  };
+}
+
+function getPublicClassHeroText(tournament, selectedClass) {
+  const classTextLines = getDedupedPublicHeroTextLines([
+    selectedClass?.publicSummary,
+    selectedClass?.promotionText,
+    selectedClass?.publicPromotionText,
+    selectedClass?.publicNotes,
+    selectedClass?.classSummary,
+    selectedClass?.classInfo,
+    selectedClass?.summary,
+    selectedClass?.description,
+    selectedClass?.rules,
+    selectedClass?.notes,
+  ]);
+
+  if (classTextLines.length > 0) return classTextLines;
+
+  return getDedupedPublicHeroTextLines([
+    tournament?.rules,
+    getTournamentPublicSummary(tournament),
+  ]);
 }
 
 function getDefaultAuth() {
@@ -1168,217 +566,6 @@ function getDefaultTournamentConfig() {
       thirdPlace: null,
     },
     matches: [],
-  };
-}
-
-function getDefaultPublicTheme() {
-  return {
-    ...PUBLIC_THEME_PRESETS["classic-green"],
-    preset: "classic-green",
-    mode: "preset",
-  };
-}
-
-function getDefaultPublicLiveTheme() {
-  return {
-    ...PUBLIC_THEME_PRESETS["clean-white"],
-    preset: "clean-white",
-    mode: "preset",
-  };
-}
-
-function isValidHexColor(value) {
-  return /^#[0-9a-f]{6}$/i.test(String(value || "").trim());
-}
-
-function normalizePublicTheme(theme) {
-  const defaultTheme = getDefaultPublicTheme();
-  const incomingTheme = theme || {};
-  const themeWithAliases = {
-    ...incomingTheme,
-    background: incomingTheme.background || incomingTheme.pageBg,
-    surface: incomingTheme.surface || incomingTheme.cardBg,
-    panel: incomingTheme.panel || incomingTheme.cardBg,
-  };
-  const presetKey = String(themeWithAliases?.preset || defaultTheme.preset).trim();
-  const preset = PUBLIC_THEME_PRESETS[presetKey] || PUBLIC_THEME_PRESETS["classic-green"];
-  const merged = {
-    ...defaultTheme,
-    ...preset,
-    ...themeWithAliases,
-    preset: PUBLIC_THEME_PRESETS[presetKey] ? presetKey : defaultTheme.preset,
-  };
-
-  [
-    "background",
-    "surface",
-    "panel",
-    "primary",
-    "accent",
-    "text",
-    "mutedText",
-    "border",
-  ].forEach((field) => {
-    if (!isValidHexColor(merged[field])) {
-      merged[field] = defaultTheme[field];
-    }
-  });
-
-  return {
-    ...merged,
-    pageBg: merged.background,
-    cardBg: merged.panel,
-  };
-}
-
-function normalizePublicLiveTheme(theme) {
-  const defaultTheme = getDefaultPublicLiveTheme();
-  const incomingTheme = theme || {};
-  const themeWithAliases = {
-    ...incomingTheme,
-    background: incomingTheme.background || incomingTheme.pageBg,
-    surface: incomingTheme.surface || incomingTheme.cardBg,
-    panel: incomingTheme.panel || incomingTheme.cardBg,
-  };
-  const presetKey = String(themeWithAliases?.preset || defaultTheme.preset).trim();
-  const preset = PUBLIC_THEME_PRESETS[presetKey] || PUBLIC_THEME_PRESETS["clean-white"];
-  const merged = {
-    ...defaultTheme,
-    ...preset,
-    ...themeWithAliases,
-    preset: PUBLIC_THEME_PRESETS[presetKey] ? presetKey : defaultTheme.preset,
-  };
-
-  [
-    "background",
-    "surface",
-    "panel",
-    "primary",
-    "accent",
-    "text",
-    "mutedText",
-    "border",
-  ].forEach((field) => {
-    if (!isValidHexColor(merged[field])) {
-      merged[field] = defaultTheme[field];
-    }
-  });
-
-  return {
-    ...merged,
-    pageBg: merged.background,
-    cardBg: merged.panel,
-  };
-}
-
-function getPublicThemeStyle(theme) {
-  const safeTheme = normalizePublicTheme(theme);
-
-  return {
-    "--public-bg": safeTheme.background,
-    "--public-surface": safeTheme.surface,
-    "--public-panel": safeTheme.panel,
-    "--public-primary": safeTheme.primary,
-    "--public-accent": safeTheme.accent,
-    "--public-text": safeTheme.text,
-    "--public-muted": safeTheme.mutedText,
-    "--public-border": safeTheme.border,
-  };
-}
-
-function hexToRgba(hex, alpha = 1) {
-  const safeHex = String(hex || "").trim();
-  if (!isValidHexColor(safeHex)) return `rgba(15,23,42,${alpha})`;
-
-  const normalized = safeHex.slice(1);
-  const r = parseInt(normalized.slice(0, 2), 16);
-  const g = parseInt(normalized.slice(2, 4), 16);
-  const b = parseInt(normalized.slice(4, 6), 16);
-
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
-function getTournamentPublicCardTheme(tournament) {
-  return normalizePublicTheme({
-    background: tournament?.themeColor,
-    primary: tournament?.themeColor,
-    accent: tournament?.accentColor,
-    ...(tournament?.publicTheme || {}),
-  });
-}
-
-function getTournamentPublicLogoUrl(tournament) {
-  return String(tournament?.publicLogoUrl || "").trim();
-}
-
-function getTournamentPublicCardImageUrl(tournament) {
-  return String(
-    tournament?.publicCardBackgroundUrl ||
-      tournament?.publicCardImageUrl ||
-      tournament?.posterImageUrl ||
-      ""
-  ).trim();
-}
-
-function getTournamentPublicOrganizerName(tournament) {
-  return String(
-    tournament?.organizerName || tournament?.publicOrganizerName || ""
-  ).trim();
-}
-
-function getTournamentPublicLiveTheme(tournament) {
-  const storedTheme = tournament?.publicLiveTheme || {};
-  const cardColor = tournament?.publicLiveCardColor || storedTheme.panel;
-
-  return normalizePublicLiveTheme({
-    ...storedTheme,
-    background:
-      tournament?.publicLivePageBackground ||
-      storedTheme.background ||
-      storedTheme.pageBg,
-    surface: cardColor || storedTheme.surface || storedTheme.cardBg,
-    panel: cardColor || storedTheme.panel || storedTheme.cardBg,
-    primary: tournament?.publicLivePrimaryColor || storedTheme.primary,
-    accent: tournament?.publicLiveAccentColor || storedTheme.accent,
-    text: tournament?.publicLiveTextColor || storedTheme.text,
-  });
-}
-
-function getTournamentPublicLiveLogoUrl(tournament) {
-  return String(tournament?.publicLiveLogoUrl || "").trim();
-}
-
-function getTournamentPublicLiveBackgroundUrl(tournament) {
-  return String(tournament?.publicLiveBackgroundUrl || "").trim();
-}
-
-function getPublicCardThemeStyle(theme, imageUrl = "") {
-  const safeTheme = normalizePublicTheme(theme);
-  const backgroundLayer = imageUrl
-    ? `linear-gradient(135deg, ${hexToRgba(safeTheme.background, 0.90)}, ${hexToRgba(
-        safeTheme.panel,
-        0.84
-      )}), url(${imageUrl})`
-    : `radial-gradient(circle at 16% 8%, ${hexToRgba(
-        safeTheme.accent,
-        0.18
-      )}, transparent 34%), linear-gradient(145deg, ${safeTheme.background}, ${
-        safeTheme.panel
-      } 74%)`;
-
-  return {
-    "--card-bg": safeTheme.background,
-    "--card-panel": safeTheme.panel,
-    "--card-primary": safeTheme.primary,
-    "--card-accent": safeTheme.accent,
-    "--card-text": safeTheme.text,
-    "--card-muted": safeTheme.mutedText,
-    "--card-border": safeTheme.border,
-    background: backgroundLayer,
-    backgroundSize: imageUrl ? "cover" : undefined,
-    backgroundPosition: imageUrl ? "center" : undefined,
-    borderColor: safeTheme.border,
-    color: safeTheme.text,
   };
 }
 
@@ -2182,39 +1369,6 @@ function shouldShowTournamentRoundLabels(tournament) {
   );
 }
 
-function getTournamentGroupCode(index) {
-  return String.fromCharCode(65 + index);
-}
-
-function getTournamentGroupColor(groupCodeOrIndex) {
-  const raw = String(groupCodeOrIndex ?? "A").trim().toUpperCase();
-  const index = Number.isFinite(Number(groupCodeOrIndex))
-    ? Number(groupCodeOrIndex)
-    : Math.max(0, raw.charCodeAt(0) - 65);
-
-  return TOURNAMENT_GROUP_COLORS[
-    ((index % TOURNAMENT_GROUP_COLORS.length) +
-      TOURNAMENT_GROUP_COLORS.length) %
-      TOURNAMENT_GROUP_COLORS.length
-  ];
-}
-
-function getTournamentSourceGroupCode(source) {
-  const match = String(source || "").trim().match(/^([A-Z])\d+$/);
-  return match ? match[1] : "";
-}
-
-function buildGroupPositionSource(groupCode, position) {
-  return `${groupCode}${position}`;
-}
-
-function displayPlayerName(player) {
-  const club = String(player?.club || "").trim();
-  const name = String(player?.name || "").trim();
-  if (!club) return name;
-  return `${club} ${name}`;
-}
-
 export default function App() {
   const [currentSearch, setCurrentSearch] = useState(() =>
     typeof window === "undefined" ? "" : window.location.search
@@ -2291,6 +1445,7 @@ export default function App() {
   const [trainerUsers, setTrainerUsers] = useState([]);
   const [trainerPasswords, setTrainerPasswords] = useState({});
   const [trainerActionMessage, setTrainerActionMessage] = useState("");
+  const [selectedTrainerUsername, setSelectedTrainerUsername] = useState("");
 
   const [mobileMoveSelection, setMobileMoveSelection] = useState(null);
 
@@ -3213,12 +2368,61 @@ export default function App() {
   const currentUserIsAdmin = isAdminUser(currentUser);
   const hasTeamBuilderAccess = canUseTeamBuilder(currentUser);
   const hasTournamentAccess = canUseTournaments(currentUser);
-  const hasAnyModuleAccess = hasTeamBuilderAccess || hasTournamentAccess;
+  const hasPlayerHubAccess = Boolean(auth.loggedIn);
+  const hasAnyModuleAccess =
+    hasTeamBuilderAccess || hasTournamentAccess || hasPlayerHubAccess;
+  const playerHubTournamentOptions = useMemo(() => {
+    const optionsById = new Map();
+    const addTournamentOption = (tournament) => {
+      if (!tournament) return;
+      const id = String(tournament.id || tournament.tournamentId || "").trim();
+      if (!id || optionsById.has(id)) return;
+      optionsById.set(id, {
+        id,
+        name:
+          tournament.publicTitle ||
+          tournament.name ||
+          tournament.title ||
+          "Tournament",
+        startDate: tournament.startDate || tournament.eventDate || "",
+        location: [tournament.city, tournament.country]
+          .map((part) => String(part || "").trim())
+          .filter(Boolean)
+          .join(", "),
+      });
+    };
+
+    publicTournaments.forEach(addTournamentOption);
+    filterTournamentsForUsername(tournaments, auth.username).forEach(
+      addTournamentOption
+    );
+
+    return Array.from(optionsById.values()).sort((a, b) => {
+      const aTime = Date.parse(a.startDate || "") || 9999999999999;
+      const bTime = Date.parse(b.startDate || "") || 9999999999999;
+      return aTime - bTime || String(a.name).localeCompare(String(b.name));
+    });
+  }, [auth.username, publicTournaments, tournaments]);
 
   const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginMessage, setLoginMessage] = useState("");
+  const [showPlayerRegistration, setShowPlayerRegistration] = useState(false);
+  const [playerRegistration, setPlayerRegistration] = useState({
+    username: "",
+    firstName: "",
+    lastName: "",
+    email: "",
+    phone: "",
+    password: "",
+    country: "",
+    freeAgent: false,
+  });
+  const [playerRegistrationLoading, setPlayerRegistrationLoading] =
+    useState(false);
+  const [playerRegistrationMessage, setPlayerRegistrationMessage] =
+    useState("");
 
   const [skillView, setSkillView] = useState(() => {
     if (typeof window === "undefined") return "numbers";
@@ -3508,6 +2712,703 @@ export default function App() {
       }
     },
     [auth.loggedIn, auth.password, auth.username]
+  );
+
+  async function readPlayerHubApiResponse(response, action = "Player Hub action") {
+    const text = await response.text();
+    let data = {};
+
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (error) {
+      throw new Error("Player profile backend did not return JSON.");
+    }
+
+    if (!response.ok || data?.success === false) {
+      throw new Error(
+        data?.message ||
+          data?.error ||
+          `${action} failed in the Player Hub backend.`
+      );
+    }
+
+    return data;
+  }
+
+  const callPlayerHubBackend = useCallback(
+    async (action, payload = {}) => {
+      if (!auth.loggedIn || !auth.username || !auth.password) {
+        throw new Error("Login required");
+      }
+
+      const body = JSON.stringify({
+        action,
+        username: auth.username,
+        password: auth.password,
+        ...payload,
+      });
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const response = await fetch(`${API}?_ts=${Date.now()}`, {
+            method: "POST",
+            cache: "no-store",
+            headers: {
+              "Content-Type": "text/plain;charset=utf-8",
+            },
+            body,
+          });
+
+          return await readPlayerHubApiResponse(response, action);
+        } catch (error) {
+          if (
+            error instanceof TypeError ||
+            String(error?.message || "").toLowerCase().includes("failed to fetch")
+          ) {
+            if (attempt === 0) {
+              await new Promise((resolve) => setTimeout(resolve, 650));
+              continue;
+            }
+          }
+
+          throw error;
+        }
+      }
+
+      throw new Error(
+        `${action}: Could not reach the Player Hub backend. Check the Apps Script deployment and try again.`
+      );
+    },
+    [auth.loggedIn, auth.password, auth.username]
+  );
+
+  const loadMyPlayerProfile = useCallback(async () => {
+    const data = await callPlayerHubBackend("getMyPlayerProfile");
+    return data?.profile || null;
+  }, [callPlayerHubBackend]);
+
+  const loadPlayerHubSnapshot = useCallback(async () => {
+    const data = await callPlayerHubBackend("getPlayerHubSnapshot");
+    return data || null;
+  }, [callPlayerHubBackend]);
+
+  const loadEventComments = useCallback(
+    async (planId) => {
+      const data = await callPlayerHubBackend("listEventComments", { planId });
+      return Array.isArray(data?.comments) ? data.comments : [];
+    },
+    [callPlayerHubBackend]
+  );
+
+  const addEventComment = useCallback(
+    async (planId, message) => {
+      const data = await callPlayerHubBackend("addEventComment", {
+        planId,
+        message,
+      });
+      return {
+        comment: data?.comment || null,
+        comments: Array.isArray(data?.comments) ? data.comments : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const saveMyPlayerProfile = useCallback(
+    async (profile) => {
+      const data = await callPlayerHubBackend("saveMyPlayerProfile", {
+        profile,
+      });
+      return data?.profile || null;
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadPlayerProfilesForAdmin = useCallback(async () => {
+    if (!currentUserIsAdmin) return [];
+    const data = await callPlayerHubBackend("listPlayerProfilesForAdmin");
+    return Array.isArray(data?.profiles) ? data.profiles : [];
+  }, [callPlayerHubBackend, currentUserIsAdmin]);
+
+  const updatePlayerProfileAdminStatus = useCallback(
+    async (targetUsername, patch) => {
+      if (!currentUserIsAdmin) {
+        throw new Error("Admin access required");
+      }
+
+      const data = await callPlayerHubBackend("updatePlayerProfileAdminStatus", {
+        targetUsername,
+        ...(patch || {}),
+      });
+      return data?.profile || null;
+    },
+    [callPlayerHubBackend, currentUserIsAdmin]
+  );
+
+  const resetPlayerPasswordForAdmin = useCallback(
+    async (targetUsername, newPassword) => {
+      if (!currentUserIsAdmin) {
+        throw new Error("Admin access required");
+      }
+
+      const data = await callPlayerHubBackend("resetPlayerPassword", {
+        targetUsername,
+        newPassword,
+      });
+      return data?.message || "Player password reset.";
+    },
+    [callPlayerHubBackend, currentUserIsAdmin]
+  );
+
+  const loadClubTeams = useCallback(async () => {
+    const data = await callPlayerHubBackend("listClubTeams");
+    return Array.isArray(data?.teams) ? data.teams : [];
+  }, [callPlayerHubBackend]);
+
+  const loadClubTeamsAdmin = useCallback(async () => {
+    if (!currentUserIsAdmin) return [];
+    const data = await callPlayerHubBackend("listClubTeamsAdmin");
+    return Array.isArray(data?.teams) ? data.teams : [];
+  }, [callPlayerHubBackend, currentUserIsAdmin]);
+
+  const saveClubTeamAdmin = useCallback(
+    async (clubTeam) => {
+      if (!currentUserIsAdmin) {
+        throw new Error("Admin access required");
+      }
+
+      const data = await callPlayerHubBackend("saveClubTeamAdmin", {
+        clubTeam,
+      });
+      return data?.team || null;
+    },
+    [callPlayerHubBackend, currentUserIsAdmin]
+  );
+
+  const updateClubTeamActiveAdmin = useCallback(
+    async (teamId, active) => {
+      if (!currentUserIsAdmin) {
+        throw new Error("Admin access required");
+      }
+
+      const data = await callPlayerHubBackend("deactivateClubTeamAdmin", {
+        teamId,
+        active,
+      });
+      return data?.team || null;
+    },
+    [callPlayerHubBackend, currentUserIsAdmin]
+  );
+
+  const requestTeamIdentityChange = useCallback(
+    async (request) => {
+      const data = await callPlayerHubBackend("requestTeamIdentityChange", {
+        request,
+      });
+      return data?.request || null;
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadTeamIdentityChangeRequests = useCallback(async () => {
+    const data = await callPlayerHubBackend("listTeamIdentityChangeRequests");
+    return Array.isArray(data?.requests) ? data.requests : [];
+  }, [callPlayerHubBackend]);
+
+  const reviewTeamIdentityChangeRequest = useCallback(
+    async (requestId, decision, adminNote) => {
+      if (!currentUserIsAdmin) {
+        throw new Error("Admin access required");
+      }
+
+      const data = await callPlayerHubBackend("reviewTeamIdentityChangeRequest", {
+        requestId,
+        decision,
+        adminNote,
+      });
+      return data?.request || null;
+    },
+    [callPlayerHubBackend, currentUserIsAdmin]
+  );
+
+  const createAccessRequest = useCallback(
+    async (request) => {
+      const data = await callPlayerHubBackend("createAccessRequest", request);
+      return data?.request || null;
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadMyAccessRequests = useCallback(async () => {
+    const data = await callPlayerHubBackend("listMyAccessRequests");
+    return Array.isArray(data?.requests) ? data.requests : [];
+  }, [callPlayerHubBackend]);
+
+  const loadAccessRequestsAdmin = useCallback(async () => {
+    if (!currentUserIsAdmin) return [];
+    const data = await callPlayerHubBackend("listAccessRequestsAdmin");
+    return Array.isArray(data?.requests) ? data.requests : [];
+  }, [callPlayerHubBackend, currentUserIsAdmin]);
+
+  const reviewAccessRequestAdmin = useCallback(
+    async (requestId, status, adminNote) => {
+      if (!currentUserIsAdmin) {
+        throw new Error("Admin access required");
+      }
+
+      const data = await callPlayerHubBackend("reviewAccessRequestAdmin", {
+        requestId,
+        status,
+        adminNote,
+      });
+      await loadTrainerUsers();
+      return data?.request || null;
+    },
+    [callPlayerHubBackend, currentUserIsAdmin, loadTrainerUsers]
+  );
+
+  const loadMyTeamProfile = useCallback(async () => {
+    const data = await callPlayerHubBackend("getMyTeamProfile");
+    return {
+      canManageTeamProfile: !!data?.canManageTeamProfile,
+      message: data?.message || "",
+      teamProfile: data?.teamProfile || null,
+      needs: Array.isArray(data?.needs) ? data.needs : [],
+    };
+  }, [callPlayerHubBackend]);
+
+  const saveMyTeamProfile = useCallback(
+    async (teamProfile) => {
+      const data = await callPlayerHubBackend("saveMyTeamProfile", {
+        teamProfile,
+      });
+      return {
+        teamProfile: data?.teamProfile || null,
+        needs: Array.isArray(data?.needs) ? data.needs : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const createOrUpdateTeamNeed = useCallback(
+    async (need) => {
+      const data = await callPlayerHubBackend("createOrUpdateTeamNeed", {
+        need,
+      });
+      return {
+        need: data?.need || null,
+        needs: Array.isArray(data?.needs) ? data.needs : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const closeTeamNeed = useCallback(
+    async (needId) => {
+      const data = await callPlayerHubBackend("closeTeamNeed", {
+        needId,
+      });
+      return data?.need || null;
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadVisibleTeamNeeds = useCallback(async () => {
+    const data = await callPlayerHubBackend("listVisibleTeamNeeds");
+    return Array.isArray(data?.needs) ? data.needs : [];
+  }, [callPlayerHubBackend]);
+
+  const loadTeamProfilesAdmin = useCallback(async () => {
+    if (!currentUserIsAdmin) return [];
+    const data = await callPlayerHubBackend("listTeamProfilesAdmin");
+    return Array.isArray(data?.teamProfiles) ? data.teamProfiles : [];
+  }, [callPlayerHubBackend, currentUserIsAdmin]);
+
+  const updateTeamProfileAdmin = useCallback(
+    async (teamProfileId, patch) => {
+      if (!currentUserIsAdmin) {
+        throw new Error("Admin access required");
+      }
+
+      const data = await callPlayerHubBackend("updateTeamProfileAdmin", {
+        teamProfileId,
+        ...(patch || {}),
+      });
+      return data?.teamProfile || null;
+    },
+    [callPlayerHubBackend, currentUserIsAdmin]
+  );
+
+  const createTeamNeedInterest = useCallback(
+    async (needId, message) => {
+      const data = await callPlayerHubBackend("createTeamNeedInterest", {
+        needId,
+        message,
+      });
+      return data?.interest || null;
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadMyTeamNeedInterests = useCallback(async () => {
+    const data = await callPlayerHubBackend("listMyTeamNeedInterests");
+    return Array.isArray(data?.interests) ? data.interests : [];
+  }, [callPlayerHubBackend]);
+
+  const loadTeamNeedInterestsForCaptain = useCallback(async (needId = "") => {
+    const data = await callPlayerHubBackend("listTeamNeedInterestsForCaptain", {
+      needId,
+    });
+    return Array.isArray(data?.interests) ? data.interests : [];
+  }, [callPlayerHubBackend]);
+
+  const reviewTeamNeedInterest = useCallback(
+    async (interestId, status) => {
+      const data = await callPlayerHubBackend("reviewTeamNeedInterest", {
+        interestId,
+        status,
+      });
+      return data?.interest || null;
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadTeamNeedInterestsAdmin = useCallback(async () => {
+    if (!currentUserIsAdmin) return [];
+    const data = await callPlayerHubBackend("listTeamNeedInterestsAdmin");
+    return Array.isArray(data?.interests) ? data.interests : [];
+  }, [callPlayerHubBackend, currentUserIsAdmin]);
+
+  const addTeamMemberFromInterest = useCallback(
+    async (interestId) => {
+      const data = await callPlayerHubBackend("addTeamMemberFromInterest", {
+        interestId,
+      });
+      return {
+        member: data?.member || null,
+        members: Array.isArray(data?.members) ? data.members : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadMyTeamMembersForCaptain = useCallback(async () => {
+    const data = await callPlayerHubBackend("listMyTeamMembersForCaptain");
+    return Array.isArray(data?.members) ? data.members : [];
+  }, [callPlayerHubBackend]);
+
+  const loadMyConfirmedTeamsForPlayer = useCallback(async () => {
+    const data = await callPlayerHubBackend("listMyConfirmedTeamsForPlayer");
+    return Array.isArray(data?.teams) ? data.teams : [];
+  }, [callPlayerHubBackend]);
+
+  const removeTeamMember = useCallback(
+    async (teamMemberId, memberStatus) => {
+      const data = await callPlayerHubBackend("removeTeamMember", {
+        teamMemberId,
+        memberStatus,
+      });
+      return {
+        member: data?.member || null,
+        members: Array.isArray(data?.members) ? data.members : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadTeamMembersAdmin = useCallback(async () => {
+    if (!currentUserIsAdmin) return [];
+    const data = await callPlayerHubBackend("listTeamMembersAdmin");
+    return Array.isArray(data?.members) ? data.members : [];
+  }, [callPlayerHubBackend, currentUserIsAdmin]);
+
+  const createOrUpdateTeamMembershipRequest = useCallback(
+    async (clubTeamId) => {
+      const data = await callPlayerHubBackend(
+        "createOrUpdateTeamMembershipRequest",
+        { clubTeamId }
+      );
+      return {
+        request: data?.request || null,
+        requests: Array.isArray(data?.requests) ? data.requests : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadMyTeamMembershipRequests = useCallback(async () => {
+    const data = await callPlayerHubBackend("listMyTeamMembershipRequests");
+    return Array.isArray(data?.requests) ? data.requests : [];
+  }, [callPlayerHubBackend]);
+
+  const loadMembershipRequestsForCaptain = useCallback(async () => {
+    const data = await callPlayerHubBackend("listMembershipRequestsForCaptain");
+    return Array.isArray(data?.requests) ? data.requests : [];
+  }, [callPlayerHubBackend]);
+
+  const reviewTeamMembershipRequest = useCallback(
+    async (requestId, status, reviewNote = "") => {
+      const data = await callPlayerHubBackend("reviewTeamMembershipRequest", {
+        requestId,
+        status,
+        reviewNote,
+      });
+      return {
+        request: data?.request || null,
+        member: data?.member || null,
+        requests: Array.isArray(data?.requests) ? data.requests : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const cancelMyTeamMembershipRequest = useCallback(
+    async (requestId) => {
+      const data = await callPlayerHubBackend("cancelMyTeamMembershipRequest", {
+        requestId,
+      });
+      return {
+        request: data?.request || null,
+        requests: Array.isArray(data?.requests) ? data.requests : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadTeamMembershipRequestsAdmin = useCallback(async () => {
+    if (!currentUserIsAdmin) return [];
+    const data = await callPlayerHubBackend("listTeamMembershipRequestsAdmin");
+    return Array.isArray(data?.requests) ? data.requests : [];
+  }, [callPlayerHubBackend, currentUserIsAdmin]);
+
+  const createTournamentTeamPlan = useCallback(
+    async (plan) => {
+      const data = await callPlayerHubBackend("createTournamentTeamPlan", plan);
+      return {
+        plan: data?.plan || null,
+        plans: Array.isArray(data?.plans) ? data.plans : [],
+        availability: Array.isArray(data?.availability)
+          ? data.availability
+          : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadMyTournamentTeamPlansForCaptain = useCallback(async () => {
+    const data = await callPlayerHubBackend(
+      "listMyTournamentTeamPlansForCaptain"
+    );
+    return Array.isArray(data?.plans) ? data.plans : [];
+  }, [callPlayerHubBackend]);
+
+  const loadMyTournamentAvailabilityForPlayer = useCallback(async () => {
+    const data = await callPlayerHubBackend(
+      "listMyTournamentAvailabilityForPlayer"
+    );
+    return Array.isArray(data?.availability) ? data.availability : [];
+  }, [callPlayerHubBackend]);
+
+  const loadMyTournamentSquadPlanningForPlayer = useCallback(async () => {
+    try {
+      const data = await callPlayerHubBackend(
+        "listMyTournamentSquadPlanningForPlayer"
+      );
+      return Array.isArray(data?.planning) ? data.planning : [];
+    } catch (error) {
+      return [];
+    }
+  }, [callPlayerHubBackend]);
+
+  const updateTournamentAvailabilityResponse = useCallback(
+    async (availabilityId, responseStatus, preferredSquad, playerNote) => {
+      const data = await callPlayerHubBackend(
+        "updateTournamentAvailabilityResponse",
+        {
+          availabilityId,
+          responseStatus,
+          preferredSquad,
+          playerNote,
+        }
+      );
+      return data?.availability || null;
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadTournamentAvailabilityForCaptain = useCallback(
+    async (planId) => {
+      const data = await callPlayerHubBackend(
+        "listTournamentAvailabilityForCaptain",
+        { planId }
+      );
+      return {
+        plan: data?.plan || null,
+        availability: Array.isArray(data?.availability)
+          ? data.availability
+          : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const updateTournamentPlanStatus = useCallback(
+    async (planId, planStatus) => {
+      const data = await callPlayerHubBackend("updateTournamentPlanStatus", {
+        planId,
+        planStatus,
+      });
+      return data?.plan || null;
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadTournamentSquadPlanningForCaptain = useCallback(
+    async (planId) => {
+      const data = await callPlayerHubBackend(
+        "listTournamentSquadPlanningForCaptain",
+        { planId }
+      );
+      return {
+        plan: data?.plan || null,
+        availability: Array.isArray(data?.availability)
+          ? data.availability
+          : [],
+        planning: Array.isArray(data?.planning) ? data.planning : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const assignPlayerToSquad = useCallback(
+    async (planId, playerUsername, assignedSquad) => {
+      const data = await callPlayerHubBackend("assignPlayerToSquad", {
+        planId,
+        playerUsername,
+        assignedSquad,
+      });
+      return {
+        plan: data?.plan || null,
+        availability: Array.isArray(data?.availability)
+          ? data.availability
+          : [],
+        planning: Array.isArray(data?.planning) ? data.planning : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const createOrUpdateRosterDraftFromSquadPlanning = useCallback(
+    async (planId) => {
+      const data = await callPlayerHubBackend(
+        "createOrUpdateRosterDraftFromSquadPlanning",
+        { planId }
+      );
+      return {
+        plan: data?.plan || null,
+        roster: data?.roster || null,
+        players: Array.isArray(data?.players) ? data.players : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadRosterDraftForCaptain = useCallback(
+    async (planId) => {
+      const data = await callPlayerHubBackend("listRosterDraftForCaptain", {
+        planId,
+      });
+      return {
+        plan: data?.plan || null,
+        roster: data?.roster || null,
+        players: Array.isArray(data?.players) ? data.players : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const submitRosterDraft = useCallback(
+    async (planId) => {
+      const data = await callPlayerHubBackend("submitRosterDraft", { planId });
+      return {
+        plan: data?.plan || null,
+        roster: data?.roster || null,
+        players: Array.isArray(data?.players) ? data.players : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const cancelRosterDraft = useCallback(
+    async (planId) => {
+      const data = await callPlayerHubBackend("cancelRosterDraft", { planId });
+      return {
+        plan: data?.plan || null,
+        roster: data?.roster || null,
+        players: Array.isArray(data?.players) ? data.players : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const loadMyRosterStatusForPlayer = useCallback(async () => {
+    const data = await callPlayerHubBackend("listMyRosterStatusForPlayer");
+    return Array.isArray(data?.rosters) ? data.rosters : [];
+  }, [callPlayerHubBackend]);
+
+  const loadRosterDraftAdmin = useCallback(async () => {
+    if (!currentUserIsAdmin && !hasTournamentAccess) return [];
+    const data = await callPlayerHubBackend("listSubmittedRosterDraftsForReview");
+    return Array.isArray(data?.rosters) ? data.rosters : [];
+  }, [callPlayerHubBackend, currentUserIsAdmin, hasTournamentAccess]);
+
+  const reviewRosterDraft = useCallback(
+    async (draftId, decision, adminNote = "") => {
+      const data = await callPlayerHubBackend("reviewRosterDraft", {
+        draftId,
+        decision,
+        adminNote,
+      });
+      return {
+        roster: data?.roster || null,
+        players: Array.isArray(data?.players) ? data.players : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const lockOfficialRoster = useCallback(
+    async (draftId, adminNote = "") => {
+      const data = await callPlayerHubBackend("lockOfficialRoster", {
+        draftId,
+        adminNote,
+      });
+      return {
+        roster: data?.roster || null,
+        players: Array.isArray(data?.players) ? data.players : [],
+        officialPlayers: Array.isArray(data?.officialPlayers)
+          ? data.officialPlayers
+          : [],
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
+  const playerHubRosterReviewProps = useMemo(
+    () => ({
+      loadPlayerHubSnapshot,
+      loadEventComments,
+      addEventComment,
+      reviewRosterDraft,
+      lockOfficialRoster,
+    }),
+    [
+      loadPlayerHubSnapshot,
+      loadEventComments,
+      addEventComment,
+      reviewRosterDraft,
+      lockOfficialRoster,
+    ]
   );
 
   function normalizeTournamentApiList(data) {
@@ -8104,8 +8005,121 @@ export default function App() {
     void persistTournamentNow("saveTournament", newTournament);
   }
 
+  function updatePlayerRegistrationField(field, value) {
+    setPlayerRegistration((current) => ({
+      ...current,
+      [field]: field === "username" ? String(value || "").toLowerCase() : value,
+    }));
+  }
+
+  async function registerPlayerAccountFromLanding(event) {
+    event.preventDefault();
+
+    const username = String(playerRegistration.username || "")
+      .trim()
+      .toLowerCase();
+    const firstName = String(playerRegistration.firstName || "").trim();
+    const lastName = String(playerRegistration.lastName || "").trim();
+    const displayName = [firstName, lastName].filter(Boolean).join(" ");
+    const email = String(playerRegistration.email || "").trim().toLowerCase();
+    const password = String(playerRegistration.password || "").trim();
+
+    if (!firstName || !lastName) {
+      setPlayerRegistrationMessage("First name and last name are required.");
+      return;
+    }
+
+    if (!username) {
+      setPlayerRegistrationMessage("Username is required.");
+      return;
+    }
+
+    if (username.length < 4 || username.length > 20) {
+      setPlayerRegistrationMessage("Username must be 4–20 characters.");
+      return;
+    }
+
+    if (!/^[a-z]/.test(username)) {
+      setPlayerRegistrationMessage("Username must start with a letter.");
+      return;
+    }
+
+    if (!/^[a-z0-9._-]+$/.test(username)) {
+      setPlayerRegistrationMessage(
+        "Username can only use letters, numbers, dot, underscore or hyphen."
+      );
+      return;
+    }
+
+    if (!password) {
+      setPlayerRegistrationMessage("Password is required.");
+      return;
+    }
+
+    if (email && !email.includes("@")) {
+      setPlayerRegistrationMessage("Please enter a valid email address.");
+      return;
+    }
+
+    try {
+      setPlayerRegistrationLoading(true);
+      setPlayerRegistrationMessage("");
+      setLoginMessage("");
+
+      const response = await fetch(`${API}?_ts=${Date.now()}`, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "text/plain;charset=utf-8",
+        },
+        body: JSON.stringify({
+          action: "registerPlayerAccount",
+          username,
+          firstName,
+          lastName,
+          displayName,
+          email,
+          phone: playerRegistration.phone,
+          password,
+          country: playerRegistration.country,
+          freeAgent: playerRegistration.freeAgent,
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok || !data?.success) {
+        setPlayerRegistrationMessage(
+          data?.message || "Could not create player profile."
+        );
+        return;
+      }
+
+      const registeredUsername = data.username || username;
+      setLoginUsername(registeredUsername);
+      setLoginPassword("");
+      setShowPlayerRegistration(false);
+      setPlayerRegistration({
+        username: "",
+        firstName: "",
+        lastName: "",
+        email: "",
+        phone: "",
+        password: "",
+        country: "",
+        freeAgent: false,
+      });
+      setPlayerRegistrationMessage(
+        data.message || "Player profile created. You can now log in with your username."
+      );
+    } catch (error) {
+      setPlayerRegistrationMessage("Could not create player profile.");
+    } finally {
+      setPlayerRegistrationLoading(false);
+    }
+  }
+
   async function handleLogin() {
-    const username = loginUsername.trim();
+    const username = loginUsername.trim().toLowerCase();
     const password = loginPassword.trim();
 
     if (!username || !password) {
@@ -8210,6 +8224,7 @@ export default function App() {
     setTrainerUsers([]);
     setTrainerPasswords({});
     setTrainerActionMessage("");
+    setSelectedTrainerUsername("");
     setCreateTrainerMessage("");
     setCreatedTrainerInfo(null);
     window.clearTimeout(tournamentAutosaveTimerRef.current);
@@ -8703,7 +8718,7 @@ export default function App() {
       .catch((error) => {
         if (cancelled) return;
 
-        console.error("Could not load public tournament from backend:", error);
+        console.warn("Could not load public tournament from backend.");
         setPublicTournamentBackend(null);
         setPublicTournamentLoadStatus("error");
       });
@@ -8729,12 +8744,10 @@ export default function App() {
       })
       .catch((error) => {
         if (cancelled) return;
-        console.error("Could not load public tournaments:", error);
+        console.warn("Could not load public tournaments.");
         setPublicTournaments([]);
         setPublicTournamentsStatus("error");
-        setPublicTournamentsMessage(
-          error?.message || tournamentText.publicListingError
-        );
+        setPublicTournamentsMessage(tournamentText.publicListingError);
       });
 
     return () => {
@@ -8928,6 +8941,8 @@ export default function App() {
       setTeams([]);
       if (hasTournamentAccess) {
         setActiveTab("tournament");
+      } else if (auth.loggedIn) {
+        setActiveTab("player-hub");
       } else {
         setActiveTab("players");
       }
@@ -8974,17 +8989,24 @@ const savedRound = readStorageWithTtl(
 
     const isTeamBuilderTab = activeTab === "players" || activeTab === "teams";
     if (activeTab === "tournament" && !hasTournamentAccess) {
-      setActiveTab(hasTeamBuilderAccess && teams.length ? "teams" : "players");
+      setActiveTab(
+        hasTeamBuilderAccess
+          ? teams.length
+            ? "teams"
+            : "players"
+          : "player-hub"
+      );
       return;
     }
 
-    if (isTeamBuilderTab && !hasTeamBuilderAccess && hasTournamentAccess) {
-      setActiveTab("tournament");
+    if (isTeamBuilderTab && !hasTeamBuilderAccess) {
+      setActiveTab(hasTournamentAccess ? "tournament" : "player-hub");
     }
   }, [
     activeTab,
     auth.loggedIn,
     hasAnyModuleAccess,
+    hasPlayerHubAccess,
     hasTeamBuilderAccess,
     hasTournamentAccess,
     teams.length,
@@ -9793,6 +9815,38 @@ const savedRound = readStorageWithTtl(
     );
   }, [auth.loggedIn, auth.username, currentUser, visibleTrainerUsers]);
 
+  const adminManagedUsers = useMemo(() => {
+    const usersByName = new Map();
+
+    visibleTrainerUsers.forEach((trainer) => {
+      const key = getUserAccessStorageUsername(trainer.username);
+      if (key) usersByName.set(key, { ...trainer, archived: false });
+    });
+
+    archivedTrainerUsers.forEach((trainer) => {
+      const key = getUserAccessStorageUsername(trainer.username);
+      if (key) usersByName.set(key, { ...trainer, archived: true });
+    });
+
+    return Array.from(usersByName.values());
+  }, [visibleTrainerUsers, archivedTrainerUsers]);
+
+  const selectedAdminUser = useMemo(() => {
+    const selectedKey = getUserAccessStorageUsername(selectedTrainerUsername);
+    if (!selectedKey) return null;
+
+    return (
+      adminManagedUsers.find(
+        (user) => getUserAccessStorageUsername(user.username) === selectedKey
+      ) || null
+    );
+  }, [adminManagedUsers, selectedTrainerUsername]);
+
+  const selectedAdminUserAccess = useMemo(
+    () => normalizeUserAccess(selectedAdminUser || {}),
+    [selectedAdminUser]
+  );
+
   const availablePlayersForTeams = useMemo(() => {
     const currentTeamNames = new Set(
       teams.flatMap((team) => (team.players || []).map((player) => player.name))
@@ -9800,6 +9854,18 @@ const savedRound = readStorageWithTtl(
 
     return players.filter((player) => !currentTeamNames.has(player.name));
   }, [players, teams]);
+
+  useEffect(() => {
+    if (!selectedTrainerUsername) return;
+    const selectedKey = getUserAccessStorageUsername(selectedTrainerUsername);
+    const stillVisible = adminManagedUsers.some(
+      (user) => getUserAccessStorageUsername(user.username) === selectedKey
+    );
+
+    if (!stillVisible) {
+      setSelectedTrainerUsername("");
+    }
+  }, [adminManagedUsers, selectedTrainerUsername]);
 
   useEffect(() => {
     const totalRounds = activeScheduleRounds.length;
@@ -10924,6 +10990,9 @@ const savedRound = readStorageWithTtl(
           <aside
             style={{
               ...styles.landingLoginCard,
+              ...(showPlayerRegistration
+                ? styles.landingLoginCardRegisterMode
+                : {}),
               ...(isMobile ? styles.landingLoginCardStacked : {}),
             }}
           >
@@ -10931,45 +11000,206 @@ const savedRound = readStorageWithTtl(
               <div style={styles.landingLoginIcon}>MTP</div>
               <div>
                 <h2 style={styles.landingLoginTitle}>
-                  {t.landingOrganizerLogin}
+                  {showPlayerRegistration ? "Create player profile" : "Sign in"}
                 </h2>
-                <p style={styles.landingLoginHelper}>{t.landingLoginHelper}</p>
+                <p style={styles.landingLoginHelper}>
+                  {showPlayerRegistration
+                    ? "Create a private player account."
+                    : "For players, trainers and organizers."}
+                </p>
               </div>
             </div>
 
-            <form
+            {!showPlayerRegistration && (
+              <form
+                style={{
+                  ...styles.landingLoginForm,
+                  ...(isMobile ? styles.landingLoginFormStacked : {}),
+                }}
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  handleLogin();
+                }}
+              >
+                <input
+                  style={styles.landingInput}
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  placeholder="Username"
+                  autoComplete="username"
+                />
+                <input
+                  style={styles.landingInput}
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  placeholder={t.password}
+                  autoComplete="current-password"
+                />
+                <button
+                  type="submit"
+                  style={styles.landingLoginButton}
+                  disabled={loginLoading}
+                >
+                  {loginLoading ? t.loggingIn : t.login}
+                </button>
+              </form>
+            )}
+
+            <div
               style={{
-                ...styles.landingLoginForm,
-                ...(isMobile ? styles.landingLoginFormStacked : {}),
-              }}
-              onSubmit={(event) => {
-                event.preventDefault();
-                handleLogin();
+                ...styles.landingRegisterPanel,
+                ...(!showPlayerRegistration
+                  ? styles.landingRegisterPanelCompact
+                  : {}),
               }}
             >
-              <input
-                style={styles.landingInput}
-                value={loginUsername}
-                onChange={(e) => setLoginUsername(e.target.value)}
-                placeholder={t.username}
-                autoComplete="username"
-              />
-              <input
-                style={styles.landingInput}
-                type="password"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                placeholder={t.password}
-                autoComplete="current-password"
-              />
               <button
-                type="submit"
-                style={styles.landingLoginButton}
-                disabled={loginLoading}
+                type="button"
+                style={styles.landingRegisterToggle}
+                onClick={() => {
+                  setShowPlayerRegistration((current) => !current);
+                  setPlayerRegistrationMessage("");
+                }}
               >
-                {loginLoading ? t.loggingIn : t.login}
+                {showPlayerRegistration ? "Back to sign in" : "Create player profile"}
               </button>
-            </form>
+
+              {showPlayerRegistration && (
+                <form
+                  style={{
+                    ...styles.landingRegisterForm,
+                    ...(isMobile ? styles.landingRegisterFormStacked : {}),
+                  }}
+                  onSubmit={registerPlayerAccountFromLanding}
+                >
+                  <div style={styles.landingRegisterHeader}>
+                    <strong style={styles.landingRegisterTitle}>
+                      Create private player profile
+                    </strong>
+                    <span style={styles.landingRegisterHelper}>
+                      Player beta account only. No Team Builder, tournament or
+                      admin access.
+                    </span>
+                  </div>
+                  <input
+                    style={styles.landingInput}
+                    value={playerRegistration.username}
+                    onChange={(event) =>
+                      updatePlayerRegistrationField(
+                        "username",
+                        event.target.value
+                      )
+                    }
+                    placeholder="Desired username"
+                    autoComplete="username"
+                    required
+                  />
+                  <input
+                    style={styles.landingInput}
+                    value={playerRegistration.firstName}
+                    onChange={(event) =>
+                      updatePlayerRegistrationField(
+                        "firstName",
+                        event.target.value
+                      )
+                    }
+                    placeholder="First name"
+                    autoComplete="given-name"
+                    required
+                  />
+                  <input
+                    style={styles.landingInput}
+                    value={playerRegistration.lastName}
+                    onChange={(event) =>
+                      updatePlayerRegistrationField(
+                        "lastName",
+                        event.target.value
+                      )
+                    }
+                    placeholder="Last name"
+                    autoComplete="family-name"
+                    required
+                  />
+                  <input
+                    style={styles.landingInput}
+                    type="email"
+                    value={playerRegistration.email}
+                    onChange={(event) =>
+                      updatePlayerRegistrationField("email", event.target.value)
+                    }
+                    placeholder="Email optional"
+                    autoComplete="email"
+                  />
+                  <input
+                    style={styles.landingInput}
+                    type="password"
+                    value={playerRegistration.password}
+                    onChange={(event) =>
+                      updatePlayerRegistrationField(
+                        "password",
+                        event.target.value
+                      )
+                    }
+                    placeholder={t.password}
+                    autoComplete="new-password"
+                    required
+                  />
+                  <input
+                    style={styles.landingInput}
+                    value={playerRegistration.phone}
+                    onChange={(event) =>
+                      updatePlayerRegistrationField("phone", event.target.value)
+                    }
+                    placeholder="Phone optional"
+                    autoComplete="tel"
+                  />
+                  <input
+                    style={styles.landingInput}
+                    value={playerRegistration.country}
+                    onChange={(event) =>
+                      updatePlayerRegistrationField(
+                        "country",
+                        event.target.value
+                      )
+                    }
+                    placeholder="Country optional"
+                  />
+                  <label style={styles.landingRegisterCheck}>
+                    <input
+                      type="checkbox"
+                      checked={playerRegistration.freeAgent}
+                      onChange={(event) =>
+                        updatePlayerRegistrationField(
+                          "freeAgent",
+                          event.target.checked
+                        )
+                      }
+                    />
+                    <span>No fixed club/team</span>
+                  </label>
+                  <div style={styles.landingRegisterNote}>
+                    Creates a private player account only. Public visibility and
+                    captain/trainer/organizer access require approval later.
+                  </div>
+                  <button
+                    type="submit"
+                    style={styles.landingRegisterButton}
+                    disabled={playerRegistrationLoading}
+                  >
+                    {playerRegistrationLoading
+                      ? "Creating..."
+                      : "Create profile"}
+                  </button>
+                </form>
+              )}
+            </div>
+
+            {playerRegistrationMessage && (
+              <div style={styles.landingLoginMessage}>
+                {playerRegistrationMessage}
+              </div>
+            )}
 
             {loginMessage && (
               <div style={styles.landingLoginMessage}>{loginMessage}</div>
@@ -11011,6 +11241,46 @@ const savedRound = readStorageWithTtl(
     const hiddenCount = Math.max(safeBatches.length - limit, 0);
     const scheduleLeftColumnWidth = showRoundLabels ? 104 : 84;
     const scheduleCourtMinWidth = 140;
+    const hasPublicScheduleTheme = Boolean(publicScheduleView && publicTheme);
+    const publicScheduleBorderColor = hasPublicScheduleTheme
+      ? hexToRgba(publicTheme.border, 0.42)
+      : "";
+    const publicScheduleGridLineColor = hasPublicScheduleTheme
+      ? hexToRgba(publicTheme.border, 0.20)
+      : "";
+    const publicScheduleBaseCellBackground = hasPublicScheduleTheme
+      ? `linear-gradient(135deg, ${hexToRgba(
+          publicTheme.surface,
+          0.72
+        )}, ${hexToRgba(publicTheme.panel, 0.96)})`
+      : "";
+    const publicScheduleHeaderBackground = hasPublicScheduleTheme
+      ? `linear-gradient(135deg, ${hexToRgba(
+          publicTheme.surface,
+          0.90
+        )}, ${hexToRgba(publicTheme.panel, 0.96)})`
+      : "";
+    const publicScheduleOpenCellStyle = hasPublicScheduleTheme
+      ? {
+          background: `linear-gradient(135deg, ${hexToRgba(
+            publicTheme.surface,
+            0.54
+          )}, ${hexToRgba(publicTheme.panel, 0.86)} 76%)`,
+          borderLeft: `4px solid ${hexToRgba(publicTheme.border, 0.24)}`,
+          color: publicTheme.mutedText,
+        }
+      : {};
+    const publicScheduleBlockedCellStyle = hasPublicScheduleTheme
+      ? {
+          background: `linear-gradient(135deg, ${hexToRgba(
+            publicTheme.surface,
+            0.58
+          )}, ${hexToRgba(publicTheme.panel, 0.88)} 76%)`,
+          borderColor: hexToRgba(publicTheme.border, 0.30),
+          borderLeft: `4px solid ${hexToRgba(publicTheme.border, 0.30)}`,
+          color: publicTheme.mutedText,
+        }
+      : {};
 
     const renderScoreControl = (item, side) => {
       const scoreKey = side === "A" ? "scoreA" : "scoreB";
@@ -11071,7 +11341,7 @@ const savedRound = readStorageWithTtl(
           <span
             style={{
               ...styles.tournamentScheduleTeamName,
-              ...(publicTheme
+              ...(hasPublicScheduleTheme
                 ? {
                     color: isPublicCompleted
                       ? publicTheme.mutedText
@@ -11090,7 +11360,7 @@ const savedRound = readStorageWithTtl(
             <span
               style={{
                 ...styles.tournamentScheduleReadonlyScore,
-                ...(publicTheme
+                ...(hasPublicScheduleTheme
                   ? {
                       color: isPublicCompleted
                         ? publicTheme.accent
@@ -11108,7 +11378,21 @@ const savedRound = readStorageWithTtl(
 
     const renderScheduleMatchTeams = (item) => {
       if (!item) {
-        return <strong style={styles.tournamentScheduleMatchTeams}>{tournamentText.openCourt}</strong>;
+        return (
+          <strong
+            style={{
+              ...styles.tournamentScheduleMatchTeams,
+              ...(hasPublicScheduleTheme
+                ? {
+                    color: publicTheme.mutedText,
+                    opacity: 0.74,
+                  }
+                : {}),
+            }}
+          >
+            {tournamentText.openCourt}
+          </strong>
+        );
       }
 
       return (
@@ -11117,7 +11401,9 @@ const savedRound = readStorageWithTtl(
           <span
             style={{
               ...styles.tournamentScheduleVsLabel,
-              ...(publicTheme ? { color: publicTheme.mutedText } : {}),
+              ...(hasPublicScheduleTheme
+                ? { color: publicTheme.mutedText }
+                : {}),
             }}
           >
             {tournamentText.vsLabel}
@@ -11136,7 +11422,17 @@ const savedRound = readStorageWithTtl(
     }
 
     return (
-      <div style={styles.tournamentScheduleWrap}>
+      <div
+        style={{
+          ...styles.tournamentScheduleWrap,
+          ...(hasPublicScheduleTheme
+            ? {
+                background: hexToRgba(publicTheme.surface, 0.72),
+                borderColor: publicScheduleBorderColor,
+              }
+            : {}),
+        }}
+      >
         {canEditScheduleStructure && selectedMoveMatchId && (
           <div style={styles.tournamentScheduleSwapNotice}>
             <span>{tournamentText.moveModeMessage}</span>
@@ -11165,15 +11461,18 @@ const savedRound = readStorageWithTtl(
             style={{
               ...styles.tournamentScheduleHeaderRow,
               gridTemplateColumns: `${scheduleLeftColumnWidth}px minmax(0, 1fr)`,
+              ...(hasPublicScheduleTheme
+                ? { borderBottomColor: publicScheduleGridLineColor }
+                : {}),
             }}
           >
             <div
               style={{
                 ...styles.tournamentScheduleCornerCell,
-                ...(publicTheme
+                ...(hasPublicScheduleTheme
                   ? {
-                      background: publicTheme.surface,
-                      borderColor: publicTheme.border,
+                      background: publicScheduleHeaderBackground,
+                      borderColor: publicScheduleBorderColor,
                       color: publicTheme.mutedText,
                     }
                   : {}),
@@ -11185,6 +11484,12 @@ const savedRound = readStorageWithTtl(
               style={{
                 ...styles.tournamentScheduleCourts,
                 gridTemplateColumns: `repeat(${safeCourtCount}, minmax(${scheduleCourtMinWidth}px, 1fr))`,
+                ...(hasPublicScheduleTheme
+                  ? {
+                      gap: "2px",
+                      background: publicScheduleGridLineColor,
+                    }
+                  : {}),
               }}
             >
               {Array.from({ length: safeCourtCount }, (_, courtIndex) => (
@@ -11192,10 +11497,10 @@ const savedRound = readStorageWithTtl(
                   key={`schedule-court-header-${courtIndex}`}
                   style={{
                     ...styles.tournamentScheduleCourtHeader,
-                    ...(publicTheme
+                    ...(hasPublicScheduleTheme
                       ? {
-                          background: publicTheme.surface,
-                          borderColor: publicTheme.border,
+                          background: publicScheduleHeaderBackground,
+                          borderColor: publicScheduleBorderColor,
                           color: publicTheme.text,
                         }
                       : {}),
@@ -11213,15 +11518,18 @@ const savedRound = readStorageWithTtl(
               style={{
                 ...styles.tournamentScheduleRow,
                 gridTemplateColumns: `${scheduleLeftColumnWidth}px minmax(0, 1fr)`,
+                ...(hasPublicScheduleTheme
+                  ? { borderBottomColor: publicScheduleGridLineColor }
+                  : {}),
               }}
             >
               <div
                 style={{
                   ...styles.tournamentScheduleTimeCell,
-                  ...(publicTheme
+                  ...(hasPublicScheduleTheme
                     ? {
-                        background: publicTheme.surface,
-                        borderColor: publicTheme.border,
+                        background: publicScheduleHeaderBackground,
+                        borderColor: publicScheduleBorderColor,
                         color: publicTheme.text,
                       }
                     : {}),
@@ -11242,6 +11550,12 @@ const savedRound = readStorageWithTtl(
                 style={{
                   ...styles.tournamentScheduleCourts,
                   gridTemplateColumns: `repeat(${safeCourtCount}, minmax(${scheduleCourtMinWidth}px, 1fr))`,
+                  ...(hasPublicScheduleTheme
+                    ? {
+                        gap: "2px",
+                        background: publicScheduleGridLineColor,
+                      }
+                    : {}),
                 }}
               >
                 {batch.items.map((item, courtIndex) => {
@@ -11261,7 +11575,7 @@ const savedRound = readStorageWithTtl(
                   const displayStatus = getMatchDisplayStatus(item);
                   const resultTypeLabel = getMatchResultTypeLabel(item);
                   const isPublicScheduleCell =
-                    publicScheduleView && publicTheme && item;
+                    hasPublicScheduleTheme && item;
                   const isPublicCompletedCell =
                     isPublicScheduleCell &&
                     (displayStatus.status === "completed" || resultTypeLabel);
@@ -11269,6 +11583,41 @@ const savedRound = readStorageWithTtl(
                     isPublicScheduleCell &&
                     displayStatus.status === "in_progress" &&
                     !isPublicCompletedCell;
+                  const publicGroupColor =
+                    hasPublicScheduleTheme && groupColor
+                      ? {
+                          soft:
+                            groupColor.publicSoft ||
+                            hexToRgba(groupColor.accent, 0.16),
+                          border:
+                            groupColor.publicBorder ||
+                            hexToRgba(groupColor.accent, 0.30),
+                          text: groupColor.publicText || groupColor.accent,
+                        }
+                      : null;
+                  const publicScheduleStatusColor = isPublicCompletedCell
+                    ? publicTheme.accent
+                    : isPublicLiveCell
+                      ? publicTheme.primary
+                      : "";
+                  const publicScheduleStatusBackground =
+                    publicScheduleStatusColor && publicGroupColor
+                      ? `linear-gradient(135deg, ${hexToRgba(
+                          publicScheduleStatusColor,
+                          isPublicLiveCell ? 0.24 : 0.18
+                        )}, ${publicGroupColor.soft} 42%, ${hexToRgba(
+                          publicTheme.panel,
+                          isPublicLiveCell ? 0.96 : 0.94
+                        )} 76%)`
+                      : publicScheduleStatusColor
+                        ? `linear-gradient(135deg, ${hexToRgba(
+                            publicScheduleStatusColor,
+                            isPublicLiveCell ? 0.26 : 0.22
+                          )}, ${hexToRgba(
+                            publicTheme.panel,
+                            isPublicLiveCell ? 0.96 : 0.94
+                          )} 72%)`
+                        : "";
                   const publicStatusLabel =
                     publicScheduleView &&
                     displayStatus.status === "completed"
@@ -11279,34 +11628,27 @@ const savedRound = readStorageWithTtl(
                           displayStatus.status === "in_progress"
                         ? "Live"
                         : displayStatus.label;
-                  const publicScheduleStateStyle = isPublicCompletedCell
+                  const publicScheduleStateStyle = publicScheduleStatusColor
                     ? {
-                        background: `linear-gradient(135deg, ${hexToRgba(
-                          publicTheme.accent,
-                          0.22
-                        )}, ${hexToRgba(publicTheme.panel, 0.94)} 72%)`,
-                        borderLeft: `5px solid ${publicTheme.accent}`,
+                        background: publicScheduleStatusBackground,
+                        ...(publicGroupColor
+                          ? {}
+                          : {
+                              borderLeft: `5px solid ${publicScheduleStatusColor}`,
+                            }),
                         boxShadow: `inset 0 0 0 1px ${hexToRgba(
-                          publicTheme.accent,
-                          0.30
-                        )}`,
+                          publicScheduleStatusColor,
+                          isPublicLiveCell ? 0.34 : 0.30
+                        )}${
+                          isPublicLiveCell
+                            ? `, 0 10px 26px ${hexToRgba(
+                                publicScheduleStatusColor,
+                                0.10
+                              )}`
+                            : ""
+                        }`,
                       }
-                    : isPublicLiveCell
-                      ? {
-                          background: `linear-gradient(135deg, ${hexToRgba(
-                            publicTheme.primary,
-                            0.26
-                          )}, ${hexToRgba(publicTheme.panel, 0.96)} 72%)`,
-                          borderLeft: `5px solid ${publicTheme.primary}`,
-                          boxShadow: `inset 0 0 0 1px ${hexToRgba(
-                            publicTheme.primary,
-                            0.34
-                          )}, 0 10px 26px ${hexToRgba(
-                            publicTheme.primary,
-                            0.10
-                          )}`,
-                        }
-                      : {};
+                    : {};
                   const finishWarning = editableScores && item
                     ? matchFinishWarnings[item.id]
                     : "";
@@ -11392,21 +11734,38 @@ const savedRound = readStorageWithTtl(
                       }}
                       style={{
                         ...styles.tournamentScheduleCourt,
-                        ...(publicTheme
+                        ...(hasPublicScheduleTheme
                           ? {
-                              background: publicTheme.panel,
+                              background: publicScheduleBaseCellBackground,
                               color: publicTheme.text,
-                              borderColor: publicTheme.border,
+                              border: `1px solid ${publicScheduleBorderColor}`,
+                              borderColor: publicScheduleBorderColor,
+                              boxSizing: "border-box",
                             }
                           : {}),
                         ...(courtBlock ? styles.tournamentScheduleBlockedCourt : {}),
+                        ...(courtBlock && hasPublicScheduleTheme
+                          ? publicScheduleBlockedCellStyle
+                          : {}),
                         ...(groupColor
-                          ? {
-                              background: `linear-gradient(135deg, ${groupColor.soft}, ${publicTheme?.panel || "#ffffff"} 78%)`,
-                              borderLeft: `4px solid ${groupColor.accent}`,
-                            }
+                          ? hasPublicScheduleTheme
+                            ? {
+                                background: `linear-gradient(135deg, ${publicGroupColor.soft}, ${hexToRgba(
+                                  publicTheme.panel,
+                                  0.94
+                                )} 70%)`,
+                                borderColor: publicGroupColor.border,
+                                borderLeft: `4px solid ${publicGroupColor.text}`,
+                              }
+                            : {
+                                background: `linear-gradient(135deg, ${groupColor.soft}, ${publicTheme?.panel || "#ffffff"} 78%)`,
+                                borderLeft: `4px solid ${groupColor.accent}`,
+                              }
                           : {}),
                         ...publicScheduleStateStyle,
+                        ...(!item && !courtBlock && hasPublicScheduleTheme
+                          ? publicScheduleOpenCellStyle
+                          : {}),
                         ...(isSelectedMoveSource
                           ? styles.tournamentScheduleSelectedSource
                           : {}),
@@ -11416,7 +11775,14 @@ const savedRound = readStorageWithTtl(
                       }}
                     >
                       {item?.stage === "knockout" && item.round && (
-                        <small style={styles.tournamentScheduleRoundLabel}>
+                        <small
+                          style={{
+                            ...styles.tournamentScheduleRoundLabel,
+                            ...(hasPublicScheduleTheme
+                              ? { color: publicTheme.mutedText }
+                              : {}),
+                          }}
+                        >
                           {getSeriesDisplayName(item.round)}
                         </small>
                       )}
@@ -11424,10 +11790,16 @@ const savedRound = readStorageWithTtl(
                         <span
                           style={{
                             ...styles.tournamentScheduleSeriesBadge,
-                            ...(publicTheme
+                            ...(hasPublicScheduleTheme
                               ? {
-                                  background: publicTheme.surface,
-                                  borderColor: publicTheme.border,
+                                  background: hexToRgba(
+                                    publicTheme.surface,
+                                    0.72
+                                  ),
+                                  borderColor: hexToRgba(
+                                    publicTheme.border,
+                                    0.32
+                                  ),
                                   color: publicTheme.primary,
                                 }
                               : {}),
@@ -11483,7 +11855,14 @@ const savedRound = readStorageWithTtl(
                         </div>
                       )}
                       {courtBlock ? (
-                        <div style={styles.tournamentScheduleBlockedContent}>
+                        <div
+                          style={{
+                            ...styles.tournamentScheduleBlockedContent,
+                            ...(hasPublicScheduleTheme
+                              ? { color: publicTheme.mutedText }
+                              : {}),
+                          }}
+                        >
                           <strong>{tournamentText.courtBlocked}</strong>
                           {courtBlock.reason && <small>{courtBlock.reason}</small>}
                           {item && (
@@ -11630,7 +12009,7 @@ const savedRound = readStorageWithTtl(
                                   ...(displayStatus.status === "completed"
                                     ? styles.tournamentScheduleStatusBadgeDone
                                     : {}),
-                                  ...(publicScheduleView && publicTheme
+                                  ...(hasPublicScheduleTheme
                                     ? {
                                         background:
                                           displayStatus.status === "completed"
@@ -11674,7 +12053,7 @@ const savedRound = readStorageWithTtl(
                               <span
                                 style={{
                                   ...styles.tournamentScheduleResultBadge,
-                                  ...(publicScheduleView && publicTheme
+                                  ...(hasPublicScheduleTheme
                                     ? {
                                         background: hexToRgba(
                                           publicTheme.accent,
@@ -11762,6 +12141,15 @@ const savedRound = readStorageWithTtl(
       ) ||
       publicVisibleSeriesClasses[0] ||
       null;
+    const selectedPublicClass = getSelectedPublicClass(
+      safeTournament,
+      effectivePublicSelectedSeriesId,
+      selectedPublicSeries
+    );
+    const publicHeroTextLines = getPublicClassHeroText(
+      safeTournament,
+      selectedPublicClass
+    );
     const selectedPublicSeriesClasses = selectedPublicSeries
       ? [selectedPublicSeries]
       : [];
@@ -12134,26 +12522,17 @@ const savedRound = readStorageWithTtl(
                     {getTournamentPublicTitle(safeTournament)}
                   </h1>
                 </div>
-                {String(safeTournament.rules || "").trim() && (
+                {publicHeroTextLines.map((heroText) => (
                   <p
+                    key={`public-hero-text-${heroText}`}
                     style={{
                       ...styles.publicTournamentDescription,
                       color: publicTheme.mutedText,
                     }}
                   >
-                    {safeTournament.rules}
+                    {heroText}
                   </p>
-                )}
-                {getTournamentPublicSummary(safeTournament) && (
-                  <p
-                    style={{
-                      ...styles.publicTournamentDescription,
-                      color: publicTheme.mutedText,
-                    }}
-                  >
-                    {getTournamentPublicSummary(safeTournament)}
-                  </p>
-                )}
+                ))}
 
                 <div style={styles.publicTournamentSummaryGrid}>
                   {[
@@ -16209,9 +16588,15 @@ const savedRound = readStorageWithTtl(
   }
 
   const activeMainModule =
-    activeTab === "tournament" ? "tournament" : "team-builder";
+    activeTab === "tournament"
+      ? "tournament"
+      : activeTab === "player-hub"
+        ? "player-hub"
+        : "team-builder";
   const availableModuleCount =
-    (hasTeamBuilderAccess ? 1 : 0) + (hasTournamentAccess ? 1 : 0);
+    (hasTeamBuilderAccess ? 1 : 0) +
+    (hasTournamentAccess ? 1 : 0) +
+    (hasPlayerHubAccess ? 1 : 0);
 
   return (
     <div style={styles.app}>
@@ -16441,11 +16826,6 @@ const savedRound = readStorageWithTtl(
             )}
 
             <div style={styles.trainerListCard}>
-              <div style={styles.authTitle}>{t.trainerUsersTitle}</div>
-              <div style={styles.authSubtitle}>
-                {t.trainerUsersSubtitle}
-              </div>
-
               {trainerActionMessage && (
                 <div style={styles.loginMessage}>{trainerActionMessage}</div>
               )}
@@ -16473,7 +16853,9 @@ const savedRound = readStorageWithTtl(
                         key={`access-${user.username}`}
                         style={styles.accessRow}
                       >
-                        <strong>{user.username}</strong>
+                        <strong style={styles.accessUsername}>
+                          {user.username}
+                        </strong>
                         <button
                           type="button"
                           style={{
@@ -16523,119 +16905,217 @@ const savedRound = readStorageWithTtl(
                 </div>
               </div>
 
-              <div style={styles.trainerUsersWrap}>
-                {visibleTrainerUsers.length === 0 ? (
-                  <div style={styles.emptyText}>{t.noActiveTrainers}</div>
-                ) : (
-                  visibleTrainerUsers.map((trainer) => (
-                    <div key={trainer.username} style={styles.trainerUserRow}>
-                      <div style={styles.trainerUserTop}>
-                        <div>
-                          <div style={styles.trainerUserName}>
-                            {trainer.username}
-                          </div>
-                          <div style={styles.trainerUserMeta}>
-                            {trainer.active ? t.activeStatus : t.inactiveStatus} /{" "}
-                            {trainer.skillView} / 1-{trainer.skillScale}
-                          </div>
-                        </div>
-
-                        <a
-                          href={trainer.spreadsheetUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={styles.link}
-                        >
-                          {t.openSheet}
-                        </a>
-                      </div>
-
-                      <div style={styles.trainerActionsRow}>
-                        <button
-                          style={styles.secondaryButton}
-                          onClick={() =>
-                            updateTrainerStatus(trainer.username, !trainer.active)
-                          }
-                        >
-                          {trainer.active ? t.deactivate : t.activate}
-                        </button>
-
-                        <input
-                          style={styles.smallInput}
-                          value={trainerPasswords[trainer.username] || ""}
-                          onChange={(e) =>
-                            setTrainerPasswords((prev) => ({
-                              ...prev,
-                              [trainer.username]: e.target.value,
-                            }))
-                          }
-                          placeholder={t.newPassword}
-                        />
-
-                        <button
-                          style={styles.secondaryButton}
-                          onClick={() => resetTrainerPassword(trainer.username)}
-                        >
-                          {t.resetPassword}
-                        </button>
-
-                        <button
-                          style={styles.archiveButton}
-                          onClick={() => archiveTrainer(trainer.username)}
-                        >
-                          {t.archive}
-                        </button>
+              <div style={styles.adminUserManagementGrid}>
+                <div style={styles.adminUserListPanel}>
+                  <div style={styles.adminUserListHeader}>
+                    <div>
+                      <div style={styles.authTitle}>{t.trainerUsersTitle}</div>
+                      <div style={styles.authSubtitle}>
+                        {t.trainerUsersSubtitle}
                       </div>
                     </div>
-                  ))
-                )}
-              </div>
-            </div>
+                    <span style={styles.adminUserCountBadge}>
+                      {adminManagedUsers.length}
+                    </span>
+                  </div>
 
-            <div style={styles.trainerListCard}>
-              <div style={styles.authTitle}>{t.archivedTrainers}</div>
-              <div style={styles.authSubtitle}>
-                {t.archivedTrainersSubtitle}
-              </div>
-
-              <div style={styles.trainerUsersWrap}>
-                {archivedTrainerUsers.length === 0 ? (
-                  <div style={styles.emptyText}>{t.noArchivedTrainers}</div>
-                ) : (
-                  archivedTrainerUsers.map((trainer) => (
-                    <div key={trainer.username} style={styles.trainerUserRow}>
-                      <div style={styles.trainerUserTop}>
-                        <div>
-                          <div style={styles.trainerUserName}>
-                            {trainer.username}
-                          </div>
-                          <div style={styles.trainerUserMeta}>
-                            {t.archivedStatus} / {trainer.skillView} / 1-
-                            {trainer.skillScale}
-                          </div>
-                        </div>
-
-                        <a
-                          href={trainer.spreadsheetUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={styles.link}
-                        >
-                          {t.openSheet}
-                        </a>
+                  <div style={styles.adminUserCompactList}>
+                    {adminManagedUsers.length === 0 ? (
+                      <div style={styles.emptyText}>
+                        No trainer/user accounts yet.
                       </div>
+                    ) : (
+                      adminManagedUsers.map((trainer) => {
+                        const trainerKey = getUserAccessStorageUsername(
+                          trainer.username
+                        );
+                        const selectedKey = getUserAccessStorageUsername(
+                          selectedTrainerUsername
+                        );
+                        const isSelected = trainerKey === selectedKey;
+                        const isArchived =
+                          trainer.archived || trainer.role === "archived";
+                        const statusText = isArchived
+                          ? t.archivedStatus
+                          : trainer.active
+                          ? t.activeStatus
+                          : t.inactiveStatus;
 
-                      <div style={styles.trainerActionsRow}>
-                        <button
-                          style={styles.primaryButton}
-                          onClick={() => restoreTrainer(trainer.username)}
-                        >
-                          {t.restore}
-                        </button>
-                      </div>
+                        return (
+                          <button
+                            key={`manage-${trainer.username}`}
+                            type="button"
+                            style={{
+                              ...styles.adminUserCompactRow,
+                              ...(isSelected
+                                ? styles.adminUserCompactRowActive
+                                : {}),
+                            }}
+                            onClick={() =>
+                              setSelectedTrainerUsername(trainer.username)
+                            }
+                          >
+                            <div style={styles.adminUserCompactMain}>
+                              <div style={styles.adminUserCompactName}>
+                                {trainer.username}
+                              </div>
+                              <div style={styles.adminUserCompactMeta}>
+                                {trainer.role || "trainer"} /{" "}
+                                {trainer.skillView || "-"} / 1-
+                                {trainer.skillScale || "-"}
+                              </div>
+                            </div>
+                            <span
+                              style={{
+                                ...styles.adminUserStatusPill,
+                                ...(isArchived
+                                  ? styles.adminUserStatusArchived
+                                  : trainer.active
+                                  ? styles.adminUserStatusActive
+                                  : styles.adminUserStatusInactive),
+                              }}
+                            >
+                              {statusText}
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                <div style={styles.adminUserDetailPanel}>
+                  {selectedAdminUser ? (
+                    (() => {
+                      const selectedIsArchived =
+                        selectedAdminUser.archived ||
+                        selectedAdminUser.role === "archived";
+                      const selectedStatus = selectedIsArchived
+                        ? t.archivedStatus
+                        : selectedAdminUser.active
+                        ? t.activeStatus
+                        : t.inactiveStatus;
+
+                      return (
+                        <>
+                          <div style={styles.adminUserDetailHeader}>
+                            <div style={styles.adminUserCompactMain}>
+                              <div style={styles.adminUserDetailTitle}>
+                                {selectedAdminUser.username}
+                              </div>
+                              <div style={styles.adminUserCompactMeta}>
+                                {selectedStatus} /{" "}
+                                {selectedAdminUser.skillView || "-"} / 1-
+                                {selectedAdminUser.skillScale || "-"}
+                              </div>
+                            </div>
+                            {selectedAdminUser.spreadsheetUrl && (
+                              <a
+                                href={selectedAdminUser.spreadsheetUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={styles.link}
+                              >
+                                {t.openSheet}
+                              </a>
+                            )}
+                          </div>
+
+                          <div style={styles.adminUserAccessSummary}>
+                            <span style={styles.adminUserAccessChip}>
+                              {t.accessTeamBuilder}:{" "}
+                              {selectedAdminUserAccess.teamBuilder
+                                ? t.accessOn
+                                : t.accessOff}
+                            </span>
+                            <span style={styles.adminUserAccessChip}>
+                              {t.accessTournaments}:{" "}
+                              {selectedAdminUserAccess.tournaments
+                                ? t.accessOn
+                                : t.accessOff}
+                            </span>
+                            <span style={styles.adminUserAccessChip}>
+                              {t.accessAdmin}:{" "}
+                              {selectedAdminUserAccess.admin
+                                ? t.accessOn
+                                : t.accessOff}
+                            </span>
+                          </div>
+
+                          {selectedIsArchived ? (
+                            <div style={styles.trainerActionsRow}>
+                              <button
+                                style={styles.primaryButton}
+                                onClick={() =>
+                                  restoreTrainer(selectedAdminUser.username)
+                                }
+                              >
+                                {t.restore}
+                              </button>
+                            </div>
+                          ) : (
+                            <div style={styles.trainerActionsRow}>
+                              <button
+                                style={styles.secondaryButton}
+                                onClick={() =>
+                                  updateTrainerStatus(
+                                    selectedAdminUser.username,
+                                    !selectedAdminUser.active
+                                  )
+                                }
+                              >
+                                {selectedAdminUser.active
+                                  ? t.deactivate
+                                  : t.activate}
+                              </button>
+
+                              <input
+                                style={styles.smallInput}
+                                value={
+                                  trainerPasswords[
+                                    selectedAdminUser.username
+                                  ] || ""
+                                }
+                                onChange={(e) =>
+                                  setTrainerPasswords((prev) => ({
+                                    ...prev,
+                                    [selectedAdminUser.username]:
+                                      e.target.value,
+                                  }))
+                                }
+                                placeholder={t.newPassword}
+                              />
+
+                              <button
+                                style={styles.secondaryButton}
+                                onClick={() =>
+                                  resetTrainerPassword(
+                                    selectedAdminUser.username
+                                  )
+                                }
+                              >
+                                {t.resetPassword}
+                              </button>
+
+                              <button
+                                style={styles.archiveButton}
+                                onClick={() =>
+                                  archiveTrainer(selectedAdminUser.username)
+                                }
+                              >
+                                {t.archive}
+                              </button>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()
+                  ) : (
+                    <div style={styles.adminUserEmptyState}>
+                      Select a user to manage account actions.
                     </div>
-                  ))
-                )}
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -16695,9 +17175,111 @@ const savedRound = readStorageWithTtl(
                 {tournamentText.tabTitle}
               </button>
             )}
+
+            {hasPlayerHubAccess && (
+              <button
+                style={{
+                  ...styles.tabButton,
+                  ...(activeMainModule === "player-hub"
+                    ? styles.tabButtonActive
+                    : {}),
+                }}
+                onClick={() => setActiveTab("player-hub")}
+              >
+                Player & Team Hub
+              </button>
+            )}
           </div>
         ) : (
           <div style={styles.lockedCard}>{t.noModuleAccess}</div>
+        )}
+
+        {hasPlayerHubAccess && activeTab === "player-hub" && (
+          <div style={styles.section}>
+            <PlayerHubPage
+              username={auth.username}
+              isAdmin={currentUserIsAdmin}
+              canReviewRosterDrafts={currentUserIsAdmin || hasTournamentAccess}
+              loadMyPlayerProfile={loadMyPlayerProfile}
+              loadEventComments={loadEventComments}
+              addEventComment={addEventComment}
+              saveMyPlayerProfile={saveMyPlayerProfile}
+              loadPlayerProfilesForAdmin={loadPlayerProfilesForAdmin}
+              updatePlayerProfileAdminStatus={updatePlayerProfileAdminStatus}
+              resetPlayerPasswordForAdmin={resetPlayerPasswordForAdmin}
+              loadClubTeams={loadClubTeams}
+              loadClubTeamsAdmin={loadClubTeamsAdmin}
+              saveClubTeamAdmin={saveClubTeamAdmin}
+              updateClubTeamActiveAdmin={updateClubTeamActiveAdmin}
+              requestTeamIdentityChange={requestTeamIdentityChange}
+              loadTeamIdentityChangeRequests={loadTeamIdentityChangeRequests}
+              reviewTeamIdentityChangeRequest={reviewTeamIdentityChangeRequest}
+              createAccessRequest={createAccessRequest}
+              loadMyAccessRequests={loadMyAccessRequests}
+              loadAccessRequestsAdmin={loadAccessRequestsAdmin}
+              reviewAccessRequestAdmin={reviewAccessRequestAdmin}
+              loadMyTeamProfile={loadMyTeamProfile}
+              saveMyTeamProfile={saveMyTeamProfile}
+              createOrUpdateTeamNeed={createOrUpdateTeamNeed}
+              closeTeamNeed={closeTeamNeed}
+              loadVisibleTeamNeeds={loadVisibleTeamNeeds}
+              loadTeamProfilesAdmin={loadTeamProfilesAdmin}
+              updateTeamProfileAdmin={updateTeamProfileAdmin}
+              createTeamNeedInterest={createTeamNeedInterest}
+              loadMyTeamNeedInterests={loadMyTeamNeedInterests}
+              loadTeamNeedInterestsForCaptain={loadTeamNeedInterestsForCaptain}
+              reviewTeamNeedInterest={reviewTeamNeedInterest}
+              loadTeamNeedInterestsAdmin={loadTeamNeedInterestsAdmin}
+              addTeamMemberFromInterest={addTeamMemberFromInterest}
+              loadMyTeamMembersForCaptain={loadMyTeamMembersForCaptain}
+              loadMyConfirmedTeamsForPlayer={loadMyConfirmedTeamsForPlayer}
+              removeTeamMember={removeTeamMember}
+              loadTeamMembersAdmin={loadTeamMembersAdmin}
+              createOrUpdateTeamMembershipRequest={
+                createOrUpdateTeamMembershipRequest
+              }
+              loadMyTeamMembershipRequests={loadMyTeamMembershipRequests}
+              loadMembershipRequestsForCaptain={
+                loadMembershipRequestsForCaptain
+              }
+              reviewTeamMembershipRequest={reviewTeamMembershipRequest}
+              cancelMyTeamMembershipRequest={cancelMyTeamMembershipRequest}
+              loadTeamMembershipRequestsAdmin={
+                loadTeamMembershipRequestsAdmin
+              }
+              tournamentOptions={playerHubTournamentOptions}
+              createTournamentTeamPlan={createTournamentTeamPlan}
+              loadMyTournamentTeamPlansForCaptain={
+                loadMyTournamentTeamPlansForCaptain
+              }
+              loadMyTournamentAvailabilityForPlayer={
+                loadMyTournamentAvailabilityForPlayer
+              }
+              loadMyTournamentSquadPlanningForPlayer={
+                loadMyTournamentSquadPlanningForPlayer
+              }
+              updateTournamentAvailabilityResponse={
+                updateTournamentAvailabilityResponse
+              }
+              loadTournamentAvailabilityForCaptain={
+                loadTournamentAvailabilityForCaptain
+              }
+              updateTournamentPlanStatus={updateTournamentPlanStatus}
+              loadTournamentSquadPlanningForCaptain={
+                loadTournamentSquadPlanningForCaptain
+              }
+              assignPlayerToSquad={assignPlayerToSquad}
+              createOrUpdateRosterDraftFromSquadPlanning={
+                createOrUpdateRosterDraftFromSquadPlanning
+              }
+              loadRosterDraftForCaptain={loadRosterDraftForCaptain}
+              submitRosterDraft={submitRosterDraft}
+              cancelRosterDraft={cancelRosterDraft}
+              loadMyRosterStatusForPlayer={loadMyRosterStatusForPlayer}
+              loadRosterDraftAdmin={loadRosterDraftAdmin}
+              {...playerHubRosterReviewProps}
+            />
+          </div>
         )}
 
         {hasTeamBuilderAccess && activeTab === "players" && (
@@ -19059,6 +19641,13 @@ const styles = {
     minWidth: 0,
   },
 
+  landingLoginCardRegisterMode: {
+    display: "grid",
+    width: "min(100%, 620px)",
+    maxWidth: "620px",
+    alignItems: "start",
+  },
+
   landingLoginCardStacked: {
     display: "grid",
     width: "100%",
@@ -19117,6 +19706,7 @@ const styles = {
 
   landingInput: {
     width: "100%",
+    minWidth: 0,
     boxSizing: "border-box",
     border: "1px solid rgba(37,99,235,0.18)",
     borderRadius: "14px",
@@ -19140,6 +19730,110 @@ const styles = {
     cursor: "pointer",
     boxShadow: "0 18px 34px rgba(37,99,235,0.18)",
     whiteSpace: "nowrap",
+  },
+
+  landingRegisterPanel: {
+    display: "grid",
+    gap: "8px",
+    flexBasis: "560px",
+    width: "min(100%, 560px)",
+    maxWidth: "100%",
+    justifySelf: "start",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+
+  landingRegisterPanelCompact: {
+    flexBasis: "auto",
+    width: "auto",
+  },
+
+  landingRegisterToggle: {
+    justifySelf: "start",
+    border: "1px solid rgba(37,99,235,0.18)",
+    borderRadius: "999px",
+    padding: "8px 11px",
+    background: "rgba(255,255,255,0.88)",
+    color: "#1e3a8a",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+  },
+
+  landingRegisterForm: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
+    gap: "8px",
+    minWidth: 0,
+    width: "100%",
+    maxWidth: "560px",
+    boxSizing: "border-box",
+    padding: "10px",
+    borderRadius: "16px",
+    background: "rgba(255,255,255,0.78)",
+    border: "1px solid rgba(37,99,235,0.14)",
+    boxShadow: "0 16px 36px rgba(37,99,235,0.10)",
+  },
+
+  landingRegisterFormStacked: {
+    gridTemplateColumns: "minmax(0, 1fr)",
+  },
+
+  landingRegisterHeader: {
+    gridColumn: "1 / -1",
+    display: "grid",
+    gap: "3px",
+    minWidth: 0,
+  },
+
+  landingRegisterTitle: {
+    color: "#0f172a",
+    fontSize: "13px",
+    fontWeight: "950",
+  },
+
+  landingRegisterHelper: {
+    color: "#475569",
+    fontSize: "11px",
+    lineHeight: 1.35,
+    fontWeight: "800",
+  },
+
+  landingRegisterCheck: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "10px 11px",
+    borderRadius: "14px",
+    background: "rgba(239,246,255,0.84)",
+    border: "1px solid rgba(37,99,235,0.14)",
+    color: "#1e3a8a",
+    fontSize: "12px",
+    fontWeight: "850",
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
+
+  landingRegisterNote: {
+    gridColumn: "1 / -1",
+    color: "#475569",
+    fontSize: "12px",
+    lineHeight: 1.45,
+    fontWeight: "800",
+  },
+
+  landingRegisterButton: {
+    justifySelf: "start",
+    minWidth: "138px",
+    border: "none",
+    borderRadius: "14px",
+    padding: "11px 13px",
+    background: "linear-gradient(135deg, #2563eb, #22c55e)",
+    color: "#ffffff",
+    fontSize: "13px",
+    fontWeight: "950",
+    cursor: "pointer",
+    boxShadow: "0 16px 30px rgba(37,99,235,0.16)",
   },
 
   landingLoginMessage: {
@@ -19498,6 +20192,7 @@ const styles = {
     borderRadius: "16px",
     display: "grid",
     gap: "10px",
+    minWidth: 0,
   },
 
   trainerUsersWrap: {
@@ -19507,9 +20202,9 @@ const styles = {
 
   accessPanel: {
     display: "grid",
-    gap: "10px",
-    padding: "12px",
-    borderRadius: "16px",
+    gap: "8px",
+    padding: "10px",
+    borderRadius: "14px",
     background: "rgba(248,250,252,0.82)",
     border: "1px solid rgba(37,99,235,0.12)",
     minWidth: 0,
@@ -19525,9 +20220,9 @@ const styles = {
 
   accessHeaderRow: {
     display: "grid",
-    gridTemplateColumns: "minmax(130px, 1.2fr) repeat(3, minmax(96px, 0.7fr))",
-    gap: "8px",
-    minWidth: "520px",
+    gridTemplateColumns: "minmax(120px, 1.2fr) repeat(3, minmax(78px, 0.7fr))",
+    gap: "6px",
+    minWidth: "420px",
   },
 
   accessHeader: {
@@ -19540,11 +20235,11 @@ const styles = {
 
   accessRow: {
     display: "grid",
-    gridTemplateColumns: "minmax(130px, 1.2fr) repeat(3, minmax(96px, 0.7fr))",
-    gap: "8px",
+    gridTemplateColumns: "minmax(120px, 1.2fr) repeat(3, minmax(78px, 0.7fr))",
+    gap: "6px",
     alignItems: "center",
-    minWidth: "520px",
-    padding: "8px",
+    minWidth: "420px",
+    padding: "6px",
     borderRadius: "12px",
     background: "rgba(255,255,255,0.76)",
     border: "1px solid rgba(37,99,235,0.10)",
@@ -19552,10 +20247,15 @@ const styles = {
     fontSize: "12px",
   },
 
+  accessUsername: {
+    minWidth: 0,
+    overflowWrap: "anywhere",
+  },
+
   accessToggle: {
     border: "1px solid #cbd5e1",
     borderRadius: "999px",
-    padding: "7px 10px",
+    padding: "6px 8px",
     background: "#f8fafc",
     color: "#64748b",
     fontSize: "11px",
@@ -19577,12 +20277,185 @@ const styles = {
   accessAdminBadge: {
     justifySelf: "start",
     borderRadius: "999px",
-    padding: "7px 10px",
+    padding: "6px 8px",
     background: "#eef2ff",
     border: "1px solid #c7d2fe",
     color: "#3730a3",
     fontSize: "11px",
     fontWeight: "950",
+  },
+
+  adminUserManagementGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+    gap: "10px",
+    alignItems: "start",
+    minWidth: 0,
+  },
+
+  adminUserListPanel: {
+    display: "grid",
+    gap: "8px",
+    padding: "10px",
+    borderRadius: "14px",
+    background: "rgba(248,250,252,0.82)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    minWidth: 0,
+  },
+
+  adminUserListHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "10px",
+    alignItems: "flex-start",
+    minWidth: 0,
+  },
+
+  adminUserCountBadge: {
+    minWidth: "28px",
+    borderRadius: "999px",
+    padding: "4px 8px",
+    background: "#eef2ff",
+    border: "1px solid #c7d2fe",
+    color: "#3730a3",
+    fontSize: "12px",
+    fontWeight: "950",
+    textAlign: "center",
+  },
+
+  adminUserCompactList: {
+    display: "grid",
+    gap: "6px",
+    maxHeight: "310px",
+    overflowY: "auto",
+    paddingRight: "2px",
+    minWidth: 0,
+  },
+
+  adminUserCompactRow: {
+    width: "100%",
+    border: "1px solid rgba(37,99,235,0.10)",
+    borderRadius: "12px",
+    padding: "8px 9px",
+    background: "rgba(255,255,255,0.78)",
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "8px",
+    alignItems: "center",
+    textAlign: "left",
+    cursor: "pointer",
+    minWidth: 0,
+  },
+
+  adminUserCompactRowActive: {
+    borderColor: "rgba(37,99,235,0.38)",
+    background: "rgba(239,246,255,0.92)",
+    boxShadow: "0 10px 24px rgba(37,99,235,0.10)",
+  },
+
+  adminUserCompactMain: {
+    display: "grid",
+    gap: "2px",
+    minWidth: 0,
+  },
+
+  adminUserCompactName: {
+    color: "#0f172a",
+    fontSize: "13px",
+    fontWeight: "900",
+    overflowWrap: "anywhere",
+  },
+
+  adminUserCompactMeta: {
+    color: "#64748b",
+    fontSize: "11px",
+    fontWeight: "700",
+    overflowWrap: "anywhere",
+  },
+
+  adminUserStatusPill: {
+    justifySelf: "end",
+    borderRadius: "999px",
+    padding: "4px 7px",
+    border: "1px solid #cbd5e1",
+    color: "#475569",
+    background: "#f8fafc",
+    fontSize: "10px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+  },
+
+  adminUserStatusActive: {
+    background: "#dcfce7",
+    borderColor: "#86efac",
+    color: "#166534",
+  },
+
+  adminUserStatusInactive: {
+    background: "#fee2e2",
+    borderColor: "#fecaca",
+    color: "#991b1b",
+  },
+
+  adminUserStatusArchived: {
+    background: "#ffedd5",
+    borderColor: "#fed7aa",
+    color: "#9a3412",
+  },
+
+  adminUserDetailPanel: {
+    display: "grid",
+    gap: "10px",
+    padding: "10px",
+    borderRadius: "14px",
+    background: "rgba(255,255,255,0.78)",
+    border: "1px solid rgba(37,99,235,0.12)",
+    minWidth: 0,
+  },
+
+  adminUserDetailHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "10px",
+    alignItems: "flex-start",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+
+  adminUserDetailTitle: {
+    color: "#0f172a",
+    fontSize: "15px",
+    fontWeight: "950",
+    overflowWrap: "anywhere",
+  },
+
+  adminUserAccessSummary: {
+    display: "flex",
+    gap: "6px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+
+  adminUserAccessChip: {
+    borderRadius: "999px",
+    padding: "5px 8px",
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    color: "#475569",
+    fontSize: "11px",
+    fontWeight: "850",
+  },
+
+  adminUserEmptyState: {
+    minHeight: "92px",
+    display: "grid",
+    placeItems: "center",
+    borderRadius: "12px",
+    border: "1px dashed rgba(100,116,139,0.32)",
+    color: "#64748b",
+    fontSize: "13px",
+    textAlign: "center",
+    padding: "14px",
   },
 
   trainerUserRow: {
