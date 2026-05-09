@@ -13,7 +13,11 @@ function doGet(e) {
       (String(e.parameter.includeArchived || "") === "1" ||
         String(e.parameter.includeArchived || "").toLowerCase() === "true");
 
-    return jsonResponse(getPlayers(context, includeArchived));
+    return jsonResponse(runTeamBuilderAction_("getPlayers", {
+      includeArchived: includeArchived
+    }, context, function () {
+      return getPlayers(context, includeArchived);
+    }));
   }
 
   if (action === "login") {
@@ -85,7 +89,9 @@ function doPost(e) {
     if (!addContext.authenticated) {
       return jsonResponse({ success: false, message: "Login required" });
     }
-    return jsonResponse(addPlayer(addContext, data.player));
+    return jsonResponse(runTeamBuilderAction_("addPlayer", data, addContext, function () {
+      return addPlayer(addContext, data.player);
+    }));
   }
 
   if (data.action === "saveSkills") {
@@ -93,8 +99,10 @@ function doPost(e) {
     if (!skillContext.authenticated) {
       return jsonResponse({ success: false, message: "Login required" });
     }
-    saveSkills(skillContext, data.players || []);
-    return jsonResponse({ success: true });
+    return jsonResponse(runTeamBuilderAction_("saveSkills", data, skillContext, function () {
+      saveSkills(skillContext, data.players || []);
+      return { success: true };
+    }));
   }
 
   if (data.action === "updatePlayerName") {
@@ -102,8 +110,10 @@ function doPost(e) {
     if (!renameContext.authenticated) {
       return jsonResponse({ success: false, message: "Login required" });
     }
-    updatePlayerName(renameContext, data.oldName, data.newName);
-    return jsonResponse({ success: true });
+    return jsonResponse(runTeamBuilderAction_("updatePlayerName", data, renameContext, function () {
+      updatePlayerName(renameContext, data.oldName, data.newName);
+      return { success: true };
+    }));
   }
 
   if (data.action === "updatePlayer") {
@@ -111,7 +121,9 @@ function doPost(e) {
     if (!updateContext.authenticated) {
       return jsonResponse({ success: false, message: "Login required" });
     }
-    return jsonResponse(updatePlayer(updateContext, data.oldName, data.player || {}));
+    return jsonResponse(runTeamBuilderAction_("updatePlayer", data, updateContext, function () {
+      return updatePlayer(updateContext, data.oldName, data.player || {});
+    }));
   }
 
   if (data.action === "archivePlayer") {
@@ -119,7 +131,9 @@ function doPost(e) {
     if (!archivePlayerContext.authenticated) {
       return jsonResponse({ success: false, message: "Login required" });
     }
-    return jsonResponse(archivePlayer(archivePlayerContext, data.playerName));
+    return jsonResponse(runTeamBuilderAction_("archivePlayer", data, archivePlayerContext, function () {
+      return archivePlayer(archivePlayerContext, data.playerName);
+    }));
   }
 
   if (data.action === "restorePlayer") {
@@ -127,7 +141,9 @@ function doPost(e) {
     if (!restorePlayerContext.authenticated) {
       return jsonResponse({ success: false, message: "Login required" });
     }
-    return jsonResponse(restorePlayer(restorePlayerContext, data.playerName));
+    return jsonResponse(runTeamBuilderAction_("restorePlayer", data, restorePlayerContext, function () {
+      return restorePlayer(restorePlayerContext, data.playerName);
+    }));
   }
 
   if (data.action === "saveTeams") {
@@ -135,8 +151,10 @@ function doPost(e) {
     if (!teamsContext.authenticated) {
       return jsonResponse({ success: false, message: "Login required" });
     }
-    saveTeams(teamsContext, data.teams || []);
-    return jsonResponse({ success: true });
+    return jsonResponse(runTeamBuilderAction_("saveTeams", data, teamsContext, function () {
+      saveTeams(teamsContext, data.teams || []);
+      return { success: true };
+    }));
   }
 
   if (data.action === "saveUserSettings") {
@@ -2213,6 +2231,416 @@ function restorePlayer(context, playerName) {
     success: false,
     message: "Player not found"
   };
+}
+
+function runTeamBuilderAction_(action, data, context, sheetsFn) {
+  if (isSupabaseTeamBuilderBackendEnabled_()) {
+    teamBuilderBackendLog_("supabase " + action);
+    try {
+      return supabaseTeamBuilderResponse_(
+        supabaseHandleTeamBuilderAction_(action, data || {}, context)
+      );
+    } catch (err) {
+      teamBuilderBackendLog_(
+        "fallback " +
+          action +
+          " " +
+          (err && err.message ? err.message : String(err))
+      );
+      var fallback = typeof sheetsFn === "function" ? sheetsFn() : {
+        success: false,
+        message: "Team Builder action failed"
+      };
+      if (fallback && typeof fallback === "object" && !Array.isArray(fallback)) {
+        fallback.teamBuilderBackend = "sheets";
+        fallback.teamBuilderBackendFallbackUsed = true;
+        fallback.teamBuilderBackendWarning =
+          "Supabase Team Builder backend failed; used Google Sheets fallback.";
+      }
+      return fallback;
+    }
+  }
+
+  teamBuilderBackendLog_("sheets " + action);
+  var response = typeof sheetsFn === "function" ? sheetsFn() : {
+    success: false,
+    message: "Team Builder action failed"
+  };
+  if (response && typeof response === "object" && !Array.isArray(response)) {
+    response.teamBuilderBackend = "sheets";
+    response.teamBuilderBackendFallbackUsed = false;
+  }
+  return response;
+}
+
+function supabaseTeamBuilderResponse_(response) {
+  if (response && typeof response === "object" && !Array.isArray(response)) {
+    response.teamBuilderBackend = "supabase";
+    response.teamBuilderBackendFallbackUsed = false;
+  }
+  return response;
+}
+
+function supabaseHandleTeamBuilderAction_(action, data, context) {
+  if (!context || !context.authenticated || !context.user) {
+    return {
+      success: false,
+      message: "Login required"
+    };
+  }
+
+  if (!userCanUseTeamBuilder_(context.user)) {
+    return {
+      success: false,
+      message: "Team Builder access required"
+    };
+  }
+
+  if (action === "getPlayers") {
+    return supabaseGetPlayers_(context, !!(data && data.includeArchived));
+  }
+
+  if (action === "addPlayer") {
+    return supabaseAddPlayer_(context, data.player);
+  }
+
+  if (action === "saveSkills") {
+    supabaseSaveSkills_(context, data.players || []);
+    return { success: true };
+  }
+
+  if (action === "updatePlayerName") {
+    supabaseUpdatePlayerName_(context, data.oldName, data.newName);
+    return { success: true };
+  }
+
+  if (action === "updatePlayer") {
+    return supabaseUpdatePlayer_(context, data.oldName, data.player || {});
+  }
+
+  if (action === "archivePlayer") {
+    return supabaseArchivePlayer_(context, data.playerName);
+  }
+
+  if (action === "restorePlayer") {
+    return supabaseRestorePlayer_(context, data.playerName);
+  }
+
+  if (action === "saveTeams") {
+    supabaseSaveTeams_(context, data.teams || []);
+    return { success: true };
+  }
+
+  return {
+    success: false,
+    message: "Unknown Team Builder action"
+  };
+}
+
+function teamBuilderOwnerUsername_(context) {
+  var user = context && context.user ? context.user : null;
+  if (!user || !user.username) return "__main__";
+  if (isAdminUser_(user) && !user.spreadsheetId) return "__main__";
+  return String(user.username || "").trim();
+}
+
+function normalizeTeamBuilderName_(name) {
+  return String(name || "").trim().toLowerCase();
+}
+
+function supabaseListTeamBuilderPlayerRows_(config, ownerUsername) {
+  var rows = supabaseSelectRows_(config, "team_builder_players", {
+    owner_username: ownerUsername
+  });
+  rows.sort(function (a, b) {
+    var createdA = String(a.created_at || "");
+    var createdB = String(b.created_at || "");
+    if (createdA !== createdB) return createdA < createdB ? -1 : 1;
+    return String(a.name || "").localeCompare(String(b.name || ""));
+  });
+  return rows;
+}
+
+function supabaseMapTeamBuilderPlayer_(row) {
+  return {
+    active: row.active !== false && String(row.active || "").toLowerCase() !== "false",
+    name: String(row.name || "").trim(),
+    skill: Number(row.skill) || 1,
+    cannot: parseCannotList(row.cannot_play_with),
+    club: normalizeClub(row.club)
+  };
+}
+
+function supabaseFindTeamBuilderPlayerRow_(rows, name) {
+  var wanted = normalizeTeamBuilderName_(name);
+  if (!wanted) return null;
+  for (var i = 0; i < rows.length; i++) {
+    if (normalizeTeamBuilderName_(rows[i].name) === wanted) {
+      return rows[i];
+    }
+  }
+  return null;
+}
+
+function supabaseTeamBuilderPlayerPatch_(player, activeOverride) {
+  var now = new Date().toISOString();
+  var patch = {
+    name: String(player && player.name ? player.name : "").trim(),
+    skill: Number(player && player.skill) || 1,
+    cannot_play_with: parseCannotList(player && player.cannot),
+    club: normalizeClub(player && player.club),
+    updated_at: now
+  };
+  if (activeOverride !== undefined) {
+    patch.active = !!activeOverride;
+  } else if (player && player.active !== undefined) {
+    patch.active = !!player.active;
+  }
+  return patch;
+}
+
+function supabaseGetPlayers_(context, includeArchived) {
+  var config = getSupabaseConfig_();
+  var ownerUsername = teamBuilderOwnerUsername_(context);
+  var rows = supabaseListTeamBuilderPlayerRows_(config, ownerUsername);
+  var mapped = rows
+    .map(supabaseMapTeamBuilderPlayer_)
+    .filter(function (player) {
+      return String(player.name || "").trim();
+    });
+
+  if (includeArchived) {
+    return {
+      players: mapped.filter(function (player) {
+        return player.active;
+      }),
+      archivedPlayers: mapped.filter(function (player) {
+        return !player.active;
+      })
+    };
+  }
+
+  return mapped.filter(function (player) {
+    return player.active;
+  });
+}
+
+function supabaseAddPlayer_(context, player) {
+  if (!player || !player.name) {
+    return {
+      success: false,
+      message: "Player name is required"
+    };
+  }
+
+  var name = String(player.name || "").trim();
+  if (!name) {
+    return {
+      success: false,
+      message: "Player name is required"
+    };
+  }
+
+  var config = getSupabaseConfig_();
+  var ownerUsername = teamBuilderOwnerUsername_(context);
+  var rows = supabaseListTeamBuilderPlayerRows_(config, ownerUsername);
+  if (supabaseFindTeamBuilderPlayerRow_(rows, name)) {
+    return {
+      success: false,
+      message: "Player name already exists"
+    };
+  }
+
+  var now = new Date().toISOString();
+  var row = supabaseTeamBuilderPlayerPatch_(
+    {
+      name: name,
+      skill: player.skill,
+      cannot: player.cannot,
+      club: player.club,
+      active: true
+    },
+    true
+  );
+  row.legacy_player_id = "team-builder-player-" + Utilities.getUuid();
+  row.owner_username = ownerUsername;
+  row.owner_display_name = context.user.displayName || context.user.username || ownerUsername;
+  row.notes = String(player.notes || "");
+  row.metadata = {
+    source: "apps-script-team-builder"
+  };
+  row.created_at = now;
+  row.updated_at = now;
+
+  supabaseInsertRows_(config, "team_builder_players", [row]);
+  supabaseAuditLog_(config, context.user.username, "addPlayer", "team_builder_players", row.legacy_player_id, {
+    ownerUsername: ownerUsername,
+    name: name
+  });
+  return {
+    success: true
+  };
+}
+
+function supabaseSaveSkills_(context, players) {
+  var config = getSupabaseConfig_();
+  var ownerUsername = teamBuilderOwnerUsername_(context);
+  var rows = supabaseListTeamBuilderPlayerRows_(config, ownerUsername);
+  (players || []).forEach(function (player) {
+    var row = supabaseFindTeamBuilderPlayerRow_(rows, player && player.name);
+    if (!row || !row.legacy_player_id) return;
+    supabasePatchRows_(config, "team_builder_players", {
+      legacy_player_id: row.legacy_player_id
+    }, {
+      skill: Number(player.skill) || 1,
+      updated_at: new Date().toISOString()
+    });
+  });
+}
+
+function supabaseUpdatePlayerName_(context, oldName, newName) {
+  if (!oldName || !newName) return;
+  var config = getSupabaseConfig_();
+  var ownerUsername = teamBuilderOwnerUsername_(context);
+  var rows = supabaseListTeamBuilderPlayerRows_(config, ownerUsername);
+  var row = supabaseFindTeamBuilderPlayerRow_(rows, oldName);
+  if (!row || !row.legacy_player_id) return;
+  supabasePatchRows_(config, "team_builder_players", {
+    legacy_player_id: row.legacy_player_id
+  }, {
+    name: String(newName || "").trim(),
+    updated_at: new Date().toISOString()
+  });
+}
+
+function supabaseUpdatePlayer_(context, oldName, player) {
+  if (!oldName || !player || !player.name) {
+    return {
+      success: false,
+      message: "Missing player data"
+    };
+  }
+
+  var newName = String(player.name || "").trim();
+  if (!newName) {
+    return {
+      success: false,
+      message: "Player name is required"
+    };
+  }
+
+  var config = getSupabaseConfig_();
+  var ownerUsername = teamBuilderOwnerUsername_(context);
+  var rows = supabaseListTeamBuilderPlayerRows_(config, ownerUsername);
+  var duplicate = supabaseFindTeamBuilderPlayerRow_(rows, newName);
+  if (duplicate && normalizeTeamBuilderName_(newName) !== normalizeTeamBuilderName_(oldName)) {
+    return {
+      success: false,
+      message: "Player name already exists"
+    };
+  }
+
+  var row = supabaseFindTeamBuilderPlayerRow_(rows, oldName);
+  if (!row || !row.legacy_player_id) {
+    return {
+      success: false,
+      message: "Player not found"
+    };
+  }
+
+  supabasePatchRows_(config, "team_builder_players", {
+    legacy_player_id: row.legacy_player_id
+  }, supabaseTeamBuilderPlayerPatch_(player, row.active !== false));
+  supabaseAuditLog_(config, context.user.username, "updatePlayer", "team_builder_players", row.legacy_player_id, {
+    ownerUsername: ownerUsername,
+    oldName: String(oldName || "").trim(),
+    newName: newName
+  });
+  return {
+    success: true
+  };
+}
+
+function supabaseArchivePlayer_(context, playerName) {
+  return supabaseSetTeamBuilderPlayerActive_(context, playerName, false, "archivePlayer");
+}
+
+function supabaseRestorePlayer_(context, playerName) {
+  return supabaseSetTeamBuilderPlayerActive_(context, playerName, true, "restorePlayer");
+}
+
+function supabaseSetTeamBuilderPlayerActive_(context, playerName, active, action) {
+  var name = String(playerName || "").trim();
+  if (!name) {
+    return {
+      success: false,
+      message: "playerName is required"
+    };
+  }
+
+  var config = getSupabaseConfig_();
+  var ownerUsername = teamBuilderOwnerUsername_(context);
+  var rows = supabaseListTeamBuilderPlayerRows_(config, ownerUsername);
+  var row = supabaseFindTeamBuilderPlayerRow_(rows, name);
+  if (!row || !row.legacy_player_id) {
+    return {
+      success: false,
+      message: "Player not found"
+    };
+  }
+
+  supabasePatchRows_(config, "team_builder_players", {
+    legacy_player_id: row.legacy_player_id
+  }, {
+    active: !!active,
+    updated_at: new Date().toISOString()
+  });
+  supabaseAuditLog_(config, context.user.username, action, "team_builder_players", row.legacy_player_id, {
+    ownerUsername: ownerUsername,
+    name: name
+  });
+  return {
+    success: true
+  };
+}
+
+function supabaseSaveTeams_(context, currentTeams) {
+  var config = getSupabaseConfig_();
+  var ownerUsername = teamBuilderOwnerUsername_(context);
+  var now = new Date().toISOString();
+  var legacySavedTeamId = "team-builder-current-" + ownerUsername;
+  supabaseUpsertRows_(config, "team_builder_saved_teams", [
+    {
+      legacy_saved_team_id: legacySavedTeamId,
+      owner_username: ownerUsername,
+      label: "Current teams",
+      teams_json: currentTeams || [],
+      created_at: now,
+      updated_at: now
+    }
+  ], "legacy_saved_team_id");
+  supabaseAuditLog_(config, context.user.username, "saveTeams", "team_builder_saved_teams", legacySavedTeamId, {
+    ownerUsername: ownerUsername,
+    teamCount: Array.isArray(currentTeams) ? currentTeams.length : 0
+  });
+}
+
+function supabaseListTeams_(context) {
+  var config = getSupabaseConfig_();
+  var ownerUsername = teamBuilderOwnerUsername_(context);
+  var rows = supabaseSelectRows_(config, "team_builder_saved_teams", {
+    owner_username: ownerUsername
+  });
+  rows.sort(function (a, b) {
+    return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+  });
+  return rows.map(function (row) {
+    return {
+      label: row.label || "Current teams",
+      teams: Array.isArray(row.teams_json) ? row.teams_json : [],
+      updatedAt: row.updated_at || ""
+    };
+  });
 }
 
 /* =========================
@@ -10153,6 +10581,42 @@ function playerHubBackendLog_(message) {
   playerHubSnapshotLog_("[PlayerHubBackend] " + message);
 }
 
+function teamBuilderBackendMode_() {
+  try {
+    var mode = String(
+      PropertiesService.getScriptProperties().getProperty("TEAM_BUILDER_BACKEND") || "sheets"
+    )
+      .trim()
+      .toLowerCase();
+    return mode === "supabase" ? "supabase" : "sheets";
+  } catch (err) {
+    return "sheets";
+  }
+}
+
+function teamBuilderBackendLog_(message) {
+  try {
+    Logger.log("[TeamBuilderBackend] " + message);
+  } catch (err) {}
+}
+
+function isSupabaseTeamBuilderBackendEnabled_() {
+  try {
+    var config = getSupabaseConfig_();
+    return !!(
+      config &&
+      config.teamBuilderBackend === "supabase" &&
+      config.url &&
+      config.serviceRoleKey
+    );
+  } catch (err) {
+    teamBuilderBackendLog_(
+      "mode check failed " + (err && err.message ? err.message : String(err))
+    );
+    return false;
+  }
+}
+
 function getSupabaseConfig_() {
   var properties = PropertiesService.getScriptProperties();
   var enabledValue = String(
@@ -10162,6 +10626,7 @@ function getSupabaseConfig_() {
     .toLowerCase();
   var backendMode = playerHubBackendMode_();
   var tournamentBackendMode = tournamentBackendMode_();
+  var teamBuilderBackendMode = teamBuilderBackendMode_();
   return {
     url: String(properties.getProperty("SUPABASE_URL") || "").trim(),
     serviceRoleKey: String(
@@ -10169,6 +10634,7 @@ function getSupabaseConfig_() {
     ).trim(),
     playerHubBackend: backendMode,
     tournamentBackend: tournamentBackendMode,
+    teamBuilderBackend: teamBuilderBackendMode,
     playerHubReadsEnabled:
       backendMode === "supabase" ||
       enabledValue === "true" ||
@@ -10534,6 +11000,8 @@ function supabaseTableWriteColumns_() {
     roster_players: ["legacy_roster_player_id", "legacy_roster_id", "legacy_plan_id", "legacy_tournament_id", "tournament_name", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "squad_label", "player_username", "player_display_name", "player_country", "assigned_squad", "roster_role", "source", "player_status", "added_by_username", "added_at", "created_at", "updated_at"],
     official_rosters: ["legacy_official_roster_id", "legacy_draft_id", "legacy_tournament_id", "tournament_name", "legacy_team_id", "team_name", "squad_label", "group_name", "player_username", "player_display_name", "player_country", "status", "locked_at", "locked_by_username", "created_at", "updated_at"],
     event_comments: ["legacy_comment_id", "legacy_plan_id", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "username", "display_name", "message", "active", "created_at", "updated_at"],
+    team_builder_players: ["legacy_player_id", "owner_username", "owner_display_name", "active", "name", "skill", "cannot_play_with", "club", "notes", "metadata", "created_at", "updated_at"],
+    team_builder_saved_teams: ["legacy_saved_team_id", "owner_username", "label", "teams_json", "created_at", "updated_at"],
     audit_log: ["actor_username", "action", "entity_table", "legacy_entity_id", "metadata", "created_at", "updated_at"]
   };
 }
@@ -10596,7 +11064,11 @@ function supabaseLooksLikeFilter_(value) {
       key === "legacy_roster_id" ||
       key === "legacy_roster_player_id" ||
       key === "legacy_draft_id" ||
-      key === "legacy_official_roster_id"
+      key === "legacy_official_roster_id" ||
+      key === "legacy_player_id" ||
+      key === "legacy_saved_team_id" ||
+      key === "owner_username" ||
+      key === "name"
     );
   });
 }
