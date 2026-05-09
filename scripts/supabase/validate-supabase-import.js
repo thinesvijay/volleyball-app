@@ -84,6 +84,11 @@ async function countTable(supabaseUrl, serviceRoleKey, table) {
 
   const body = await response.text();
   if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(
+        `${table} count failed: ${response.status}. Check that SUPABASE_SERVICE_ROLE_KEY is the Supabase service_role key, not the anon/public key. If the key is correct, run supabase/import-service-role-grants.sql once in the Supabase SQL editor for the dev project. ${body}`
+      );
+    }
     throw new Error(`${table} count failed: ${response.status} ${body}`);
   }
 

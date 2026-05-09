@@ -29,6 +29,14 @@ Then run the safe dry-run:
 npm.cmd run supabase:shadow:dry-run
 ```
 
+If validation says `permission denied for table app_users`, open the Supabase SQL editor for `make-teams-pro-dev` and run:
+
+```text
+supabase/import-service-role-grants.sql
+```
+
+That grants access only to `service_role`; it does not create anon policies.
+
 Review the output and `supabase/.tmp/player-hub-export.json`.
 
 Only when you are ready to write to the Supabase dev project:
