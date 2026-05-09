@@ -2,6 +2,8 @@
 
 This diagnostic is the first server-side Supabase read test path for Player Hub. It is disabled by default and does not change the normal app flow.
 
+For the exact temporary enable/test/disable sequence, use [Supabase Diagnostic Toggle Runbook](supabase-diagnostic-toggle-runbook.md).
+
 ## Action
 
 ```text

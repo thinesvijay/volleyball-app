@@ -8,6 +8,8 @@ React -> Apps Script Code.gs -> Google Sheets
 
 Supabase reads are not enabled by default and the React app is not connected to Supabase.
 
+For the current diagnostic-only toggle procedure, use [Supabase Diagnostic Toggle Runbook](supabase-diagnostic-toggle-runbook.md).
+
 ## Current State
 
 - Google Sheets remains the source of truth.
