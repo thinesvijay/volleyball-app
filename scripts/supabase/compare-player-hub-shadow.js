@@ -1,8 +1,12 @@
 const fs = require("fs");
 const path = require("path");
+const {
+  loadPlayerHubSupabaseSnapshot,
+  playerHubSnapshotPath,
+  readPlayerHubSupabaseData,
+} = require("./player-hub-read-service");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
-const DEFAULT_ENV_PATH = path.join(PROJECT_ROOT, "supabase", ".env.import");
 const DEFAULT_EXPORT_PATH = path.join(
   PROJECT_ROOT,
   "supabase",
@@ -66,44 +70,6 @@ const COMPARE_TABLES = [
     select: "legacy_tournament_id,name",
   },
 ];
-
-function loadEnvFile(filePath) {
-  if (!fs.existsSync(filePath)) return;
-  const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-    if (!match) continue;
-    const key = match[1];
-    let value = match[2].trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    if (process.env[key] === undefined) process.env[key] = value;
-  }
-}
-
-function requireEnv() {
-  const envPath = path.resolve(process.env.SUPABASE_IMPORT_ENV || DEFAULT_ENV_PATH);
-  loadEnvFile(envPath);
-
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!supabaseUrl || !serviceRoleKey) {
-    throw new Error(
-      `Supabase env is not configured. Create ${path.relative(PROJECT_ROOT, envPath)} from supabase/.env.import.example.`
-    );
-  }
-
-  return {
-    supabaseUrl: supabaseUrl.replace(/\/+$/, ""),
-    serviceRoleKey,
-  };
-}
 
 function exportPath() {
   return path.resolve(
@@ -234,40 +200,6 @@ function buildExpectedSets(exportData) {
   };
 }
 
-async function fetchRows({ supabaseUrl, serviceRoleKey }, table, select) {
-  const pageSize = 1000;
-  let from = 0;
-  const rows = [];
-
-  while (true) {
-    const response = await fetch(
-      `${supabaseUrl}/rest/v1/${table}?select=${encodeURIComponent(select)}`,
-      {
-        method: "GET",
-        headers: {
-          apikey: serviceRoleKey,
-          Authorization: `Bearer ${serviceRoleKey}`,
-          Prefer: "count=exact",
-          Range: `${from}-${from + pageSize - 1}`,
-          "Range-Unit": "items",
-        },
-      }
-    );
-
-    const body = await response.text();
-    if (!response.ok) {
-      throw new Error(`${table} read failed: ${response.status} ${body}`);
-    }
-
-    const page = body ? JSON.parse(body) : [];
-    rows.push(...page);
-    if (page.length < pageSize) break;
-    from += pageSize;
-  }
-
-  return rows;
-}
-
 function difference(left, right) {
   const result = [];
   for (const value of left) {
@@ -277,7 +209,6 @@ function difference(left, right) {
 }
 
 async function main() {
-  const env = requireEnv();
   const sourcePath = exportPath();
   if (!fs.existsSync(sourcePath)) {
     throw new Error(`Export JSON not found: ${sourcePath}. Run npm.cmd run supabase:export:player-hub first.`);
@@ -285,9 +216,18 @@ async function main() {
 
   const exportData = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
   const expectedSets = buildExpectedSets(exportData);
+  const snapshotPath = playerHubSnapshotPath();
+  let supabaseSnapshot = loadPlayerHubSupabaseSnapshot(snapshotPath);
+  let supabaseSource = `snapshot ${path.relative(PROJECT_ROOT, snapshotPath)}`;
+  if (!supabaseSnapshot) {
+    supabaseSource = "live Supabase read";
+    supabaseSnapshot = await readPlayerHubSupabaseData();
+  }
+  const supabaseCollections = supabaseSnapshot.collections || {};
 
   console.log("Make Teams Pro Supabase shadow comparison");
   console.log(`Export file: ${sourcePath}`);
+  console.log(`Supabase source: ${supabaseSource}`);
   console.log("Read-only: no app behavior changes, no writes.");
   console.log("");
 
@@ -295,7 +235,7 @@ async function main() {
   const failures = [];
 
   for (const config of COMPARE_TABLES) {
-    const rows = await fetchRows(env, config.table, config.select);
+    const rows = supabaseCollections[config.exportKey] || [];
     const actual = new Set(
       rows.map((row) => text(row[config.legacyColumn])).filter(Boolean)
     );
