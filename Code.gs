@@ -26,6 +26,10 @@ function doGet(e) {
   }
 
   if (action === "getMyPlayerProfile") {
+    var getProfileSupabaseResponse = handlePlayerHubSupabaseAction_(
+      Object.assign({}, e ? e.parameter : {}, { action: action })
+    );
+    if (getProfileSupabaseResponse) return jsonResponse(getProfileSupabaseResponse);
     return jsonResponse(getMyPlayerProfile(e ? e.parameter : {}));
   }
 
@@ -38,6 +42,12 @@ function doGet(e) {
   }
 
   if (action === "listClubTeams") {
+    var listClubTeamsSupabaseResponse = handlePlayerHubSupabaseAction_(
+      Object.assign({}, e ? e.parameter : {}, { action: action })
+    );
+    if (listClubTeamsSupabaseResponse) {
+      return jsonResponse(listClubTeamsSupabaseResponse);
+    }
     return jsonResponse(listClubTeams(e ? e.parameter : {}));
   }
 
@@ -147,6 +157,11 @@ function doPost(e) {
 
   if (data.action === "testSupabasePlayerHubSnapshot") {
     return jsonResponse(testSupabasePlayerHubSnapshot(data));
+  }
+
+  var playerHubSupabaseResponse = handlePlayerHubSupabaseAction_(data);
+  if (playerHubSupabaseResponse) {
+    return jsonResponse(playerHubSupabaseResponse);
   }
 
   if (data.action === "listEventComments") {
@@ -9458,6 +9473,28 @@ function playerHubSnapshotRosterPlayers_(ctx) {
   );
 }
 
+function playerHubSnapshotOfficialRosters_(ctx) {
+  return playerHubSnapshotData_(
+    ctx,
+    "officialRosters",
+    OFFICIAL_ROSTERS_SHEET_,
+    OFFICIAL_ROSTER_HEADERS_,
+    "OfficialRosters",
+    officialRosterFromRow_
+  );
+}
+
+function playerHubSnapshotTournaments_(ctx) {
+  return playerHubSnapshotData_(
+    ctx,
+    "tournaments",
+    TOURNAMENTS_SHEET_,
+    TOURNAMENT_HEADERS_,
+    "Tournaments",
+    tournamentFromRow_
+  );
+}
+
 function playerHubSnapshotProfilesByUsername_(ctx) {
   if (ctx.maps.profilesByUsername) return ctx.maps.profilesByUsername;
   var map = {};
@@ -9715,11 +9752,24 @@ function playerHubSnapshotDecorateRoster_(ctx, roster) {
       var bName = String(b.playerDisplayName || b.playerUsername || "");
       return aName.localeCompare(bName);
     });
+  var officialPlayers = playerHubSnapshotOfficialRosters_(ctx)
+    .filter(function (player) {
+      return player && player.draftId === roster.rosterId && player.status === "LOCKED";
+    })
+    .sort(function (a, b) {
+      var squadOrder = { "Team A": 1, "Team B": 2, "Team C": 3, Reserve: 4 };
+      var squadDiff =
+        (squadOrder[a.groupName] || 99) - (squadOrder[b.groupName] || 99);
+      if (squadDiff !== 0) return squadDiff;
+      var aName = String(a.playerDisplayName || a.playerUsername || "");
+      var bName = String(b.playerDisplayName || b.playerUsername || "");
+      return aName.localeCompare(bName);
+    });
   return Object.assign({}, roster, {
     players: players,
     playerCount: players.length,
-    officialPlayers: [],
-    officialPlayerCount: 0
+    officialPlayers: officialPlayers,
+    officialPlayerCount: officialPlayers.length
   });
 }
 
@@ -10091,6 +10141,18 @@ function authorizeSupabaseUrlFetchOnce() {
   return message;
 }
 
+function playerHubBackendMode_() {
+  var properties = PropertiesService.getScriptProperties();
+  var mode = String(properties.getProperty("PLAYER_HUB_BACKEND") || "sheets")
+    .trim()
+    .toLowerCase();
+  return mode === "supabase" ? "supabase" : "sheets";
+}
+
+function playerHubBackendLog_(message) {
+  playerHubSnapshotLog_("[PlayerHubBackend] " + message);
+}
+
 function getSupabaseConfig_() {
   var properties = PropertiesService.getScriptProperties();
   var enabledValue = String(
@@ -10098,17 +10160,38 @@ function getSupabaseConfig_() {
   )
     .trim()
     .toLowerCase();
+  var backendMode = playerHubBackendMode_();
   return {
     url: String(properties.getProperty("SUPABASE_URL") || "").trim(),
     serviceRoleKey: String(
       properties.getProperty("SUPABASE_SERVICE_ROLE_KEY") || ""
     ).trim(),
+    playerHubBackend: backendMode,
     playerHubReadsEnabled:
+      backendMode === "supabase" ||
       enabledValue === "true" ||
       enabledValue === "1" ||
       enabledValue === "yes" ||
       enabledValue === "on"
   };
+}
+
+function isSupabasePlayerHubBackendEnabled_() {
+  try {
+    var config = getSupabaseConfig_();
+    return !!(
+      config &&
+      config.playerHubBackend === "supabase" &&
+      config.url &&
+      config.serviceRoleKey
+    );
+  } catch (err) {
+    playerHubBackendLog_(
+      "Supabase backend config unavailable " +
+        (err && err.message ? err.message : String(err))
+    );
+    return false;
+  }
 }
 
 function isSupabasePlayerHubReadsEnabled_() {
@@ -10127,6 +10210,2797 @@ function isSupabasePlayerHubReadsEnabled_() {
     );
     return false;
   }
+}
+
+function playerHubBackendActionMap_() {
+  return {
+    getMyPlayerProfile: supabaseGetMyPlayerProfile_,
+    listClubTeams: supabaseListClubTeams_,
+    listClubTeamsAdmin: supabaseListClubTeamsAdmin_,
+    saveClubTeamAdmin: supabaseSaveClubTeamAdmin_,
+    deactivateClubTeamAdmin: supabaseDeactivateClubTeamAdmin_,
+    updatePlayerProfileAdminStatus: supabaseUpdatePlayerProfileAdminStatus_,
+    listVisibleTeamNeeds: supabaseListVisibleTeamNeeds_,
+    listMyAccessRequests: supabaseListMyAccessRequests_,
+    listAccessRequestsAdmin: supabaseListAccessRequestsAdmin_,
+    reviewAccessRequestAdmin: supabaseReviewAccessRequestAdmin_,
+    requestTeamIdentityChange: supabaseRequestTeamIdentityChange_,
+    listTeamIdentityChangeRequests: supabaseListTeamIdentityChangeRequests_,
+    reviewTeamIdentityChangeRequest: supabaseReviewTeamIdentityChangeRequest_,
+    getMyTeamProfile: supabaseGetMyTeamProfile_,
+    saveMyTeamProfile: supabaseSaveMyTeamProfile_,
+    createOrUpdateTeamNeed: supabaseCreateOrUpdateTeamNeed_,
+    closeTeamNeed: supabaseCloseTeamNeed_,
+    listTeamProfilesAdmin: supabaseListTeamProfilesAdmin_,
+    updateTeamProfileAdmin: supabaseUpdateTeamProfileAdmin_,
+    createTeamNeedInterest: supabaseCreateTeamNeedInterest_,
+    listMyTeamNeedInterests: supabaseListMyTeamNeedInterests_,
+    listTeamNeedInterestsForCaptain: supabaseListTeamNeedInterestsForCaptain_,
+    reviewTeamNeedInterest: supabaseReviewTeamNeedInterest_,
+    listTeamNeedInterestsAdmin: supabaseListTeamNeedInterestsAdmin_,
+    addTeamMemberFromInterest: supabaseAddTeamMemberFromInterest_,
+    listMyTeamMembersForCaptain: supabaseListMyTeamMembersForCaptain_,
+    listMyConfirmedTeamsForPlayer: supabaseListMyConfirmedTeamsForPlayer_,
+    removeTeamMember: supabaseRemoveTeamMember_,
+    listTeamMembersAdmin: supabaseListTeamMembersAdmin_,
+    createOrUpdateTeamMembershipRequest: supabaseCreateOrUpdateTeamMembershipRequest_,
+    listMyTeamMembershipRequests: supabaseListMyTeamMembershipRequests_,
+    listMembershipRequestsForCaptain: supabaseListMembershipRequestsForCaptain_,
+    reviewTeamMembershipRequest: supabaseReviewTeamMembershipRequest_,
+    cancelMyTeamMembershipRequest: supabaseCancelMyTeamMembershipRequest_,
+    listTeamMembershipRequestsAdmin: supabaseListTeamMembershipRequestsAdmin_,
+    createTournamentTeamPlan: supabaseCreateTournamentTeamPlan_,
+    listMyTournamentTeamPlansForCaptain: supabaseListMyTournamentTeamPlansForCaptain_,
+    listMyTournamentAvailabilityForPlayer: supabaseListMyTournamentAvailabilityForPlayer_,
+    listMyTournamentSquadPlanningForPlayer:
+      supabaseListMyTournamentSquadPlanningForPlayer_,
+    listTournamentAvailabilityForCaptain: supabaseListTournamentAvailabilityForCaptain_,
+    updateTournamentPlanStatus: supabaseUpdateTournamentPlanStatus_,
+    listTournamentSquadPlanningForCaptain:
+      supabaseListTournamentSquadPlanningForCaptain_,
+    syncSquadPlanningFromAvailability: supabaseListTournamentSquadPlanningForCaptain_,
+    assignPlayerToSquad: supabaseAssignPlayerToSquad_,
+    removePlayerFromSquadPlanning: supabaseRemovePlayerFromSquadPlanning_,
+    createOrUpdateRosterDraftFromSquadPlanning:
+      supabaseCreateOrUpdateRosterDraftFromSquadPlanning_,
+    listRosterDraftForCaptain: supabaseListRosterDraftForCaptain_,
+    submitRosterDraft: supabaseSubmitRosterDraft_,
+    removePlayerFromRosterDraft: supabaseRemovePlayerFromRosterDraft_,
+    cancelRosterDraft: supabaseCancelRosterDraft_,
+    listRosterDraftAdmin: supabaseListSubmittedRosterDraftsForReview_,
+    listSubmittedRosterDraftsForReview: supabaseListSubmittedRosterDraftsForReview_,
+    reviewRosterDraft: supabaseReviewRosterDraft_,
+    lockOfficialRoster: supabaseLockOfficialRoster_,
+    listMyRosterStatusForPlayer: supabaseListMyRosterStatusForPlayer_,
+    listEventComments: supabaseListEventComments_,
+    saveMyPlayerProfile: supabaseSaveMyPlayerProfile_,
+    createAccessRequest: supabaseCreateAccessRequest_,
+    updateTournamentAvailabilityResponse: supabaseUpdateTournamentAvailabilityResponse_,
+    addEventComment: supabaseAddEventComment_,
+    archiveEventComment: supabaseArchiveEventComment_
+  };
+}
+
+function playerHubBackendWriteActions_() {
+  return {
+    saveClubTeamAdmin: true,
+    deactivateClubTeamAdmin: true,
+    updatePlayerProfileAdminStatus: true,
+    reviewAccessRequestAdmin: true,
+    requestTeamIdentityChange: true,
+    reviewTeamIdentityChangeRequest: true,
+    saveMyTeamProfile: true,
+    createOrUpdateTeamNeed: true,
+    closeTeamNeed: true,
+    updateTeamProfileAdmin: true,
+    createTeamNeedInterest: true,
+    reviewTeamNeedInterest: true,
+    addTeamMemberFromInterest: true,
+    removeTeamMember: true,
+    createOrUpdateTeamMembershipRequest: true,
+    reviewTeamMembershipRequest: true,
+    cancelMyTeamMembershipRequest: true,
+    createTournamentTeamPlan: true,
+    updateTournamentPlanStatus: true,
+    assignPlayerToSquad: true,
+    removePlayerFromSquadPlanning: true,
+    createOrUpdateRosterDraftFromSquadPlanning: true,
+    submitRosterDraft: true,
+    removePlayerFromRosterDraft: true,
+    cancelRosterDraft: true,
+    reviewRosterDraft: true,
+    lockOfficialRoster: true,
+    addEventComment: true,
+    archiveEventComment: true,
+    saveMyPlayerProfile: true,
+    createAccessRequest: true,
+    updateTournamentAvailabilityResponse: true
+  };
+}
+
+function playerHubKnownBackendActions_() {
+  return {
+    getMyPlayerProfile: true,
+    getPlayerHubSnapshot: true,
+    listClubTeams: true,
+    listClubTeamsAdmin: true,
+    saveClubTeamAdmin: true,
+    deactivateClubTeamAdmin: true,
+    requestTeamIdentityChange: true,
+    listTeamIdentityChangeRequests: true,
+    reviewTeamIdentityChangeRequest: true,
+    createAccessRequest: true,
+    listMyAccessRequests: true,
+    listAccessRequestsAdmin: true,
+    reviewAccessRequestAdmin: true,
+    getMyTeamProfile: true,
+    saveMyTeamProfile: true,
+    createOrUpdateTeamNeed: true,
+    closeTeamNeed: true,
+    listVisibleTeamNeeds: true,
+    listTeamProfilesAdmin: true,
+    updateTeamProfileAdmin: true,
+    createTeamNeedInterest: true,
+    listMyTeamNeedInterests: true,
+    listTeamNeedInterestsForCaptain: true,
+    reviewTeamNeedInterest: true,
+    listTeamNeedInterestsAdmin: true,
+    addTeamMemberFromInterest: true,
+    listMyTeamMembersForCaptain: true,
+    listMyConfirmedTeamsForPlayer: true,
+    removeTeamMember: true,
+    listTeamMembersAdmin: true,
+    createOrUpdateTeamMembershipRequest: true,
+    listMyTeamMembershipRequests: true,
+    listMembershipRequestsForCaptain: true,
+    reviewTeamMembershipRequest: true,
+    cancelMyTeamMembershipRequest: true,
+    listTeamMembershipRequestsAdmin: true,
+    createTournamentTeamPlan: true,
+    listMyTournamentTeamPlansForCaptain: true,
+    listMyTournamentAvailabilityForPlayer: true,
+    listMyTournamentSquadPlanningForPlayer: true,
+    updateTournamentAvailabilityResponse: true,
+    listTournamentAvailabilityForCaptain: true,
+    updateTournamentPlanStatus: true,
+    syncSquadPlanningFromAvailability: true,
+    listTournamentSquadPlanningForCaptain: true,
+    assignPlayerToSquad: true,
+    removePlayerFromSquadPlanning: true,
+    createOrUpdateRosterDraftFromSquadPlanning: true,
+    listRosterDraftForCaptain: true,
+    submitRosterDraft: true,
+    removePlayerFromRosterDraft: true,
+    cancelRosterDraft: true,
+    listMyRosterStatusForPlayer: true,
+    listRosterDraftAdmin: true,
+    listSubmittedRosterDraftsForReview: true,
+    reviewRosterDraft: true,
+    lockOfficialRoster: true,
+    listEventComments: true,
+    addEventComment: true,
+    archiveEventComment: true
+  };
+}
+
+function handlePlayerHubSupabaseAction_(data) {
+  var action = String(data && data.action || "").trim();
+  if (!action || !isSupabasePlayerHubBackendEnabled_()) return null;
+
+  var handlers = playerHubBackendActionMap_();
+  var handler = handlers[action];
+  if (!handler) {
+    if (playerHubKnownBackendActions_()[action]) {
+      playerHubBackendLog_("fallback " + action + " (not migrated yet)");
+    }
+    return null;
+  }
+
+  try {
+    playerHubBackendLog_(
+      (playerHubBackendWriteActions_()[action] ? "supabase write " : "supabase ") +
+        action
+    );
+    return handler(data || {});
+  } catch (err) {
+    playerHubBackendLog_(
+      "fallback " +
+        action +
+        " " +
+        (err && err.message ? err.message : String(err))
+    );
+    return null;
+  }
+}
+
+function supabaseApiBaseUrl_(config, tableName, query) {
+  var url =
+    String(config.url || "").replace(/\/+$/, "") +
+    "/rest/v1/" +
+    tableName;
+  if (query) url += "?" + query;
+  return url;
+}
+
+function supabaseFilter_(column, value) {
+  return encodeURIComponent(column) + "=eq." + encodeURIComponent(String(value || ""));
+}
+
+function supabaseApiRequest_(config, tableName, method, query, payload, prefer) {
+  var headers = {
+    apikey: config.serviceRoleKey,
+    Authorization: "Bearer " + config.serviceRoleKey,
+    Accept: "application/json"
+  };
+  if (payload !== undefined && payload !== null) {
+    headers["Content-Type"] = "application/json";
+  }
+  if (prefer) headers.Prefer = prefer;
+
+  var request = {
+    method: String(method || "get").toLowerCase(),
+    muteHttpExceptions: true,
+    headers: headers
+  };
+  if (payload !== undefined && payload !== null) {
+    request.payload = JSON.stringify(payload);
+  }
+
+  var response = UrlFetchApp.fetch(
+    supabaseApiBaseUrl_(config, tableName, query),
+    request
+  );
+  var statusCode = response.getResponseCode();
+  var body = response.getContentText() || "";
+  if (statusCode < 200 || statusCode >= 300) {
+    throw new Error(
+      tableName + " " + method + " failed: " + statusCode + " " + body.slice(0, 180)
+    );
+  }
+
+  if (!body) return null;
+  try {
+    return JSON.parse(body);
+  } catch (err) {
+    return null;
+  }
+}
+
+function supabaseSelectRows_(config, tableName, filters, select) {
+  var parts = ["select=" + encodeURIComponent(select || "*")];
+  Object.keys(filters || {}).forEach(function (key) {
+    parts.push(supabaseFilter_(key, filters[key]));
+  });
+  var rows = supabaseApiRequest_(config, tableName, "get", parts.join("&"));
+  return Array.isArray(rows) ? rows : [];
+}
+
+function supabaseTableWriteColumns_() {
+  return {
+    app_users: ["username", "email", "display_name", "role", "active", "can_request_team_profile", "can_use_team_builder", "can_create_tournaments", "created_at", "updated_at"],
+    club_teams: ["legacy_team_id", "name", "country", "city", "level", "type", "active", "created_at", "updated_at"],
+    player_profiles: ["legacy_profile_id", "username", "first_name", "last_name", "display_name", "email", "phone", "country", "region", "legacy_club_team_id", "club_team_name", "club_or_team", "team_note", "profile_type", "free_agent", "primary_role", "secondary_role", "custom_role", "level", "availability", "looking_for_team", "available_as_substitute", "can_guest_for_teams", "interested_abroad", "public_visible", "approved", "created_at", "updated_at"],
+    access_requests: ["legacy_request_id", "username", "display_name", "email", "request_type", "legacy_club_team_id", "club_team_name", "message", "status", "admin_note", "reviewed_by_username", "reviewed_at", "created_at", "updated_at"],
+    team_profiles: ["legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "country", "captain_username", "captain_display_name", "team_level", "team_description", "contact_note", "needs_players", "needs_text", "active", "public_visible", "approved", "created_at", "updated_at"],
+    team_identity_change_requests: ["legacy_request_id", "legacy_team_id", "current_name", "requested_name", "current_country", "requested_country", "current_city", "requested_city", "requested_by_username", "reason", "status", "admin_note", "reviewed_by_username", "reviewed_at", "created_at", "updated_at"],
+    team_members: ["legacy_team_member_id", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "captain_username", "player_username", "player_display_name", "player_email", "player_phone", "player_country", "legacy_source_interest_id", "member_status", "confirmed_by_username", "confirmed_at", "created_at", "updated_at"],
+    team_membership_requests: ["legacy_request_id", "legacy_club_team_id", "club_team_name", "player_username", "player_display_name", "player_email", "player_phone", "player_country", "legacy_player_profile_id", "status", "requested_at", "reviewed_by_username", "reviewed_at", "review_note", "created_at", "updated_at"],
+    team_needs: ["legacy_need_id", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "captain_username", "need_type", "need_text", "needed_count", "status", "visibility", "is_published", "need_context", "legacy_tournament_id", "tournament_name", "squad_label", "class_name", "deadline_at", "source_type", "published_at", "public_visible", "approved", "created_at", "updated_at"],
+    team_need_interests: ["legacy_interest_id", "legacy_need_id", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "player_username", "player_display_name", "player_email", "player_phone", "player_country", "message", "status", "reviewed_by_username", "reviewed_at", "created_at", "updated_at"],
+    tournament_events: ["legacy_plan_id", "legacy_tournament_id", "tournament_name", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "captain_username", "squad_label", "class_name", "status", "deadline_at", "note", "created_at", "updated_at"],
+    tournament_availability: ["legacy_availability_id", "legacy_plan_id", "legacy_tournament_id", "tournament_name", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "player_username", "player_display_name", "player_email", "player_phone", "player_country", "response_status", "preferred_squad", "player_note", "requested_by_username", "requested_at", "responded_at", "created_at", "updated_at"],
+    tournament_squad_planning: ["legacy_planning_id", "legacy_plan_id", "legacy_tournament_id", "tournament_name", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "player_username", "player_display_name", "player_country", "availability_status", "preferred_squad", "assigned_squad", "planning_status", "assigned_by_username", "assigned_at", "created_at", "updated_at"],
+    roster_drafts: ["legacy_roster_id", "legacy_plan_id", "legacy_tournament_id", "tournament_name", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "squad_label", "captain_username", "roster_status", "submitted_by_username", "submitted_at", "reviewed_by_username", "reviewed_at", "admin_note", "locked_at", "locked_by_username", "lock_reason", "created_at", "updated_at"],
+    roster_players: ["legacy_roster_player_id", "legacy_roster_id", "legacy_plan_id", "legacy_tournament_id", "tournament_name", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "squad_label", "player_username", "player_display_name", "player_country", "assigned_squad", "roster_role", "source", "player_status", "added_by_username", "added_at", "created_at", "updated_at"],
+    official_rosters: ["legacy_official_roster_id", "legacy_draft_id", "legacy_tournament_id", "tournament_name", "legacy_team_id", "team_name", "squad_label", "group_name", "player_username", "player_display_name", "player_country", "status", "locked_at", "locked_by_username", "created_at", "updated_at"],
+    event_comments: ["legacy_comment_id", "legacy_plan_id", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "username", "display_name", "message", "active", "created_at", "updated_at"],
+    audit_log: ["actor_username", "action", "entity_table", "legacy_entity_id", "metadata", "created_at", "updated_at"]
+  };
+}
+
+function supabaseNormalizeRowsForWrite_(tableName, rows) {
+  var columns = supabaseTableWriteColumns_()[tableName];
+  if (!columns) return rows || [];
+  rows = rows || [];
+  var present = {};
+  rows.forEach(function(row) {
+    columns.forEach(function(column) {
+      if (row && Object.prototype.hasOwnProperty.call(row, column) && row[column] !== undefined) {
+        present[column] = true;
+      }
+    });
+  });
+  var presentColumns = columns.filter(function(column) { return present[column]; });
+  return rows.map(function(row) {
+    var normalized = {};
+    presentColumns.forEach(function(column) {
+      normalized[column] = row && row[column] !== undefined ? row[column] : null;
+    });
+    return normalized;
+  });
+}
+
+function supabaseNormalizePatchForWrite_(tableName, patch) {
+  var columns = supabaseTableWriteColumns_()[tableName];
+  if (!columns || !patch) return patch || {};
+  var normalized = {};
+  columns.forEach(function(column) {
+    if (Object.prototype.hasOwnProperty.call(patch, column) && patch[column] !== undefined) {
+      normalized[column] = patch[column];
+    }
+  });
+  return normalized;
+}
+
+function supabaseLooksLikeFilter_(value) {
+  var keys = Object.keys(value || {});
+  if (!keys.length) return false;
+  return keys.every(function(key) {
+    return (
+      key === "id" ||
+      key === "username" ||
+      key === "legacy_request_id" ||
+      key === "legacy_profile_id" ||
+      key === "legacy_team_id" ||
+      key === "legacy_team_profile_id" ||
+      key === "legacy_club_team_id" ||
+      key === "legacy_tournament_id" ||
+      key === "legacy_source_interest_id" ||
+      key === "legacy_team_member_id" ||
+      key === "legacy_member_id" ||
+      key === "legacy_need_id" ||
+      key === "legacy_interest_id" ||
+      key === "legacy_plan_id" ||
+      key === "legacy_availability_id" ||
+      key === "legacy_planning_id" ||
+      key === "legacy_roster_id" ||
+      key === "legacy_roster_player_id" ||
+      key === "legacy_draft_id" ||
+      key === "legacy_official_roster_id"
+    );
+  });
+}
+
+function supabasePatchRows_(config, tableName, filters, patch) {
+  if (!supabaseLooksLikeFilter_(filters) && supabaseLooksLikeFilter_(patch)) {
+    var tmp = filters;
+    filters = patch;
+    patch = tmp;
+  }
+  var parts = ["select=" + encodeURIComponent("*")];
+  Object.keys(filters || {}).forEach(function (key) {
+    parts.push(supabaseFilter_(key, filters[key]));
+  });
+  var writePatch = supabaseNormalizePatchForWrite_(tableName, patch || {});
+  var rows = supabaseApiRequest_(
+    config,
+    tableName,
+    "patch",
+    parts.join("&"),
+    writePatch,
+    "return=representation"
+  );
+  return Array.isArray(rows) ? rows : [];
+}
+
+function supabaseUpsertRows_(config, tableName, rows, conflictTarget) {
+  var query = conflictTarget
+    ? "on_conflict=" + encodeURIComponent(conflictTarget)
+    : "";
+  var result = supabaseApiRequest_(
+    config,
+    tableName,
+    "post",
+    query,
+    supabaseNormalizeRowsForWrite_(tableName, rows || []),
+    "resolution=merge-duplicates,return=representation"
+  );
+  return Array.isArray(result) ? result : [];
+}
+
+function supabaseInsertRows_(config, tableName, rows) {
+  var result = supabaseApiRequest_(
+    config,
+    tableName,
+    "post",
+    "",
+    supabaseNormalizeRowsForWrite_(tableName, rows || []),
+    "return=representation"
+  );
+  return Array.isArray(result) ? result : [];
+}
+
+function supabaseDbText_(value) {
+  if (value === undefined || value === null) return null;
+  var text = String(value).trim();
+  return text ? text : null;
+}
+
+function supabaseAuthContext_(data) {
+  var context = resolveRequestContext(data || {});
+  if (!context || !context.authenticated || !context.user) {
+    return {
+      success: false,
+      message: "Login required"
+    };
+  }
+
+  var config = getSupabaseConfig_();
+  return {
+    success: true,
+    context: context,
+    config: config,
+    ctx: supabasePlayerHubContext_(config, context.user)
+  };
+}
+
+function supabaseAdminContext_(data) {
+  var adminCheck = requireAdmin(data || {});
+  if (!adminCheck.success) {
+    return {
+      success: false,
+      message: adminCheck.message
+    };
+  }
+  var config = getSupabaseConfig_();
+  return {
+    success: true,
+    context: { authenticated: true, user: adminCheck.admin },
+    config: config,
+    ctx: supabasePlayerHubContext_(config, adminCheck.admin)
+  };
+}
+
+function supabaseReviewerContext_(data) {
+  var reviewerCheck = requireRosterReviewer_(data || {});
+  if (!reviewerCheck.success) {
+    return {
+      success: false,
+      message: reviewerCheck.message
+    };
+  }
+  var config = getSupabaseConfig_();
+  return {
+    success: true,
+    context: { authenticated: true, user: reviewerCheck.user },
+    config: config,
+    ctx: supabasePlayerHubContext_(config, reviewerCheck.user)
+  };
+}
+
+function supabaseCaptainSnapshotForUser_(ctx, user) {
+  return playerHubCaptainSnapshot_(
+    ctx,
+    user,
+    playerHubSnapshotProfile_(ctx, user)
+  );
+}
+
+function supabaseRequireCaptainSnapshot_(env) {
+  var captain = supabaseCaptainSnapshotForUser_(env.ctx, env.context.user);
+  if (!captain || !captain.canManageTeamProfile || !captain.teamProfile) {
+    return {
+      success: false,
+      message: captain && captain.message ? captain.message : "Captain access required."
+    };
+  }
+  return {
+    success: true,
+    captain: captain
+  };
+}
+
+function supabasePlanForCaptain_(env, planId) {
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  var targetPlanId = String(planId || "").trim();
+  var plans = captainCheck.captain.tournamentPlans || [];
+  for (var i = 0; i < plans.length; i++) {
+    if (plans[i] && plans[i].planId === targetPlanId) {
+      return {
+        success: true,
+        captain: captainCheck.captain,
+        plan: plans[i]
+      };
+    }
+  }
+  return {
+    success: false,
+    message: "Captain access required."
+  };
+}
+
+function supabaseAvailabilityForPlan_(ctx, planId) {
+  var targetPlanId = String(planId || "").trim();
+  return playerHubSnapshotSortRecent_(
+    playerHubSnapshotTournamentAvailability_(ctx)
+      .filter(function (availability) {
+        return availability && availability.planId === targetPlanId;
+      })
+      .map(function (availability) {
+        return playerHubSnapshotEnrichAvailability_(ctx, availability);
+      })
+  );
+}
+
+function supabasePlanningForPlan_(ctx, planId) {
+  var targetPlanId = String(planId || "").trim();
+  return playerHubSnapshotSortRecent_(
+    playerHubSnapshotSquadPlanning_(ctx).filter(function (planning) {
+      return planning && planning.planId === targetPlanId;
+    })
+  );
+}
+
+function supabaseRosterPayloadForPlan_(ctx, plan) {
+  var roster = null;
+  playerHubSnapshotRosters_(ctx).forEach(function (item) {
+    if (!roster && item && item.planId === plan.planId) roster = item;
+  });
+  return {
+    success: true,
+    plan: playerHubSnapshotDecoratePlan_(ctx, plan),
+    roster: roster ? playerHubSnapshotDecorateRoster_(ctx, roster) : null,
+    players: roster
+      ? (playerHubSnapshotRosterPlayersByRoster_(ctx)[roster.rosterId] || [])
+          .filter(function (player) {
+            return player && player.playerStatus === "ACTIVE";
+          })
+      : []
+  };
+}
+
+function supabaseGetMyPlayerProfile_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    profile: playerHubSnapshotProfile_(env.ctx, env.context.user)
+  };
+}
+
+function supabaseListClubTeams_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    teams: sortClubTeams_(
+      playerHubSnapshotClubs_(env.ctx).filter(function (team) {
+        return team && team.teamId && team.name && team.active;
+      })
+    )
+  };
+}
+
+function supabaseListClubTeamsAdmin_(data) {
+  var env = supabaseAdminContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    teams: sortClubTeams_(
+      playerHubSnapshotClubs_(env.ctx).filter(function (team) {
+        return team && team.teamId && team.name;
+      })
+    )
+  };
+}
+
+function supabaseListVisibleTeamNeeds_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    needs: playerHubSnapshotVisibleTeamNeeds_(
+      env.ctx,
+      playerHubUsername_(env.context.user)
+    )
+  };
+}
+
+function supabaseListMyAccessRequests_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    requests: playerHubSnapshotAccessRequestsForUser_(
+      env.ctx,
+      playerHubUsername_(env.context.user)
+    )
+  };
+}
+
+function supabaseListAccessRequestsAdmin_(data) {
+  var env = supabaseAdminContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    requests: sortAccessRequests_(
+      addAccessRequestAdminWarnings_(playerHubSnapshotAccessRequests_(env.ctx))
+    )
+  };
+}
+
+function supabaseGetMyTeamProfile_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captain = supabaseCaptainSnapshotForUser_(env.ctx, env.context.user);
+  return Object.assign({ success: true }, captain);
+}
+
+function supabaseListMyTeamNeedInterests_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    interests: playerHubSnapshotMyTeamNeedInterests_(
+      env.ctx,
+      playerHubUsername_(env.context.user)
+    )
+  };
+}
+
+function supabaseListTeamNeedInterestsForCaptain_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  var requestedNeedId = String(data && data.needId || "").trim();
+  var interests = captainCheck.captain.interests || [];
+  if (requestedNeedId) {
+    var ownsNeed = (captainCheck.captain.needs || []).some(function (need) {
+      return need && need.needId === requestedNeedId;
+    });
+    if (!ownsNeed) {
+      return {
+        success: false,
+        message: "Captain access required."
+      };
+    }
+    interests = interests.filter(function (interest) {
+      return interest && interest.needId === requestedNeedId;
+    });
+  }
+  return {
+    success: true,
+    interests: interests
+  };
+}
+
+function supabaseListTeamNeedInterestsAdmin_(data) {
+  var env = supabaseAdminContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    interests: playerHubSnapshotTeamNeedInterests_(env.ctx).map(function (interest) {
+      return playerHubSnapshotEnrichTeamNeedInterest_(env.ctx, interest);
+    })
+  };
+}
+
+function supabaseListMyTeamMembersForCaptain_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  return {
+    success: true,
+    members: captainCheck.captain.members || []
+  };
+}
+
+function supabaseListMyConfirmedTeamsForPlayer_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    teams: playerHubSnapshotMyTeams_(env.ctx, playerHubUsername_(env.context.user))
+  };
+}
+
+function supabaseListTeamMembersAdmin_(data) {
+  var env = supabaseAdminContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    members: playerHubSnapshotSortRecent_(
+      playerHubSnapshotTeamMembers_(env.ctx).map(function (member) {
+        return playerHubSnapshotEnrichTeamMember_(env.ctx, member);
+      })
+    )
+  };
+}
+
+function supabaseListMyTeamMembershipRequests_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    requests: playerHubSnapshotMembershipRequestsForPlayer_(
+      env.ctx,
+      playerHubUsername_(env.context.user)
+    )
+  };
+}
+
+function supabaseListMembershipRequestsForCaptain_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  return {
+    success: true,
+    requests: captainCheck.captain.membershipRequests || []
+  };
+}
+
+function supabaseListTeamMembershipRequestsAdmin_(data) {
+  var env = supabaseAdminContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    requests: sortTeamMembershipRequests_(
+      playerHubSnapshotMembershipRequests_(env.ctx).map(function (request) {
+        return playerHubSnapshotEnrichMembershipRequest_(env.ctx, request);
+      })
+    )
+  };
+}
+
+function supabaseListMyTournamentTeamPlansForCaptain_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  return {
+    success: true,
+    plans: captainCheck.captain.tournamentPlans || []
+  };
+}
+
+function supabaseListMyTournamentAvailabilityForPlayer_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    availability: playerHubSnapshotTournamentAvailabilityForPlayer_(
+      env.ctx,
+      playerHubUsername_(env.context.user)
+    )
+  };
+}
+
+function supabaseListMyTournamentSquadPlanningForPlayer_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    planning: playerHubSnapshotPlannedTeamsForPlayer_(
+      env.ctx,
+      playerHubUsername_(env.context.user)
+    )
+  };
+}
+
+function supabaseListTournamentAvailabilityForCaptain_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var planCheck = supabasePlanForCaptain_(env, data && data.planId);
+  if (!planCheck.success) return planCheck;
+  return {
+    success: true,
+    availability: supabaseAvailabilityForPlan_(env.ctx, planCheck.plan.planId),
+    plan: playerHubSnapshotDecoratePlan_(env.ctx, planCheck.plan)
+  };
+}
+
+function supabaseListTournamentSquadPlanningForCaptain_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var planCheck = supabasePlanForCaptain_(env, data && data.planId);
+  if (!planCheck.success) return planCheck;
+  return {
+    success: true,
+    plan: playerHubSnapshotDecoratePlan_(env.ctx, planCheck.plan),
+    availability: supabaseAvailabilityForPlan_(env.ctx, planCheck.plan.planId),
+    planning: supabasePlanningForPlan_(env.ctx, planCheck.plan.planId)
+  };
+}
+
+function supabaseListRosterDraftForCaptain_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var planCheck = supabasePlanForCaptain_(env, data && data.planId);
+  if (!planCheck.success) return planCheck;
+  return supabaseRosterPayloadForPlan_(env.ctx, planCheck.plan);
+}
+
+function supabaseListMyRosterStatusForPlayer_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  return {
+    success: true,
+    rosters: playerHubSnapshotRosterStatusForPlayer_(
+      env.ctx,
+      playerHubUsername_(env.context.user)
+    )
+  };
+}
+
+function supabaseListSubmittedRosterDraftsForReview_(data) {
+  var env = supabaseReviewerContext_(data);
+  if (!env.success) return env;
+  var reviewStatuses = {
+    SUBMITTED: true,
+    APPROVED: true,
+    REJECTED: true,
+    LOCKED: true
+  };
+  return {
+    success: true,
+    rosters: playerHubSnapshotSortRecent_(
+      playerHubSnapshotRosters_(env.ctx)
+        .filter(function (roster) {
+          return roster && !!reviewStatuses[roster.rosterStatus];
+        })
+        .map(function (roster) {
+          return playerHubSnapshotDecorateRoster_(env.ctx, roster);
+        })
+    )
+  };
+}
+
+function supabaseProfileRowFromProfile_(profile) {
+  return {
+    legacy_profile_id: supabaseDbText_(profile.profileId),
+    user_id: null,
+    username: supabaseDbText_(profile.username),
+    first_name: supabaseDbText_(profile.firstName),
+    last_name: supabaseDbText_(profile.lastName),
+    display_name: supabaseDbText_(profile.displayName || profile.username),
+    email: supabaseDbText_(profile.email),
+    phone: supabaseDbText_(profile.phone),
+    country: supabaseDbText_(profile.country),
+    region: supabaseDbText_(profile.region),
+    club_team_id: null,
+    legacy_club_team_id: supabaseDbText_(profile.clubTeamId),
+    club_team_name: supabaseDbText_(profile.clubTeamName),
+    club_or_team: supabaseDbText_(profile.clubOrTeam),
+    team_note: supabaseDbText_(profile.teamNote),
+    profile_type: supabaseDbText_(profile.profileType || "Player"),
+    free_agent: !!profile.freeAgent,
+    primary_role: supabaseDbText_(profile.primaryRole),
+    secondary_role: supabaseDbText_(profile.secondaryRole),
+    custom_role: supabaseDbText_(profile.customRole),
+    level: supabaseDbText_(profile.level),
+    availability: supabaseDbText_(profile.availability),
+    looking_for_team: !!profile.lookingForTeam,
+    available_as_substitute: !!profile.availableAsSubstitute,
+    can_guest_for_teams: !!profile.canGuestForTeams,
+    interested_abroad: !!profile.interestedAbroad,
+    public_visible: !!profile.publicVisible,
+    approved: !!profile.approved,
+    created_at: supabaseDbText_(profile.createdAt),
+    updated_at: supabaseDbText_(profile.updatedAt)
+  };
+}
+
+function supabaseMembershipRequestRowFromRequest_(request) {
+  return {
+    legacy_request_id: supabaseDbText_(request.requestId),
+    club_team_id: null,
+    legacy_club_team_id: supabaseDbText_(request.clubTeamId),
+    club_team_name: supabaseDbText_(request.clubTeamName),
+    player_user_id: null,
+    player_username: supabaseDbText_(request.playerUsername),
+    player_display_name: supabaseDbText_(request.playerDisplayName),
+    player_email: supabaseDbText_(request.playerEmail),
+    player_phone: supabaseDbText_(request.playerPhone),
+    player_country: supabaseDbText_(request.playerCountry),
+    player_profile_id: null,
+    legacy_player_profile_id: supabaseDbText_(request.playerProfileId),
+    status: supabaseDbText_(request.status || "PENDING"),
+    requested_at: supabaseDbText_(request.requestedAt),
+    reviewed_by_user_id: null,
+    reviewed_by_username: supabaseDbText_(request.reviewedBy),
+    reviewed_at: supabaseDbText_(request.reviewedAt),
+    review_note: supabaseDbText_(request.reviewNote),
+    created_at: supabaseDbText_(request.createdAt),
+    updated_at: supabaseDbText_(request.updatedAt)
+  };
+}
+
+function buildSupabasePlayerProfileForSave_(incoming, existingProfile, user, ctx) {
+  var now = new Date().toISOString();
+  var safeIncoming = incoming && typeof incoming === "object" ? incoming : {};
+  var existing = existingProfile || defaultPlayerProfileForUser_(user);
+  var selectedClubTeamId = String(safeIncoming.clubTeamId || "").trim();
+  var selectedClubTeam = selectedClubTeamId
+    ? playerHubSnapshotClubsById_(ctx)[selectedClubTeamId]
+    : null;
+  var freeAgent = truthy_(safeIncoming.freeAgent);
+  if (!selectedClubTeam || freeAgent) {
+    selectedClubTeamId = "";
+    selectedClubTeam = null;
+  }
+
+  var teamNote = playerProfileText_(
+    firstNonEmpty_(safeIncoming.teamNote, safeIncoming.clubOrTeam),
+    160
+  );
+  var firstName = playerProfileText_(
+    firstNonEmpty_(safeIncoming.firstName, existing.firstName),
+    80
+  );
+  var lastName = playerProfileText_(
+    firstNonEmpty_(safeIncoming.lastName, existing.lastName),
+    80
+  );
+  var displayName = playerProfileText_(
+    firstNonEmpty_(
+      safeIncoming.displayName,
+      [firstName, lastName].filter(Boolean).join(" "),
+      existing.displayName,
+      playerHubUsername_(user)
+    ),
+    120
+  );
+
+  return {
+    profileId: existing.profileId || "profile-" + Utilities.getUuid(),
+    username: playerHubUsername_(user),
+    firstName: firstName,
+    lastName: lastName,
+    displayName: displayName,
+    email: playerProfileText_(safeIncoming.email, 160),
+    phone: playerProfileText_(safeIncoming.phone, 80),
+    country: playerProfileText_(
+      firstNonEmpty_(safeIncoming.country, safeIncoming.region, existing.country),
+      120
+    ),
+    clubOrTeam: selectedClubTeam ? selectedClubTeam.name : teamNote,
+    clubTeamId: selectedClubTeam ? selectedClubTeam.teamId : "",
+    clubTeamName: selectedClubTeam ? selectedClubTeam.name : "",
+    teamNote: teamNote,
+    profileType:
+      String(safeIncoming.profileType || "").trim() === "Captain"
+        ? "Captain"
+        : "Player",
+    freeAgent: freeAgent || !selectedClubTeam,
+    region: playerProfileText_(
+      firstNonEmpty_(safeIncoming.region, existing.region),
+      120
+    ),
+    primaryRole: playerProfileText_(
+      firstNonEmpty_(safeIncoming.primaryRole, existing.primaryRole),
+      80
+    ),
+    secondaryRole: playerProfileText_(
+      firstNonEmpty_(safeIncoming.secondaryRole, existing.secondaryRole),
+      120
+    ),
+    customRole: playerProfileText_(
+      firstNonEmpty_(
+        safeIncoming.customRole,
+        safeIncoming.primaryRole === "Custom" ? safeIncoming.secondaryRole : "",
+        existing.customRole
+      ),
+      120
+    ),
+    level: playerProfileText_(firstNonEmpty_(safeIncoming.level, existing.level), 80),
+    availability: playerProfileText_(safeIncoming.availability, 240),
+    lookingForTeam: truthy_(safeIncoming.lookingForTeam),
+    availableAsSubstitute: truthy_(safeIncoming.availableAsSubstitute),
+    canGuestForTeams: truthy_(safeIncoming.canGuestForTeams),
+    interestedAbroad: truthy_(safeIncoming.interestedAbroad),
+    publicVisible: truthy_(safeIncoming.publicVisible),
+    approved: !!existing.approved,
+    createdAt: existing.createdAt || now,
+    updatedAt: now
+  };
+}
+
+function supabaseCancelPendingMembershipRequests_(config, ctx, username, exceptClubTeamId) {
+  var targetUsername = playerHubSnapshotUsernameKey_(username);
+  var keepClubTeamId = String(exceptClubTeamId || "").trim();
+  var now = new Date().toISOString();
+  playerHubSnapshotMembershipRequests_(ctx).forEach(function (request) {
+    if (
+      request &&
+      request.status === "PENDING" &&
+      playerHubSnapshotUsernameKey_(request.playerUsername) === targetUsername &&
+      request.clubTeamId !== keepClubTeamId
+    ) {
+      supabasePatchRows_(
+        config,
+        "team_membership_requests",
+        { legacy_request_id: request.requestId },
+        { status: "CANCELLED", updated_at: now }
+      );
+      request.status = "CANCELLED";
+      request.updatedAt = now;
+    }
+  });
+}
+
+function supabaseSyncTeamMembershipRequestForProfile_(config, ctx, user, profile) {
+  var username = playerHubUsername_(user);
+  var selectedClubTeamId = String((profile && profile.clubTeamId) || "").trim();
+  if (!profile || profile.freeAgent || !selectedClubTeamId) {
+    supabaseCancelPendingMembershipRequests_(config, ctx, username, "");
+    return null;
+  }
+
+  var selectedTeam = playerHubSnapshotClubsById_(ctx)[selectedClubTeamId];
+  if (!selectedTeam || !selectedTeam.active) {
+    supabaseCancelPendingMembershipRequests_(config, ctx, username, "");
+    return null;
+  }
+
+  supabaseCancelPendingMembershipRequests_(config, ctx, username, selectedTeam.teamId);
+
+  var existingPending = null;
+  playerHubSnapshotMembershipRequests_(ctx).forEach(function (request) {
+    if (
+      !existingPending &&
+      request &&
+      request.status === "PENDING" &&
+      request.clubTeamId === selectedTeam.teamId &&
+      playerHubSnapshotUsernameKey_(request.playerUsername) ===
+        playerHubSnapshotUsernameKey_(username)
+    ) {
+      existingPending = request;
+    }
+  });
+
+  if (
+    playerHubSnapshotActiveMemberExists_(ctx, selectedTeam.teamId, username)
+  ) {
+    if (!existingPending) return null;
+    existingPending.status = "APPROVED";
+    existingPending.reviewedBy = existingPending.reviewedBy || "system";
+    existingPending.reviewedAt =
+      existingPending.reviewedAt || new Date().toISOString();
+    existingPending.updatedAt = new Date().toISOString();
+    supabaseUpsertRows_(
+      config,
+      "team_membership_requests",
+      [supabaseMembershipRequestRowFromRequest_(existingPending)],
+      "legacy_request_id"
+    );
+    return playerHubSnapshotEnrichMembershipRequest_(ctx, existingPending);
+  }
+
+  var now = new Date().toISOString();
+  var request = {
+    requestId:
+      (existingPending && existingPending.requestId) ||
+      "team-membership-" + Utilities.getUuid(),
+    clubTeamId: selectedTeam.teamId,
+    clubTeamName: selectedTeam.name,
+    playerUsername: profile.username || username,
+    playerDisplayName: playerProfileText_(profile.displayName, 120),
+    playerEmail: playerProfileText_(profile.email, 160),
+    playerPhone: playerProfileText_(profile.phone, 80),
+    playerCountry: playerProfileText_(profile.country, 120),
+    playerProfileId: profile.profileId || "",
+    status: "PENDING",
+    requestedAt:
+      existingPending && existingPending.requestedAt
+        ? existingPending.requestedAt
+        : now,
+    reviewedBy: "",
+    reviewedAt: "",
+    reviewNote: "",
+    createdAt:
+      existingPending && existingPending.createdAt ? existingPending.createdAt : now,
+    updatedAt: now
+  };
+  supabaseUpsertRows_(
+    config,
+    "team_membership_requests",
+    [supabaseMembershipRequestRowFromRequest_(request)],
+    "legacy_request_id"
+  );
+  return playerHubSnapshotEnrichMembershipRequest_(ctx, request);
+}
+
+function supabaseSaveMyPlayerProfile_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var existing = playerHubSnapshotProfile_(env.ctx, env.context.user);
+  var profile = buildSupabasePlayerProfileForSave_(
+    data && data.profile ? data.profile : {},
+    existing,
+    env.context.user,
+    env.ctx
+  );
+  var rows = supabaseUpsertRows_(
+    env.config,
+    "player_profiles",
+    [supabaseProfileRowFromProfile_(profile)],
+    "legacy_profile_id"
+  );
+  var savedProfile = rows && rows[0]
+    ? supabaseProfile_(rows[0], env.context.user)
+    : profile;
+  var membershipRequest = supabaseSyncTeamMembershipRequestForProfile_(
+    env.config,
+    env.ctx,
+    env.context.user,
+    savedProfile
+  );
+  return {
+    success: true,
+    profile: savedProfile,
+    membershipRequest: membershipRequest
+  };
+}
+
+function supabaseAccessRequestRowFromRequest_(request) {
+  return {
+    legacy_request_id: supabaseDbText_(request.requestId),
+    user_id: null,
+    username: supabaseDbText_(request.username),
+    display_name: supabaseDbText_(request.displayName),
+    email: supabaseDbText_(request.email),
+    request_type: supabaseDbText_(request.requestType),
+    club_team_id: null,
+    legacy_club_team_id: supabaseDbText_(request.clubTeamId),
+    club_team_name: supabaseDbText_(request.clubTeamName),
+    message: supabaseDbText_(request.message),
+    status: supabaseDbText_(request.status || "PENDING"),
+    admin_note: supabaseDbText_(request.adminNote),
+    reviewed_by_user_id: null,
+    reviewed_by_username: supabaseDbText_(request.reviewedBy),
+    reviewed_at: supabaseDbText_(request.reviewedAt),
+    created_at: supabaseDbText_(request.createdAt),
+    updated_at: supabaseDbText_(request.updatedAt)
+  };
+}
+
+function supabaseCreateAccessRequest_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var requestType = normalizeAccessRequestType_(data && data.requestType);
+  if (!requestType) {
+    return {
+      success: false,
+      message: "Invalid access request type"
+    };
+  }
+
+  var username = playerHubUsername_(env.context.user);
+  var hasPending = playerHubSnapshotAccessRequests_(env.ctx).some(function (request) {
+    return (
+      request &&
+      request.requestType === requestType &&
+      request.status === "PENDING" &&
+      playerHubSnapshotUsernameKey_(request.username) ===
+        playerHubSnapshotUsernameKey_(username)
+    );
+  });
+  if (hasPending) {
+    return {
+      success: false,
+      message: "You already have a pending request for this access."
+    };
+  }
+
+  var profile = playerHubSnapshotProfile_(env.ctx, env.context.user);
+  var clubTeamId = playerProfileText_(
+    firstNonEmpty_(data && data.clubTeamId, profile.clubTeamId),
+    120
+  );
+  var club = clubTeamId ? playerHubSnapshotClubsById_(env.ctx)[clubTeamId] : null;
+  var now = new Date().toISOString();
+  var requestPayload = {
+    requestId: "access-" + Utilities.getUuid(),
+    username: username,
+    displayName: playerProfileText_(profile.displayName || username, 120),
+    email: playerProfileText_(profile.email || username, 160),
+    requestType: requestType,
+    clubTeamId: club ? club.teamId : "",
+    clubTeamName: club ? club.name : playerProfileText_(profile.clubTeamName, 160),
+    message: playerProfileText_(data && data.message, 500),
+    status: "PENDING",
+    adminNote: "",
+    createdAt: now,
+    updatedAt: now,
+    reviewedBy: "",
+    reviewedAt: ""
+  };
+  var rows = supabaseUpsertRows_(
+    env.config,
+    "access_requests",
+    [supabaseAccessRequestRowFromRequest_(requestPayload)],
+    "legacy_request_id"
+  );
+  return {
+    success: true,
+    request: rows && rows[0] ? supabaseAccessRequest_(rows[0]) : requestPayload
+  };
+}
+
+function supabaseUpdateTournamentAvailabilityResponse_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var availabilityId = String(data && data.availabilityId || "").trim();
+  var availability = null;
+  playerHubSnapshotTournamentAvailability_(env.ctx).forEach(function (item) {
+    if (!availability && item && item.availabilityId === availabilityId) {
+      availability = item;
+    }
+  });
+  if (
+    !availability ||
+    playerHubSnapshotUsernameKey_(availability.playerUsername) !==
+      playerHubSnapshotUsernameKey_(playerHubUsername_(env.context.user))
+  ) {
+    return {
+      success: false,
+      message: "Availability request not found"
+    };
+  }
+
+  var now = new Date().toISOString();
+  var rows = supabasePatchRows_(
+    env.config,
+    "tournament_availability",
+    { legacy_availability_id: availability.availabilityId },
+    {
+      response_status: normalizeTournamentAvailabilityStatus_(
+        data && data.responseStatus
+      ),
+      preferred_squad: normalizePreferredSquad_(data && data.preferredSquad),
+      player_note: supabaseDbText_(playerProfileText_(data && data.playerNote, 300)),
+      responded_at: now,
+      updated_at: now
+    }
+  );
+  var updated = rows && rows[0]
+    ? supabaseTournamentAvailability_(rows[0])
+    : Object.assign({}, availability, {
+        responseStatus: normalizeTournamentAvailabilityStatus_(
+          data && data.responseStatus
+        ),
+        preferredSquad: normalizePreferredSquad_(data && data.preferredSquad),
+        playerNote: playerProfileText_(data && data.playerNote, 300),
+        respondedAt: now,
+        updatedAt: now
+      });
+  return {
+    success: true,
+    availability: playerHubSnapshotEnrichAvailability_(env.ctx, updated)
+  };
+}
+
+function supabaseEventComment_(row) {
+  return {
+    commentId: supabaseText_(row.legacy_comment_id),
+    planId: supabaseText_(row.legacy_plan_id),
+    teamProfileId: supabaseText_(row.legacy_team_profile_id),
+    clubTeamId: supabaseText_(row.legacy_club_team_id),
+    clubTeamName: supabaseText_(row.club_team_name),
+    username: supabaseText_(row.username),
+    displayName: supabaseText_(row.display_name),
+    message: supabaseText_(row.message),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at),
+    active: supabaseBool_(row.active, true)
+  };
+}
+
+function supabaseCommentsForPlan_(config, planId) {
+  return supabaseSelectRows_(
+    config,
+    "event_comments",
+    { legacy_plan_id: planId, active: true },
+    "*"
+  )
+    .map(supabaseEventComment_)
+    .sort(function (a, b) {
+      return (Date.parse(a.createdAt || "") || 0) - (Date.parse(b.createdAt || "") || 0);
+    });
+}
+
+function supabaseTournamentPlanCommentContext_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var planId = String(data && (data.planId || data.eventId) || "").trim();
+  var plan = playerHubSnapshotPlansById_(env.ctx)[planId];
+  if (!plan) {
+    return {
+      success: false,
+      message: "Event not found"
+    };
+  }
+
+  var username = playerHubUsername_(env.context.user);
+  var invited = playerHubSnapshotTournamentAvailability_(env.ctx).some(function (item) {
+    return (
+      item &&
+      item.planId === plan.planId &&
+      playerHubSnapshotUsernameKey_(item.playerUsername) ===
+        playerHubSnapshotUsernameKey_(username)
+    );
+  });
+  var canAccess =
+    isAdminUser_(env.context.user) ||
+    userCanUseTournaments_(env.context.user) ||
+    (playerHubSnapshotUsernameKey_(plan.captainUsername) ===
+      playerHubSnapshotUsernameKey_(username) &&
+      playerHubSnapshotHasCaptainApproval_(
+        env.ctx,
+        username,
+        plan.clubTeamId,
+        plan.clubTeamName
+      )) ||
+    invited;
+
+  if (!canAccess) {
+    return {
+      success: false,
+      message: "Event access required"
+    };
+  }
+
+  return Object.assign({}, env, {
+    plan: plan,
+    username: username
+  });
+}
+
+function supabaseListEventComments_(data) {
+  var eventContext = supabaseTournamentPlanCommentContext_(data || {});
+  if (!eventContext.success) return eventContext;
+  return {
+    success: true,
+    comments: supabaseCommentsForPlan_(
+      eventContext.config,
+      eventContext.plan.planId
+    )
+  };
+}
+
+function supabaseEventCommentRowFromComment_(comment) {
+  return {
+    legacy_comment_id: supabaseDbText_(comment.commentId),
+    event_id: null,
+    legacy_plan_id: supabaseDbText_(comment.planId),
+    team_profile_id: null,
+    legacy_team_profile_id: supabaseDbText_(comment.teamProfileId),
+    club_team_id: null,
+    legacy_club_team_id: supabaseDbText_(comment.clubTeamId),
+    club_team_name: supabaseDbText_(comment.clubTeamName),
+    user_id: null,
+    username: supabaseDbText_(comment.username),
+    display_name: supabaseDbText_(comment.displayName),
+    message: supabaseDbText_(comment.message),
+    active: comment.active !== false,
+    created_at: supabaseDbText_(comment.createdAt),
+    updated_at: supabaseDbText_(comment.updatedAt)
+  };
+}
+
+function supabaseAddEventComment_(data) {
+  var eventContext = supabaseTournamentPlanCommentContext_(data || {});
+  if (!eventContext.success) return eventContext;
+
+  var message = playerProfileText_(data && data.message, 500);
+  if (!message) {
+    return {
+      success: false,
+      message: "Comment cannot be empty"
+    };
+  }
+
+  var profile = playerHubSnapshotProfile_(eventContext.ctx, eventContext.context.user);
+  var now = new Date().toISOString();
+  var comment = {
+    commentId: "event-comment-" + Utilities.getUuid(),
+    planId: eventContext.plan.planId,
+    teamProfileId: eventContext.plan.teamProfileId,
+    clubTeamId: eventContext.plan.clubTeamId,
+    clubTeamName: eventContext.plan.clubTeamName,
+    username: eventContext.username,
+    displayName: playerProfileText_(
+      (profile && profile.displayName) || eventContext.username,
+      120
+    ),
+    message: message,
+    createdAt: now,
+    updatedAt: now,
+    active: true
+  };
+  var rows = supabaseInsertRows_(
+    eventContext.config,
+    "event_comments",
+    [supabaseEventCommentRowFromComment_(comment)]
+  );
+  return {
+    success: true,
+    comment: rows && rows[0] ? supabaseEventComment_(rows[0]) : comment,
+    comments: supabaseCommentsForPlan_(eventContext.config, eventContext.plan.planId)
+  };
+}
+
+function supabaseArchiveEventComment_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var commentId = String(data && data.commentId || "").trim();
+  var rows = supabaseSelectRows_(
+    env.config,
+    "event_comments",
+    { legacy_comment_id: commentId },
+    "*"
+  );
+  var comment = rows && rows[0] ? supabaseEventComment_(rows[0]) : null;
+  if (!comment) {
+    return {
+      success: false,
+      message: "Comment not found"
+    };
+  }
+  var plan = playerHubSnapshotPlansById_(env.ctx)[comment.planId];
+  var usernameKey = playerHubSnapshotUsernameKey_(playerHubUsername_(env.context.user));
+  var canArchive =
+    usernameKey === playerHubSnapshotUsernameKey_(comment.username) ||
+    isAdminUser_(env.context.user) ||
+    userCanUseTournaments_(env.context.user) ||
+    (plan &&
+      playerHubSnapshotUsernameKey_(plan.captainUsername) === usernameKey &&
+      playerHubSnapshotHasCaptainApproval_(
+        env.ctx,
+        playerHubUsername_(env.context.user),
+        plan.clubTeamId,
+        plan.clubTeamName
+      ));
+  if (!canArchive) {
+    return {
+      success: false,
+      message: "Comment access required"
+    };
+  }
+  var now = new Date().toISOString();
+  var updatedRows = supabasePatchRows_(
+    env.config,
+    "event_comments",
+    { legacy_comment_id: comment.commentId },
+    { active: false, updated_at: now }
+  );
+  var updated = updatedRows && updatedRows[0]
+    ? supabaseEventComment_(updatedRows[0])
+    : Object.assign({}, comment, { active: false, updatedAt: now });
+  return {
+    success: true,
+    comment: updated,
+    comments: supabaseCommentsForPlan_(env.config, comment.planId)
+  };
+}
+
+function nowIso_() {
+  return new Date().toISOString();
+}
+
+function supabaseReloadEnv_(env) {
+  return {
+    success: true,
+    config: env.config,
+    context: env.context,
+    ctx: supabasePlayerHubContext_(env.config, env.context.user)
+  };
+}
+
+function supabaseAuditLog_(config, username, action, entityType, legacyId, metadata) {
+  try {
+    supabaseInsertRows_(config, "audit_log", [{
+      legacy_audit_id: "audit-" + Utilities.getUuid(),
+      actor_username: username || "",
+      action: action || "",
+      entity_table: entityType || "",
+      legacy_entity_id: legacyId || "",
+      metadata: metadata || {},
+      created_at: nowIso_(),
+      updated_at: nowIso_()
+    }]);
+  } catch (err) {
+    Logger.log("[PlayerHubBackend] supabase audit skipped " + (err && err.message ? err.message : err));
+  }
+}
+
+function supabaseClubTeamRowFromTeam_(team) {
+  return {
+    legacy_team_id: team.teamId || "",
+    name: team.name || "",
+    country: team.country || "",
+    city: team.city || "",
+    level: team.level || "",
+    type: team.type || "",
+    active: truthy_(team.active),
+    created_at: team.createdAt || nowIso_(),
+    updated_at: team.updatedAt || nowIso_()
+  };
+}
+
+function supabaseTeamProfileRowFromProfile_(profile) {
+  return {
+    legacy_team_profile_id: profile.teamProfileId || profile.profileId || "",
+    legacy_club_team_id: profile.clubTeamId || "",
+    club_team_name: profile.clubTeamName || "",
+    captain_username: profile.captainUsername || "",
+    country: profile.country || "",
+    team_level: profile.level || profile.teamLevel || "",
+    team_description: profile.description || profile.teamDescription || "",
+    contact_note: profile.contactNote || "",
+    active: truthy_(profile.active),
+    created_at: profile.createdAt || nowIso_(),
+    updated_at: profile.updatedAt || nowIso_()
+  };
+}
+
+function supabaseTeamChangeRequestRowFromRequest_(request) {
+  return {
+    legacy_request_id: request.requestId || "",
+    legacy_team_id: request.teamId || "",
+    current_name: request.currentName || "",
+    requested_name: request.requestedName || "",
+    current_country: request.currentCountry || "",
+    requested_country: request.requestedCountry || "",
+    current_city: request.currentCity || "",
+    requested_city: request.requestedCity || "",
+    requested_by_username: request.requestedByUsername || "",
+    reason: request.reason || "",
+    status: request.status || "PENDING",
+    admin_note: request.adminNote || "",
+    reviewed_at: request.reviewedAt || null,
+    reviewed_by_username: request.reviewedBy || "",
+    created_at: request.createdAt || nowIso_(),
+    updated_at: request.updatedAt || nowIso_()
+  };
+}
+
+function supabaseTeamNeedRowFromNeed_(need) {
+  return {
+    legacy_need_id: need.needId || "",
+    legacy_team_profile_id: need.teamProfileId || "",
+    legacy_club_team_id: need.clubTeamId || "",
+    club_team_name: need.clubTeamName || "",
+    captain_username: need.createdBy || need.captainUsername || "",
+    need_type: normalizeTeamNeedType_(need.needType || need.type || "PLAYER"),
+    needed_count: Math.max(1, parseInt(firstValue_(need.neededCount, need.count, 1), 10) || 1),
+    need_text: firstValue_(need.needText, need.note, ""),
+    status: normalizeTeamNeedStatus_(need.status || "OPEN"),
+    visibility: normalizeTeamNeedVisibility_(need.visibility || "internal"),
+    is_published: normalizeTeamNeedVisibility_(need.visibility || "internal") === "published",
+    need_context: normalizeTeamNeedContext_(need.needContext || "general"),
+    legacy_tournament_id: need.tournamentId || "",
+    tournament_name: need.tournamentName || "",
+    class_name: need.className || "",
+    deadline_at: need.deadlineAt || "",
+    source_type: normalizeTeamNeedVisibility_(need.visibility || "internal") === "published" ? "player_ad" : "team_need",
+    published_at: normalizeTeamNeedVisibility_(need.visibility || "internal") === "published" ? (need.publishedAt || need.createdAt || nowIso_()) : null,
+    public_visible: normalizeTeamNeedVisibility_(need.visibility || "internal") === "published",
+    approved: true,
+    created_at: need.createdAt || nowIso_(),
+    updated_at: need.updatedAt || nowIso_()
+  };
+}
+
+function supabaseTeamNeedInterestRowFromInterest_(interest) {
+  return {
+    legacy_interest_id: interest.interestId || "",
+    legacy_need_id: interest.needId || "",
+    legacy_team_profile_id: interest.teamProfileId || "",
+    legacy_club_team_id: interest.clubTeamId || "",
+    club_team_name: interest.clubTeamName || "",
+    player_username: interest.playerUsername || "",
+    player_display_name: interest.playerDisplayName || "",
+    player_email: interest.playerEmail || "",
+    player_phone: interest.playerPhone || "",
+    player_country: interest.playerCountry || "",
+    message: interest.message || "",
+    status: normalizeTeamNeedInterestStatus_(interest.status || "PENDING"),
+    reviewed_by_username: interest.reviewedBy || "",
+    reviewed_at: interest.reviewedAt || null,
+    created_at: interest.createdAt || nowIso_(),
+    updated_at: interest.updatedAt || nowIso_()
+  };
+}
+
+function supabaseTeamMemberRowFromMember_(member) {
+  return {
+    legacy_team_member_id: member.teamMemberId || "",
+    legacy_team_profile_id: member.teamProfileId || "",
+    legacy_club_team_id: member.clubTeamId || "",
+    club_team_name: member.clubTeamName || "",
+    captain_username: member.captainUsername || "",
+    player_username: member.playerUsername || "",
+    player_display_name: member.playerDisplayName || "",
+    player_email: member.playerEmail || "",
+    player_phone: member.playerPhone || "",
+    player_country: member.playerCountry || "",
+    legacy_source_interest_id: member.sourceInterestId || "",
+    member_status: normalizeTeamMemberStatus_(member.memberStatus || "ACTIVE"),
+    confirmed_by_username: member.confirmedBy || "",
+    confirmed_at: member.confirmedAt || null,
+    created_at: member.createdAt || nowIso_(),
+    updated_at: member.updatedAt || nowIso_()
+  };
+}
+
+function supabaseMembershipRequestRowFromRequest_(request) {
+  return {
+    legacy_request_id: request.requestId || "",
+    legacy_club_team_id: request.clubTeamId || "",
+    club_team_name: request.clubTeamName || "",
+    player_username: request.playerUsername || "",
+    player_display_name: request.playerDisplayName || "",
+    player_email: request.playerEmail || "",
+    player_phone: request.playerPhone || "",
+    player_country: request.playerCountry || "",
+    legacy_player_profile_id: request.playerProfileId || "",
+    status: normalizeTeamMembershipRequestStatus_(request.status || "PENDING"),
+    requested_at: request.requestedAt || request.createdAt || nowIso_(),
+    reviewed_by_username: request.reviewedBy || "",
+    reviewed_at: request.reviewedAt || null,
+    review_note: request.reviewNote || "",
+    created_at: request.createdAt || nowIso_(),
+    updated_at: request.updatedAt || nowIso_()
+  };
+}
+
+function supabaseTournamentPlanRowFromPlan_(plan) {
+  return {
+    legacy_plan_id: plan.planId || "",
+    legacy_tournament_id: plan.tournamentId || "",
+    tournament_name: plan.tournamentName || "",
+    legacy_team_profile_id: plan.teamProfileId || "",
+    legacy_club_team_id: plan.clubTeamId || "",
+    club_team_name: plan.clubTeamName || "",
+    captain_username: plan.captainUsername || "",
+    squad_label: plan.squadLabel || "TEAM_PLANNING",
+    class_name: plan.className || "",
+    status: normalizeTournamentPlanStatus_(plan.planStatus || "INVITING"),
+    deadline_at: plan.deadlineAt || "",
+    note: plan.note || "",
+    created_at: plan.createdAt || nowIso_(),
+    updated_at: plan.updatedAt || nowIso_()
+  };
+}
+
+function supabaseTournamentAvailabilityRowFromAvailability_(availability) {
+  return {
+    legacy_availability_id: availability.availabilityId || "",
+    legacy_plan_id: availability.planId || "",
+    legacy_tournament_id: availability.tournamentId || "",
+    tournament_name: availability.tournamentName || "",
+    legacy_team_profile_id: availability.teamProfileId || "",
+    legacy_club_team_id: availability.clubTeamId || "",
+    club_team_name: availability.clubTeamName || "",
+    player_username: availability.playerUsername || "",
+    player_display_name: availability.playerDisplayName || "",
+    player_email: availability.playerEmail || "",
+    player_phone: availability.playerPhone || "",
+    player_country: availability.playerCountry || "",
+    response_status: normalizeTournamentAvailabilityStatus_(availability.responseStatus || "PENDING"),
+    preferred_squad: normalizePreferredSquad_(availability.preferredSquad || "NO_PREFERENCE"),
+    player_note: availability.playerNote || "",
+    requested_by_username: availability.requestedBy || "",
+    requested_at: availability.requestedAt || availability.createdAt || nowIso_(),
+    responded_at: availability.respondedAt || null,
+    created_at: availability.createdAt || nowIso_(),
+    updated_at: availability.updatedAt || nowIso_()
+  };
+}
+
+function supabaseSquadPlanningRowFromPlanning_(planning) {
+  return {
+    legacy_planning_id: planning.planningId || "",
+    legacy_plan_id: planning.planId || "",
+    legacy_tournament_id: planning.tournamentId || "",
+    tournament_name: planning.tournamentName || "",
+    legacy_team_profile_id: planning.teamProfileId || "",
+    legacy_club_team_id: planning.clubTeamId || "",
+    club_team_name: planning.clubTeamName || "",
+    player_username: planning.playerUsername || "",
+    player_display_name: planning.playerDisplayName || "",
+    player_country: planning.playerCountry || "",
+    availability_status: normalizeTournamentAvailabilityStatus_(planning.availabilityStatus || ""),
+    preferred_squad: normalizePreferredSquad_(planning.preferredSquad || "NO_PREFERENCE"),
+    assigned_squad: normalizeAssignedSquad_(planning.assignedSquad || "UNASSIGNED"),
+    planning_status: normalizeTournamentSquadPlanningStatus_(planning.planningStatus || "PLANNED"),
+    assigned_by_username: planning.assignedBy || "",
+    assigned_at: planning.assignedAt || null,
+    created_at: planning.createdAt || nowIso_(),
+    updated_at: planning.updatedAt || nowIso_()
+  };
+}
+
+function supabaseRosterRowFromRoster_(roster) {
+  return {
+    legacy_roster_id: roster.rosterId || "",
+    legacy_plan_id: roster.planId || "",
+    legacy_tournament_id: roster.tournamentId || "",
+    tournament_name: roster.tournamentName || "",
+    legacy_team_profile_id: roster.teamProfileId || "",
+    legacy_club_team_id: roster.clubTeamId || "",
+    club_team_name: roster.clubTeamName || "",
+    squad_label: roster.squadLabel || "TEAM_PLANNING",
+    captain_username: roster.captainUsername || "",
+    roster_status: normalizeTournamentRosterStatus_(roster.rosterStatus || "DRAFT"),
+    submitted_by_username: roster.submittedBy || "",
+    submitted_at: roster.submittedAt || null,
+    reviewed_by_username: firstValue_(roster.approvedBy, roster.rejectedBy, roster.reviewedBy, ""),
+    reviewed_at: firstValue_(roster.approvedAt, roster.rejectedAt, roster.reviewedAt, null),
+    admin_note: roster.adminNote || "",
+    locked_by_username: roster.lockedBy || "",
+    locked_at: roster.lockedAt || null,
+    lock_reason: roster.lockReason || "",
+    created_at: roster.createdAt || nowIso_(),
+    updated_at: roster.updatedAt || nowIso_()
+  };
+}
+
+function supabaseRosterPlayerRowFromPlayer_(player) {
+  return {
+    legacy_roster_player_id: player.rosterPlayerId || "",
+    legacy_roster_id: player.rosterId || "",
+    legacy_plan_id: player.planId || "",
+    legacy_tournament_id: player.tournamentId || "",
+    tournament_name: player.tournamentName || "",
+    legacy_team_profile_id: player.teamProfileId || "",
+    legacy_club_team_id: player.clubTeamId || "",
+    club_team_name: player.clubTeamName || "",
+    squad_label: player.squadLabel || "TEAM_PLANNING",
+    player_username: player.playerUsername || "",
+    player_display_name: player.playerDisplayName || "",
+    player_country: player.playerCountry || "",
+    assigned_squad: normalizeAssignedSquad_(player.assignedSquad || "UNASSIGNED"),
+    roster_role: player.rosterRole || (normalizeAssignedSquad_(player.assignedSquad) === "RESERVE" ? "RESERVE" : "PLAYER"),
+    source: player.source || "SQUAD_PLANNING",
+    player_status: normalizeTournamentRosterPlayerStatus_(player.playerStatus || "ACTIVE"),
+    added_by_username: player.addedBy || "",
+    added_at: player.addedAt || player.createdAt || nowIso_(),
+    created_at: player.createdAt || nowIso_(),
+    updated_at: player.updatedAt || nowIso_()
+  };
+}
+
+function supabaseOfficialRosterRowFromOfficial_(official) {
+  return {
+    legacy_official_roster_id: official.officialRosterId || "",
+    legacy_draft_id: official.draftId || official.rosterId || "",
+    legacy_tournament_id: official.tournamentId || "",
+    tournament_name: official.tournamentName || "",
+    legacy_team_id: official.teamId || official.clubTeamId || "",
+    team_name: official.teamName || official.clubTeamName || "",
+    squad_label: official.squadLabel || "TEAM_PLANNING",
+    group_name: official.groupName || official.assignedSquad || "",
+    player_username: official.playerUsername || "",
+    player_display_name: official.playerDisplayName || "",
+    player_country: official.playerCountry || "",
+    status: official.status || "LOCKED",
+    locked_at: official.lockedAt || nowIso_(),
+    locked_by_username: official.lockedBy || "",
+    updated_at: official.updatedAt || official.createdAt || nowIso_(),
+    created_at: official.createdAt || nowIso_()
+  };
+}
+
+function supabaseFindByLegacyId_(items, key, value) {
+  var target = String(value || "");
+  var found = null;
+  (items || []).some(function(item) {
+    if (String(item && item[key] || "") === target) {
+      found = item;
+      return true;
+    }
+    return false;
+  });
+  return found;
+}
+
+function supabaseClubById_(ctx, clubTeamId) {
+  return supabaseFindByLegacyId_(playerHubSnapshotClubs_(ctx), "teamId", clubTeamId);
+}
+
+function supabaseNeedById_(ctx, needId) {
+  return supabaseFindByLegacyId_(playerHubSnapshotTeamNeeds_(ctx), "needId", needId);
+}
+
+function supabaseInterestById_(ctx, interestId) {
+  return supabaseFindByLegacyId_(playerHubSnapshotTeamNeedInterests_(ctx), "interestId", interestId);
+}
+
+function supabaseMembershipRequestById_(ctx, requestId) {
+  return supabaseFindByLegacyId_(playerHubSnapshotMembershipRequests_(ctx), "requestId", requestId);
+}
+
+function supabaseRosterById_(ctx, rosterId) {
+  return supabaseFindByLegacyId_(playerHubSnapshotRosters_(ctx), "rosterId", rosterId);
+}
+
+function supabaseRosterForPlanId_(ctx, planId) {
+  var found = null;
+  (playerHubSnapshotRosters_(ctx) || []).some(function(roster) {
+    if (
+      String(roster && roster.planId || "") === String(planId || "") &&
+      normalizeTournamentRosterStatus_(roster.rosterStatus || "") !== "CANCELLED"
+    ) {
+      found = roster;
+      return true;
+    }
+    return false;
+  });
+  return found;
+}
+
+function supabaseTeamProfileById_(ctx, teamProfileId) {
+  return supabaseFindByLegacyId_(playerHubSnapshotTeamProfiles_(ctx), "teamProfileId", teamProfileId);
+}
+
+function supabasePlayerProfileForUsername_(ctx, username) {
+  var key = playerHubSnapshotUsernameKey_(username);
+  var profile = null;
+  playerHubSnapshotProfiles_(ctx).some(function(item) {
+    if (playerHubSnapshotUsernameKey_(item.username) === key) {
+      profile = item;
+      return true;
+    }
+    return false;
+  });
+  if (profile) return profile;
+  var user = null;
+  (ctx.appUsers || []).some(function(row) {
+    if (playerHubSnapshotUsernameKey_(row.username) === key) {
+      user = row;
+      return true;
+    }
+    return false;
+  });
+  return {
+    username: username,
+    displayName: user && (user.display_name || user.name) || username,
+    email: user && user.email || "",
+    phone: user && user.phone || "",
+    country: user && user.country || "",
+    clubTeamId: "",
+    clubTeamName: ""
+  };
+}
+
+function supabaseActiveTeamMemberExists_(ctx, teamProfileId, username) {
+  var key = playerHubSnapshotUsernameKey_(username);
+  return (playerHubSnapshotTeamMembers_(ctx) || []).some(function(member) {
+    return (
+      String(member.teamProfileId || "") === String(teamProfileId || "") &&
+      playerHubSnapshotUsernameKey_(member.playerUsername) === key &&
+      normalizeTeamMemberStatus_(member.memberStatus || "") === "ACTIVE"
+    );
+  });
+}
+
+function supabasePatchClubTeamReferences_(config, teamId, name, country, city, now) {
+  if (!teamId) return;
+  [
+    ["player_profiles", { club_team_name: name || "", country: country || "", city: city || "", updated_at: now }],
+    ["access_requests", { club_team_name: name || "", updated_at: now }],
+    ["team_profiles", { club_team_name: name || "", country: country || "", city: city || "", updated_at: now }],
+    ["team_needs", { club_team_name: name || "", country: country || "", updated_at: now }],
+    ["team_need_interests", { club_team_name: name || "", updated_at: now }],
+    ["team_members", { club_team_name: name || "", updated_at: now }],
+    ["team_membership_requests", { club_team_name: name || "", updated_at: now }],
+    ["tournament_events", { club_team_name: name || "", updated_at: now }],
+    ["tournament_availability", { club_team_name: name || "", updated_at: now }],
+    ["tournament_squad_planning", { club_team_name: name || "", updated_at: now }],
+    ["roster_drafts", { club_team_name: name || "", updated_at: now }],
+    ["roster_players", { club_team_name: name || "", updated_at: now }],
+    ["event_comments", { club_team_name: name || "", updated_at: now }]
+  ].forEach(function(entry) {
+    try {
+      supabasePatchRows_(config, entry[0], entry[1], { legacy_club_team_id: teamId });
+    } catch (err) {
+      Logger.log("[PlayerHubBackend] supabase reference patch skipped " + entry[0] + " " + (err && err.message ? err.message : err));
+    }
+  });
+}
+
+function supabaseSaveClubTeamAdmin_(data) {
+  var env = supabaseAdminContext_(data);
+  if (!env.success) return env;
+  var incoming = data.clubTeam || data.team || data;
+  var now = nowIso_();
+  var teamId = String(firstValue_(incoming.teamId, incoming.clubTeamId, incoming.id, "") || "").trim();
+  var name = clubTeamText_(firstValue_(incoming.name, incoming.clubTeamName, incoming.TeamName, ""));
+  if (!name) return { success: false, message: "Club/team name is required." };
+  var duplicate = (playerHubSnapshotClubs_(env.ctx) || []).some(function(team) {
+    return truthy_(team.active) && clubTeamNameKey_(team.name) === clubTeamNameKey_(name) && String(team.teamId || "") !== String(teamId || "");
+  });
+  if (duplicate) return { success: false, message: "An active club/team with this name already exists." };
+  if (!teamId) teamId = "club-team-" + Utilities.getUuid();
+  var team = {
+    teamId: teamId,
+    name: name,
+    country: clubTeamText_(firstValue_(incoming.country, incoming.Country, "")),
+    city: clubTeamText_(firstValue_(incoming.city, incoming.City, "")),
+    level: clubTeamText_(firstValue_(incoming.level, incoming.Level, "")),
+    type: clubTeamText_(firstValue_(incoming.type, incoming.Type, "club")),
+    active: incoming.active !== undefined ? truthy_(incoming.active) : true,
+    createdAt: firstValue_(incoming.createdAt, now),
+    updatedAt: now
+  };
+  supabaseUpsertRows_(env.config, "club_teams", [supabaseClubTeamRowFromTeam_(team)], "legacy_team_id");
+  supabaseAuditLog_(env.config, env.context.user.username, "saveClubTeamAdmin", "club_teams", teamId, { name: name });
+  return { success: true, team: team };
+}
+
+function supabaseDeactivateClubTeamAdmin_(data) {
+  var env = supabaseAdminContext_(data);
+  if (!env.success) return env;
+  var teamId = String(firstValue_(data.teamId, data.clubTeamId, data.id, "") || "").trim();
+  if (!teamId) return { success: false, message: "Team id is required." };
+  var active = data.active !== undefined ? truthy_(data.active) : false;
+  var rows = supabasePatchRows_(env.config, "club_teams", { active: active, updated_at: nowIso_() }, { legacy_team_id: teamId });
+  supabaseAuditLog_(env.config, env.context.user.username, "deactivateClubTeamAdmin", "club_teams", teamId, { active: active });
+  return { success: true, team: rows[0] ? supabaseClub_(rows[0]) : null };
+}
+
+function supabaseUpdatePlayerProfileAdminStatus_(data) {
+  var env = supabaseAdminContext_(data);
+  if (!env.success) return env;
+  var username = String(firstValue_(data.username, data.playerUsername, "") || "").trim();
+  if (!username) return { success: false, message: "Username is required." };
+  var now = nowIso_();
+  var patch = { updated_at: now };
+  if (data.publicVisible !== undefined || data.isPublic !== undefined) patch.public_visible = truthy_(firstValue_(data.publicVisible, data.isPublic));
+  if (data.approved !== undefined) patch.approved = truthy_(data.approved);
+  if (data.reviewStatus) patch.review_status = String(data.reviewStatus || "").toUpperCase();
+  if (data.adminNote !== undefined) patch.admin_note = String(data.adminNote || "");
+  var rows = supabasePatchRows_(env.config, "player_profiles", patch, { username: username });
+  if (data.active !== undefined) {
+    supabasePatchRows_(env.config, "app_users", { active: truthy_(data.active), updated_at: now }, { username: username });
+  }
+  supabaseAuditLog_(env.config, env.context.user.username, "updatePlayerProfileAdminStatus", "player_profiles", username, patch);
+  return { success: true, profile: rows[0] ? supabaseProfile_(rows[0]) : null };
+}
+
+function supabaseReviewAccessRequestAdmin_(data) {
+  var env = supabaseAdminContext_(data);
+  if (!env.success) return env;
+  var requestId = String(firstValue_(data.requestId, data.id, "") || "").trim();
+  var status = normalizeAccessRequestStatus_(firstValue_(data.status, data.decision, ""));
+  if (!requestId || (status !== "APPROVED" && status !== "REJECTED")) return { success: false, message: "A valid request and decision are required." };
+  var requests = playerHubSnapshotAccessRequests_(env.ctx) || [];
+  var request = supabaseFindByLegacyId_(requests, "requestId", requestId);
+  if (!request) return { success: false, message: "Access request not found" };
+  var now = nowIso_();
+  var rows = supabasePatchRows_(env.config, "access_requests", {
+    status: status,
+    reviewed_by_username: env.context.user.username,
+    reviewed_at: now,
+    admin_note: firstValue_(data.reviewNote, data.adminNote, ""),
+    updated_at: now
+  }, { legacy_request_id: requestId });
+  if (status === "APPROVED") {
+    var rolePatch = { updated_at: now };
+    var requestType = normalizeAccessRequestType_(request.requestType || request.accessType || request.type);
+    if (requestType === "CAPTAIN") rolePatch.can_request_team_profile = true;
+    if (requestType === "TRAINER") rolePatch.can_use_team_builder = true;
+    if (requestType === "ORGANIZER") rolePatch.can_create_tournaments = true;
+    try {
+      supabasePatchRows_(env.config, "app_users", rolePatch, { username: request.username });
+      applyApprovedAccessRequest_(request);
+    } catch (err) {
+      Logger.log("[PlayerHubBackend] access auth side-effect skipped " + (err && err.message ? err.message : err));
+    }
+  }
+  supabaseAuditLog_(env.config, env.context.user.username, "reviewAccessRequestAdmin", "access_requests", requestId, { status: status });
+  return { success: true, request: rows[0] ? supabaseAccessRequest_(rows[0]) : null };
+}
+
+function supabaseRequestTeamIdentityChange_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  var teamProfile = captainCheck.captain.teamProfile;
+  var club = supabaseClubById_(env.ctx, teamProfile.clubTeamId) || {};
+  var pending = (playerHubSnapshotTeamChangeRequests_(env.ctx) || []).some(function(request) {
+    return String(request.teamId || "") === String(teamProfile.clubTeamId || "") && normalizeTeamChangeRequestStatus_(request.status || "") === "PENDING";
+  });
+  if (pending) return { success: false, message: "Identity change already pending." };
+  var requestedName = clubTeamText_(firstValue_(data.requestedName, data.name, data.newName, club.name || teamProfile.clubTeamName));
+  if (!requestedName) return { success: false, message: "Requested team name is required." };
+  var now = nowIso_();
+  var request = {
+    requestId: "team-change-" + Utilities.getUuid(),
+    teamId: teamProfile.clubTeamId || "",
+    currentName: club.name || teamProfile.clubTeamName || "",
+    requestedName: requestedName,
+    currentCountry: club.country || teamProfile.country || "",
+    requestedCountry: clubTeamText_(firstValue_(data.requestedCountry, data.country, data.newCountry, club.country || teamProfile.country)),
+    currentCity: club.city || teamProfile.city || "",
+    requestedCity: clubTeamText_(firstValue_(data.requestedCity, data.city, data.newCity, club.city || teamProfile.city)),
+    requestedByUsername: env.context.user.username,
+    reason: firstValue_(data.reason, data.note, ""),
+    status: "PENDING",
+    adminNote: "",
+    createdAt: now,
+    updatedAt: now
+  };
+  supabaseInsertRows_(env.config, "team_identity_change_requests", [supabaseTeamChangeRequestRowFromRequest_(request)]);
+  supabaseAuditLog_(env.config, env.context.user.username, "requestTeamIdentityChange", "team_identity_change_requests", request.requestId, { teamId: request.teamId });
+  return { success: true, request: request, message: "Identity change requested." };
+}
+
+function supabaseListTeamIdentityChangeRequests_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var requests = playerHubSnapshotTeamChangeRequests_(env.ctx) || [];
+  if (!isAdminUser_(env.context.user)) {
+    var captainCheck = supabaseRequireCaptainSnapshot_(env);
+    if (!captainCheck.success) return captainCheck;
+    requests = requests.filter(function(request) {
+      return String(request.teamId || "") === String(captainCheck.captain.teamProfile.clubTeamId || "");
+    });
+  }
+  return { success: true, requests: sortTeamChangeRequests_(requests) };
+}
+
+function supabaseReviewTeamIdentityChangeRequest_(data) {
+  var env = supabaseAdminContext_(data);
+  if (!env.success) return env;
+  var requestId = String(firstValue_(data.requestId, data.id, "") || "").trim();
+  var decision = normalizeTeamChangeRequestStatus_(firstValue_(data.status, data.decision, ""));
+  if (!requestId || (decision !== "APPROVED" && decision !== "REJECTED")) return { success: false, message: "A valid request and decision are required." };
+  var request = supabaseFindByLegacyId_(playerHubSnapshotTeamChangeRequests_(env.ctx), "requestId", requestId);
+  if (!request) return { success: false, message: "Identity request not found." };
+  var now = nowIso_();
+  if (decision === "APPROVED") {
+    var nextName = request.requestedName || request.currentName || "";
+    var nextCountry = request.requestedCountry || request.currentCountry || "";
+    var nextCity = request.requestedCity || request.currentCity || "";
+    supabasePatchRows_(env.config, "club_teams", { name: nextName, country: nextCountry, city: nextCity, updated_at: now }, { legacy_team_id: request.teamId });
+    supabasePatchClubTeamReferences_(env.config, request.teamId, nextName, nextCountry, nextCity, now);
+  }
+  var rows = supabasePatchRows_(env.config, "team_identity_change_requests", {
+    status: decision,
+    admin_note: firstValue_(data.adminNote, data.reviewNote, ""),
+    reviewed_by_username: env.context.user.username,
+    reviewed_at: now,
+    updated_at: now
+  }, { legacy_request_id: requestId });
+  supabaseAuditLog_(env.config, env.context.user.username, "reviewTeamIdentityChangeRequest", "team_identity_change_requests", requestId, { status: decision });
+  return { success: true, request: rows[0] ? supabaseTeamChangeRequest_(rows[0]) : null };
+}
+
+function supabaseSaveMyTeamProfile_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  var existing = captainCheck.captain.teamProfile || {};
+  var incoming = data.teamProfile || data.profile || data;
+  var club = supabaseClubById_(env.ctx, existing.clubTeamId) || {};
+  var now = nowIso_();
+  var profile = {
+    teamProfileId: existing.teamProfileId || "team-profile-" + Utilities.getUuid(),
+    clubTeamId: existing.clubTeamId || incoming.clubTeamId || "",
+    clubTeamName: club.name || existing.clubTeamName || incoming.clubTeamName || "",
+    captainUsername: env.context.user.username,
+    country: club.country || existing.country || "",
+    city: club.city || existing.city || "",
+    level: firstValue_(incoming.level, existing.level, ""),
+    description: firstValue_(incoming.description, existing.description, ""),
+    contactNote: firstValue_(incoming.contactNote, incoming.contact_note, existing.contactNote, ""),
+    active: incoming.active !== undefined ? truthy_(incoming.active) : truthy_(firstValue_(existing.active, true)),
+    status: firstValue_(existing.status, "ACTIVE"),
+    createdAt: existing.createdAt || now,
+    updatedAt: now
+  };
+  supabaseUpsertRows_(env.config, "team_profiles", [supabaseTeamProfileRowFromProfile_(profile)], "legacy_profile_id");
+  supabaseAuditLog_(env.config, env.context.user.username, "saveMyTeamProfile", "team_profiles", profile.teamProfileId, {});
+  return { success: true, teamProfile: profile, message: "Team profile saved." };
+}
+
+function supabaseListTeamProfilesAdmin_(data) {
+  var env = supabaseAdminContext_(data);
+  if (!env.success) return env;
+  return { success: true, teamProfiles: playerHubSnapshotTeamProfiles_(env.ctx) || [] };
+}
+
+function supabaseUpdateTeamProfileAdmin_(data) {
+  var env = supabaseAdminContext_(data);
+  if (!env.success) return env;
+  var incoming = data.teamProfile || data.profile || data;
+  var teamProfileId = String(firstValue_(incoming.teamProfileId, incoming.profileId, "") || "").trim();
+  var existing = supabaseTeamProfileById_(env.ctx, teamProfileId);
+  if (!existing) return { success: false, message: "Team profile not found." };
+  var profile = Object.assign({}, existing, {
+    description: firstValue_(incoming.description, existing.description, ""),
+    contactNote: firstValue_(incoming.contactNote, existing.contactNote, ""),
+    level: firstValue_(incoming.level, existing.level, ""),
+    active: incoming.active !== undefined ? truthy_(incoming.active) : truthy_(existing.active),
+    status: firstValue_(incoming.status, existing.status, "ACTIVE"),
+    updatedAt: nowIso_()
+  });
+  var rows = supabasePatchRows_(env.config, "team_profiles", supabaseTeamProfileRowFromProfile_(profile), { legacy_profile_id: teamProfileId });
+  supabaseAuditLog_(env.config, env.context.user.username, "updateTeamProfileAdmin", "team_profiles", teamProfileId, {});
+  return { success: true, teamProfile: rows[0] ? supabaseTeamProfile_(rows[0]) : profile };
+}
+
+function supabaseCreateOrUpdateTeamNeed_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  var teamProfile = captainCheck.captain.teamProfile;
+  var incoming = data.need || data.teamNeed || data;
+  var needId = String(firstValue_(incoming.needId, incoming.id, "") || "").trim();
+  var existing = needId ? supabaseNeedById_(env.ctx, needId) : null;
+  if (existing && String(existing.teamProfileId || "") !== String(teamProfile.teamProfileId || "")) return { success: false, message: "You can only update your own team needs." };
+  var tournamentId = String(firstValue_(incoming.tournamentId, existing && existing.tournamentId, "") || "").trim();
+  var tournamentName = String(firstValue_(incoming.tournamentName, existing && existing.tournamentName, "") || "").trim();
+  var publishRequested = truthy_(firstValue_(incoming.isPublished, incoming.IsPublished, false));
+  var visibility = normalizeTeamNeedVisibility_(firstValue_(incoming.visibility, incoming.publishStatus, existing && existing.visibility, publishRequested ? "published" : "internal"));
+  if (publishRequested) visibility = "published";
+  var needContext = normalizeTeamNeedContext_(firstValue_(incoming.needContext, incoming.context, existing && existing.needContext, tournamentId || tournamentName ? "tournament" : "general"));
+  if (visibility === "published" && (needContext !== "tournament" || (!tournamentId && !tournamentName))) {
+    return { success: false, message: "Select tournament first." };
+  }
+  var now = nowIso_();
+  var need = {
+    needId: needId || "team-need-" + Utilities.getUuid(),
+    teamProfileId: teamProfile.teamProfileId,
+    clubTeamId: teamProfile.clubTeamId,
+    clubTeamName: teamProfile.clubTeamName,
+    country: teamProfile.country || "",
+    needType: normalizeTeamNeedType_(firstValue_(incoming.needType, incoming.type, existing && existing.needType, "PLAYER")),
+    neededCount: Math.max(1, parseInt(firstValue_(incoming.neededCount, incoming.count, existing && existing.neededCount, 1), 10) || 1),
+    needText: firstValue_(incoming.needText, incoming.note, existing && existing.needText, existing && existing.note, ""),
+    status: normalizeTeamNeedStatus_(firstValue_(incoming.status, existing && existing.status, "OPEN")),
+    visibility: visibility,
+    needContext: needContext,
+    tournamentId: tournamentId,
+    tournamentName: tournamentName,
+    className: firstValue_(incoming.className, existing && existing.className, ""),
+    deadlineAt: firstValue_(incoming.deadlineAt, existing && existing.deadlineAt, ""),
+    publishedAt: visibility === "published" ? firstValue_(existing && existing.publishedAt, now) : "",
+    createdBy: existing && existing.createdBy || env.context.user.username,
+    createdAt: existing && existing.createdAt || now,
+    updatedAt: now
+  };
+  supabaseUpsertRows_(env.config, "team_needs", [supabaseTeamNeedRowFromNeed_(need)], "legacy_need_id");
+  var fresh = supabaseReloadEnv_(env);
+  var captain = supabaseCaptainSnapshotForUser_(fresh.ctx, fresh.context.user);
+  supabaseAuditLog_(env.config, env.context.user.username, "createOrUpdateTeamNeed", "team_needs", need.needId, { visibility: need.visibility });
+  return { success: true, teamNeed: need, teamNeeds: captain.needs || [], needs: captain.needs || [], message: visibility === "published" ? "Player ad published." : "Need saved." };
+}
+
+function supabaseCloseTeamNeed_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  var needId = String(firstValue_(data.needId, data.id, "") || "").trim();
+  var need = supabaseNeedById_(env.ctx, needId);
+  if (!need) return { success: false, message: "Team need not found." };
+  if (String(need.teamProfileId || "") !== String(captainCheck.captain.teamProfile.teamProfileId || "")) return { success: false, message: "You can only close your own team needs." };
+  var rows = supabasePatchRows_(env.config, "team_needs", { status: "CLOSED", updated_at: nowIso_() }, { legacy_need_id: needId });
+  var fresh = supabaseReloadEnv_(env);
+  var captain = supabaseCaptainSnapshotForUser_(fresh.ctx, fresh.context.user);
+  supabaseAuditLog_(env.config, env.context.user.username, "closeTeamNeed", "team_needs", needId, {});
+  return { success: true, teamNeed: rows[0] ? supabaseTeamNeed_(rows[0]) : null, teamNeeds: captain.needs || [], needs: captain.needs || [], message: "Need closed." };
+}
+
+function supabaseCreateTeamNeedInterest_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var needId = String(firstValue_(data.needId, data.NeedId, "") || "").trim();
+  var need = supabaseNeedById_(env.ctx, needId);
+  if (!need) return { success: false, message: "Team need not found." };
+  if (normalizeTeamNeedStatus_(need.status || "") !== "OPEN") return { success: false, message: "This need is closed." };
+  var username = playerHubUsername_(env.context.user);
+  if (playerHubSnapshotUsernameKey_(need.createdBy) === playerHubSnapshotUsernameKey_(username)) return { success: false, message: "You cannot send interest to your own need." };
+  var duplicate = (playerHubSnapshotTeamNeedInterests_(env.ctx) || []).some(function(interest) {
+    return String(interest.needId || "") === needId &&
+      playerHubSnapshotUsernameKey_(interest.playerUsername) === playerHubSnapshotUsernameKey_(username) &&
+      ["PENDING", "ACCEPTED"].indexOf(normalizeTeamNeedInterestStatus_(interest.status || "")) !== -1;
+  });
+  if (duplicate) return { success: false, message: "Interest already sent." };
+  var profile = playerHubSnapshotProfile_(env.ctx, env.context.user);
+  var now = nowIso_();
+  var interest = {
+    interestId: "need-interest-" + Utilities.getUuid(),
+    needId: needId,
+    teamProfileId: need.teamProfileId,
+    clubTeamId: need.clubTeamId,
+    clubTeamName: need.clubTeamName,
+    playerUsername: username,
+    playerDisplayName: profile.displayName || env.context.user.name || username,
+    playerEmail: profile.email || env.context.user.email || "",
+    playerPhone: profile.phone || "",
+    playerCountry: profile.country || "",
+    message: firstValue_(data.message, ""),
+    status: "PENDING",
+    createdAt: now,
+    updatedAt: now
+  };
+  supabaseInsertRows_(env.config, "team_need_interests", [supabaseTeamNeedInterestRowFromInterest_(interest)]);
+  supabaseAuditLog_(env.config, username, "createTeamNeedInterest", "team_need_interests", interest.interestId, { needId: needId });
+  return { success: true, interest: interest, message: "Interest sent." };
+}
+
+function supabaseReviewTeamNeedInterest_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  var interestId = String(firstValue_(data.interestId, data.id, "") || "").trim();
+  var decision = normalizeTeamNeedInterestStatus_(firstValue_(data.status, data.decision, ""));
+  if (!interestId || (decision !== "ACCEPTED" && decision !== "DECLINED")) return { success: false, message: "A valid interest and decision are required." };
+  var interest = supabaseInterestById_(env.ctx, interestId);
+  if (!interest) return { success: false, message: "Interest not found." };
+  if (String(interest.teamProfileId || "") !== String(captainCheck.captain.teamProfile.teamProfileId || "")) return { success: false, message: "Captain access required." };
+  var now = nowIso_();
+  var rows = supabasePatchRows_(env.config, "team_need_interests", {
+    status: decision,
+    reviewed_by_username: playerHubUsername_(env.context.user),
+    reviewed_at: now,
+    updated_at: now
+  }, { legacy_interest_id: interestId });
+  var fresh = supabaseReloadEnv_(env);
+  var captain = supabaseCaptainSnapshotForUser_(fresh.ctx, fresh.context.user);
+  var interests = (captain.interests || []).filter(function(item) {
+    return !interest.needId || item.needId === interest.needId;
+  });
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "reviewTeamNeedInterest", "team_need_interests", interestId, { status: decision });
+  return { success: true, interest: rows[0] ? supabaseTeamNeedInterest_(rows[0]) : null, interests: interests, teamNeeds: captain.needs || [] };
+}
+
+function supabaseAddTeamMemberFromInterest_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  var interestId = String(firstValue_(data.interestId, data.id, "") || "").trim();
+  var interest = supabaseInterestById_(env.ctx, interestId);
+  if (!interest) return { success: false, message: "Interest not found." };
+  if (String(interest.teamProfileId || "") !== String(captainCheck.captain.teamProfile.teamProfileId || "")) return { success: false, message: "Captain access required." };
+  if (normalizeTeamNeedInterestStatus_(interest.status || "") !== "ACCEPTED") return { success: false, message: "Interest must be accepted first." };
+  if (supabaseActiveTeamMemberExists_(env.ctx, interest.teamProfileId, interest.playerUsername)) {
+    return { success: true, message: "Already a team member.", teamMembers: captainCheck.captain.members || [] };
+  }
+  var now = nowIso_();
+  var member = {
+    teamMemberId: "team-member-" + Utilities.getUuid(),
+    teamProfileId: interest.teamProfileId,
+    clubTeamId: interest.clubTeamId,
+    clubTeamName: interest.clubTeamName,
+    captainUsername: playerHubUsername_(env.context.user),
+    playerUsername: interest.playerUsername,
+    playerDisplayName: interest.playerDisplayName,
+    playerEmail: interest.playerEmail,
+    playerPhone: interest.playerPhone,
+    playerCountry: interest.playerCountry,
+    sourceInterestId: interestId,
+    memberStatus: "ACTIVE",
+    confirmedBy: playerHubUsername_(env.context.user),
+    confirmedAt: now,
+    createdAt: now,
+    updatedAt: now
+  };
+  supabaseInsertRows_(env.config, "team_members", [supabaseTeamMemberRowFromMember_(member)]);
+  var fresh = supabaseReloadEnv_(env);
+  var captain = supabaseCaptainSnapshotForUser_(fresh.ctx, fresh.context.user);
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "addTeamMemberFromInterest", "team_members", member.teamMemberId, { interestId: interestId });
+  return { success: true, teamMember: member, teamMembers: captain.members || [], message: "Team member added." };
+}
+
+function supabaseRemoveTeamMember_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  var memberId = String(firstValue_(data.teamMemberId, data.memberId, data.id, "") || "").trim();
+  var member = supabaseFindByLegacyId_(playerHubSnapshotTeamMembers_(env.ctx), "teamMemberId", memberId);
+  if (!member) return { success: false, message: "Team member not found." };
+  if (String(member.teamProfileId || "") !== String(captainCheck.captain.teamProfile.teamProfileId || "")) return { success: false, message: "Captain access required." };
+  var rows = supabasePatchRows_(env.config, "team_members", { member_status: "REMOVED", updated_at: nowIso_() }, { legacy_team_member_id: memberId });
+  var fresh = supabaseReloadEnv_(env);
+  var captain = supabaseCaptainSnapshotForUser_(fresh.ctx, fresh.context.user);
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "removeTeamMember", "team_members", memberId, {});
+  return { success: true, teamMember: rows[0] ? supabaseTeamMember_(rows[0]) : null, teamMembers: captain.members || [] };
+}
+
+function supabaseCreateOrUpdateTeamMembershipRequest_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var username = playerHubUsername_(env.context.user);
+  var profile = playerHubSnapshotProfile_(env.ctx, env.context.user);
+  var clubTeamId = String(firstValue_(data.clubTeamId, profile.clubTeamId, "") || "").trim();
+  if (!clubTeamId) return { success: true, request: null, requests: playerHubSnapshotMembershipRequestsForPlayer_(env.ctx, username) };
+  var club = supabaseClubById_(env.ctx, clubTeamId);
+  if (!club) return { success: false, message: "Selected club/team is no longer active." };
+  var now = nowIso_();
+  (playerHubSnapshotMembershipRequests_(env.ctx) || []).forEach(function(request) {
+    if (playerHubSnapshotUsernameKey_(request.playerUsername) === playerHubSnapshotUsernameKey_(username) &&
+      normalizeTeamMembershipRequestStatus_(request.status || "") === "PENDING" &&
+      String(request.clubTeamId || "") !== clubTeamId) {
+      supabasePatchRows_(env.config, "team_membership_requests", { status: "CANCELLED", updated_at: now }, { legacy_request_id: request.requestId });
+    }
+  });
+  var existing = null;
+  (playerHubSnapshotMembershipRequests_(env.ctx) || []).some(function(request) {
+    if (playerHubSnapshotUsernameKey_(request.playerUsername) === playerHubSnapshotUsernameKey_(username) &&
+      String(request.clubTeamId || "") === clubTeamId &&
+      normalizeTeamMembershipRequestStatus_(request.status || "") === "PENDING") {
+      existing = request;
+      return true;
+    }
+    return false;
+  });
+  var requestObj = {
+    requestId: existing && existing.requestId || "team-membership-" + Utilities.getUuid(),
+    clubTeamId: club.teamId,
+    clubTeamName: club.name,
+    playerUsername: username,
+    playerDisplayName: profile.displayName || env.context.user.name || username,
+    playerEmail: profile.email || env.context.user.email || "",
+    playerPhone: profile.phone || "",
+    playerCountry: profile.country || "",
+    playerProfileId: profile.profileId || "",
+    status: "PENDING",
+    requestedAt: existing && existing.requestedAt || now,
+    createdAt: existing && existing.createdAt || now,
+    updatedAt: now
+  };
+  supabaseUpsertRows_(env.config, "team_membership_requests", [supabaseMembershipRequestRowFromRequest_(requestObj)], "legacy_request_id");
+  var fresh = supabaseReloadEnv_(env);
+  supabaseAuditLog_(env.config, username, "createOrUpdateTeamMembershipRequest", "team_membership_requests", requestObj.requestId, { clubTeamId: clubTeamId });
+  return { success: true, request: requestObj, requests: playerHubSnapshotMembershipRequestsForPlayer_(fresh.ctx, username) };
+}
+
+function supabaseReviewTeamMembershipRequest_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  var requestId = String(firstValue_(data.requestId, data.id, "") || "").trim();
+  var status = normalizeTeamMembershipRequestStatus_(firstValue_(data.status, data.decision, ""));
+  if (!requestId || (status !== "APPROVED" && status !== "REJECTED")) return { success: false, message: "Request must be approved or rejected." };
+  var request = supabaseMembershipRequestById_(env.ctx, requestId);
+  if (!request) return { success: false, message: "Membership request not found" };
+  if (String(request.clubTeamId || "") !== String(captainCheck.captain.teamProfile.clubTeamId || "")) return { success: false, message: "Captain access required." };
+  var now = nowIso_();
+  var rows = supabasePatchRows_(env.config, "team_membership_requests", {
+    status: status,
+    reviewed_by_username: playerHubUsername_(env.context.user),
+    reviewed_at: now,
+    review_note: firstValue_(data.reviewNote, data.adminNote, ""),
+    updated_at: now
+  }, { legacy_request_id: requestId });
+  if (status === "APPROVED" && !supabaseActiveTeamMemberExists_(env.ctx, captainCheck.captain.teamProfile.teamProfileId, request.playerUsername)) {
+    supabaseInsertRows_(env.config, "team_members", [supabaseTeamMemberRowFromMember_({
+      teamMemberId: "team-member-" + Utilities.getUuid(),
+      teamProfileId: captainCheck.captain.teamProfile.teamProfileId,
+      clubTeamId: captainCheck.captain.teamProfile.clubTeamId,
+      clubTeamName: captainCheck.captain.teamProfile.clubTeamName,
+      captainUsername: playerHubUsername_(env.context.user),
+      playerUsername: request.playerUsername,
+      playerDisplayName: request.playerDisplayName,
+      playerEmail: request.playerEmail,
+      playerPhone: request.playerPhone,
+      playerCountry: request.playerCountry,
+      sourceInterestId: "PROFILE_REQUEST",
+      memberStatus: "ACTIVE",
+      confirmedBy: playerHubUsername_(env.context.user),
+      confirmedAt: now,
+      createdAt: now,
+      updatedAt: now
+    })]);
+  }
+  var fresh = supabaseReloadEnv_(env);
+  var captain = supabaseCaptainSnapshotForUser_(fresh.ctx, fresh.context.user);
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "reviewTeamMembershipRequest", "team_membership_requests", requestId, { status: status });
+  return { success: true, request: rows[0] ? supabaseMembershipRequest_(rows[0]) : null, requests: captain.membershipRequests || [], members: captain.members || [] };
+}
+
+function supabaseCancelMyTeamMembershipRequest_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var username = playerHubUsername_(env.context.user);
+  var requestId = String(firstValue_(data.requestId, data.id, "") || "").trim();
+  var request = supabaseMembershipRequestById_(env.ctx, requestId);
+  if (!request || playerHubSnapshotUsernameKey_(request.playerUsername) !== playerHubSnapshotUsernameKey_(username)) return { success: false, message: "Membership request not found" };
+  if (normalizeTeamMembershipRequestStatus_(request.status || "") !== "PENDING") return { success: false, message: "Only pending requests can be cancelled." };
+  var rows = supabasePatchRows_(env.config, "team_membership_requests", { status: "CANCELLED", updated_at: nowIso_() }, { legacy_request_id: requestId });
+  supabaseAuditLog_(env.config, username, "cancelMyTeamMembershipRequest", "team_membership_requests", requestId, {});
+  return { success: true, request: rows[0] ? supabaseMembershipRequest_(rows[0]) : null };
+}
+
+function supabaseCreateTournamentTeamPlan_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var captainCheck = supabaseRequireCaptainSnapshot_(env);
+  if (!captainCheck.success) return captainCheck;
+  var teamProfile = captainCheck.captain.teamProfile;
+  var tournamentId = String(firstValue_(data.tournamentId, data.tournament && data.tournament.id, "") || "").trim();
+  var tournamentName = String(firstValue_(data.tournamentName, data.tournament && data.tournament.name, "") || "").trim();
+  if (!tournamentId && !tournamentName) return { success: false, message: "Select tournament first." };
+  var now = nowIso_();
+  var plan = {
+    planId: "tournament-plan-" + Utilities.getUuid(),
+    tournamentId: tournamentId,
+    tournamentName: tournamentName,
+    teamProfileId: teamProfile.teamProfileId,
+    clubTeamId: teamProfile.clubTeamId,
+    clubTeamName: teamProfile.clubTeamName,
+    captainUsername: playerHubUsername_(env.context.user),
+    squadLabel: firstValue_(data.squadLabel, "TEAM_PLANNING"),
+    className: firstValue_(data.className, ""),
+    planStatus: normalizeTournamentPlanStatus_(firstValue_(data.planStatus, "INVITING")),
+    deadlineAt: firstValue_(data.deadlineAt, ""),
+    note: firstValue_(data.note, ""),
+    createdAt: now,
+    updatedAt: now
+  };
+  supabaseInsertRows_(env.config, "tournament_events", [supabaseTournamentPlanRowFromPlan_(plan)]);
+  var invitees = tournamentAvailabilityInvitees_(captainCheck.captain.members || [], {
+    user: env.context.user,
+    teamProfile: teamProfile,
+    playerProfile: playerHubSnapshotProfile_(env.ctx, env.context.user)
+  });
+  var existingAvailability = {};
+  (playerHubSnapshotTournamentAvailability_(env.ctx) || []).forEach(function(item) {
+    if (String(item.planId || "") === plan.planId) existingAvailability[playerHubSnapshotUsernameKey_(item.playerUsername)] = true;
+  });
+  var rows = [];
+  invitees.forEach(function(member) {
+    var username = member.playerUsername || "";
+    var key = playerHubSnapshotUsernameKey_(username);
+    if (!key || existingAvailability[key]) return;
+    existingAvailability[key] = true;
+    rows.push(supabaseTournamentAvailabilityRowFromAvailability_({
+      availabilityId: "availability-" + Utilities.getUuid(),
+      planId: plan.planId,
+      tournamentId: plan.tournamentId,
+      tournamentName: plan.tournamentName,
+      teamProfileId: plan.teamProfileId,
+      clubTeamId: plan.clubTeamId,
+      clubTeamName: plan.clubTeamName,
+      playerUsername: username,
+      playerDisplayName: member.playerDisplayName || username,
+      playerEmail: member.playerEmail || "",
+      playerPhone: member.playerPhone || "",
+      playerCountry: member.playerCountry || "",
+      responseStatus: "PENDING",
+      preferredSquad: "NO_PREFERENCE",
+      playerNote: "",
+      requestedBy: playerHubUsername_(env.context.user),
+      requestedAt: now,
+      createdAt: now,
+      updatedAt: now
+    }));
+  });
+  if (rows.length) supabaseInsertRows_(env.config, "tournament_availability", rows);
+  var fresh = supabaseReloadEnv_(env);
+  var captain = supabaseCaptainSnapshotForUser_(fresh.ctx, fresh.context.user);
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "createTournamentTeamPlan", "tournament_events", plan.planId, { invitees: rows.length });
+  return { success: true, plan: plan, plans: captain.tournamentPlans || [], tournamentPlans: captain.tournamentPlans || [], message: "Team members asked." };
+}
+
+function supabaseUpdateTournamentPlanStatus_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var planCheck = supabasePlanForCaptain_(env, firstValue_(data.planId, data.id, ""));
+  if (!planCheck.success) return planCheck;
+  var status = normalizeTournamentPlanStatus_(firstValue_(data.planStatus, data.status, ""));
+  if (!status) return { success: false, message: "Plan status is required." };
+  var rows = supabasePatchRows_(env.config, "tournament_events", { status: status, updated_at: nowIso_() }, { legacy_plan_id: planCheck.plan.planId });
+  var fresh = supabaseReloadEnv_(env);
+  var captain = supabaseCaptainSnapshotForUser_(fresh.ctx, fresh.context.user);
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "updateTournamentPlanStatus", "tournament_events", planCheck.plan.planId, { status: status });
+  return { success: true, plan: rows[0] ? supabaseTournamentPlan_(rows[0]) : null, plans: captain.tournamentPlans || [], tournamentPlans: captain.tournamentPlans || [] };
+}
+
+function supabaseAssignPlayerToSquad_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var planCheck = supabasePlanForCaptain_(env, firstValue_(data.planId, data.id, ""));
+  if (!planCheck.success) return planCheck;
+  var plan = planCheck.plan;
+  var username = String(firstValue_(data.playerUsername, data.username, "") || "").trim();
+  var assignedSquad = normalizeAssignedSquad_(firstValue_(data.assignedSquad, data.squad, ""));
+  if (!username || ["A", "B", "C", "RESERVE", "UNASSIGNED"].indexOf(assignedSquad) === -1) return { success: false, message: "A valid player and squad are required." };
+  var availability = null;
+  (playerHubSnapshotTournamentAvailability_(env.ctx) || []).some(function(item) {
+    if (String(item.planId || "") === plan.planId && playerHubSnapshotUsernameKey_(item.playerUsername) === playerHubSnapshotUsernameKey_(username)) {
+      availability = item;
+      return true;
+    }
+    return false;
+  });
+  if (!availability || ["YES", "MAYBE"].indexOf(normalizeTournamentAvailabilityStatus_(availability.responseStatus || "")) === -1) {
+    return { success: false, message: "Only Going or Maybe players can be assigned." };
+  }
+  var existing = null;
+  (playerHubSnapshotSquadPlanning_(env.ctx) || []).some(function(item) {
+    if (String(item.planId || "") === plan.planId && playerHubSnapshotUsernameKey_(item.playerUsername) === playerHubSnapshotUsernameKey_(username)) {
+      existing = item;
+      return true;
+    }
+    return false;
+  });
+  var now = nowIso_();
+  var planning = {
+    planningId: existing && existing.planningId || "squad-planning-" + Utilities.getUuid(),
+    planId: plan.planId,
+    tournamentId: plan.tournamentId,
+    tournamentName: plan.tournamentName,
+    teamProfileId: plan.teamProfileId,
+    clubTeamId: plan.clubTeamId,
+    clubTeamName: plan.clubTeamName,
+    playerUsername: username,
+    playerDisplayName: availability.playerDisplayName || username,
+    playerCountry: availability.playerCountry || "",
+    availabilityStatus: availability.responseStatus || "YES",
+    preferredSquad: availability.preferredSquad || "NO_PREFERENCE",
+    assignedSquad: assignedSquad,
+    planningStatus: "PLANNED",
+    assignedBy: playerHubUsername_(env.context.user),
+    assignedAt: now,
+    createdAt: existing && existing.createdAt || now,
+    updatedAt: now
+  };
+  supabaseUpsertRows_(env.config, "tournament_squad_planning", [supabaseSquadPlanningRowFromPlanning_(planning)], "legacy_planning_id");
+  var fresh = supabaseReloadEnv_(env);
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "assignPlayerToSquad", "tournament_squad_planning", planning.planningId, { squad: assignedSquad });
+  return { success: true, planning: planning, squadPlanning: supabasePlanningForPlan_(fresh.ctx, plan.planId) };
+}
+
+function supabaseRemovePlayerFromSquadPlanning_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var planCheck = supabasePlanForCaptain_(env, firstValue_(data.planId, data.id, ""));
+  if (!planCheck.success) return planCheck;
+  var username = String(firstValue_(data.playerUsername, data.username, "") || "").trim();
+  var rows = [];
+  (playerHubSnapshotSquadPlanning_(env.ctx) || []).forEach(function(item) {
+    if (String(item.planId || "") !== planCheck.plan.planId) return;
+    if (username && playerHubSnapshotUsernameKey_(item.playerUsername) !== playerHubSnapshotUsernameKey_(username)) return;
+    rows = rows.concat(supabasePatchRows_(env.config, "tournament_squad_planning", {
+      assigned_squad: "UNASSIGNED",
+      planning_status: "PLANNED",
+      assigned_by_username: playerHubUsername_(env.context.user),
+      assigned_at: nowIso_(),
+      updated_at: nowIso_()
+    }, { legacy_planning_id: item.planningId }));
+  });
+  var fresh = supabaseReloadEnv_(env);
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "removePlayerFromSquadPlanning", "tournament_squad_planning", planCheck.plan.planId, { playerUsername: username });
+  return { success: true, planning: rows.map(supabaseSquadPlanning_), squadPlanning: supabasePlanningForPlan_(fresh.ctx, planCheck.plan.planId) };
+}
+
+function supabaseRosterPlanningVersionKey_(planning) {
+  return (planning || [])
+    .filter(function(item) {
+      return normalizeTournamentSquadPlanningStatus_(item.planningStatus || "PLANNED") === "PLANNED" &&
+        ["A", "B", "C", "RESERVE"].indexOf(normalizeAssignedSquad_(item.assignedSquad || "")) !== -1;
+    })
+    .map(function(item) {
+      return [item.playerUsername || "", normalizeAssignedSquad_(item.assignedSquad || "")].join(":");
+    })
+    .sort()
+    .join("|");
+}
+
+function supabaseCreateOrUpdateRosterDraftFromSquadPlanning_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var planCheck = supabasePlanForCaptain_(env, firstValue_(data.planId, data.id, ""));
+  if (!planCheck.success) return planCheck;
+  var plan = planCheck.plan;
+  var existing = supabaseRosterForPlanId_(env.ctx, plan.planId);
+  if (existing && ["SUBMITTED", "APPROVED", "LOCKED"].indexOf(normalizeTournamentRosterStatus_(existing.rosterStatus || "")) !== -1) {
+    return { success: false, message: "Submitted or locked rosters cannot be updated from planning." };
+  }
+  var planning = supabasePlanningForPlan_(env.ctx, plan.planId).filter(function(item) {
+    return normalizeTournamentSquadPlanningStatus_(item.planningStatus || "PLANNED") === "PLANNED" &&
+      ["A", "B", "C", "RESERVE"].indexOf(normalizeAssignedSquad_(item.assignedSquad || "")) !== -1;
+  });
+  if (!planning.length) return { success: false, message: "Assign at least one player before creating a roster draft." };
+  var now = nowIso_();
+  var rosterId = existing && existing.rosterId || "roster-draft-" + Utilities.getUuid();
+  var roster = {
+    rosterId: rosterId,
+    planId: plan.planId,
+    tournamentId: plan.tournamentId,
+    tournamentName: plan.tournamentName,
+    teamProfileId: plan.teamProfileId,
+    clubTeamId: plan.clubTeamId,
+    clubTeamName: plan.clubTeamName,
+    squadLabel: plan.squadLabel || "TEAM_PLANNING",
+    captainUsername: playerHubUsername_(env.context.user),
+    rosterStatus: "DRAFT",
+    planningVersionKey: supabaseRosterPlanningVersionKey_(planning),
+    createdAt: existing && existing.createdAt || now,
+    updatedAt: now
+  };
+  supabaseUpsertRows_(env.config, "roster_drafts", [supabaseRosterRowFromRoster_(roster)], "legacy_roster_id");
+  var existingPlayers = {};
+  (playerHubSnapshotRosterPlayers_(env.ctx) || []).forEach(function(player) {
+    if (String(player.rosterId || "") === rosterId) existingPlayers[playerHubSnapshotUsernameKey_(player.playerUsername)] = player;
+  });
+  var activeKeys = {};
+  var playerRows = planning.map(function(item) {
+    var key = playerHubSnapshotUsernameKey_(item.playerUsername);
+    activeKeys[key] = true;
+    var existingPlayer = existingPlayers[key] || {};
+    return supabaseRosterPlayerRowFromPlayer_({
+      rosterPlayerId: existingPlayer.rosterPlayerId || "roster-player-" + Utilities.getUuid(),
+      rosterId: rosterId,
+      planId: plan.planId,
+      tournamentId: plan.tournamentId,
+      tournamentName: plan.tournamentName,
+      teamProfileId: plan.teamProfileId,
+      clubTeamId: plan.clubTeamId,
+      clubTeamName: plan.clubTeamName,
+      squadLabel: roster.squadLabel,
+      playerUsername: item.playerUsername,
+      playerDisplayName: item.playerDisplayName,
+      playerCountry: item.playerCountry,
+      assignedSquad: item.assignedSquad,
+      rosterRole: normalizeAssignedSquad_(item.assignedSquad) === "RESERVE" ? "RESERVE" : "PLAYER",
+      source: "SQUAD_PLANNING",
+      playerStatus: "ACTIVE",
+      addedBy: playerHubUsername_(env.context.user),
+      addedAt: existingPlayer.addedAt || now,
+      createdAt: existingPlayer.createdAt || now,
+      updatedAt: now
+    });
+  });
+  if (playerRows.length) supabaseUpsertRows_(env.config, "roster_players", playerRows, "legacy_roster_player_id");
+  Object.keys(existingPlayers).forEach(function(key) {
+    if (!activeKeys[key]) {
+      supabasePatchRows_(env.config, "roster_players", { player_status: "REMOVED", updated_at: now }, { legacy_roster_player_id: existingPlayers[key].rosterPlayerId });
+    }
+  });
+  var fresh = supabaseReloadEnv_(env);
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "createOrUpdateRosterDraftFromSquadPlanning", "roster_drafts", rosterId, { players: playerRows.length });
+  return Object.assign({ message: "Roster draft saved." }, supabaseRosterPayloadForPlan_(fresh.ctx, plan));
+}
+
+function supabaseSubmitRosterDraft_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var rosterId = String(firstValue_(data.rosterId, data.draftId, "") || "").trim();
+  var roster = rosterId ? supabaseRosterById_(env.ctx, rosterId) : supabaseRosterForPlanId_(env.ctx, firstValue_(data.planId, ""));
+  if (!roster) return { success: false, message: "Roster draft not found." };
+  var planCheck = supabasePlanForCaptain_(env, roster.planId);
+  if (!planCheck.success) return planCheck;
+  if (normalizeTournamentRosterStatus_(roster.rosterStatus || "") !== "DRAFT" && normalizeTournamentRosterStatus_(roster.rosterStatus || "") !== "CHANGE_REQUESTED") {
+    return { success: false, message: "Only draft rosters can be submitted." };
+  }
+  var now = nowIso_();
+  supabasePatchRows_(env.config, "roster_drafts", {
+    roster_status: "SUBMITTED",
+    submitted_by_username: playerHubUsername_(env.context.user),
+    submitted_at: now,
+    updated_at: now
+  }, { legacy_roster_id: roster.rosterId });
+  var fresh = supabaseReloadEnv_(env);
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "submitRosterDraft", "roster_drafts", roster.rosterId, {});
+  return Object.assign({ message: "Roster submitted." }, supabaseRosterPayloadForPlan_(fresh.ctx, planCheck.plan));
+}
+
+function supabaseRemovePlayerFromRosterDraft_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var rosterId = String(firstValue_(data.rosterId, data.draftId, "") || "").trim();
+  var roster = supabaseRosterById_(env.ctx, rosterId);
+  if (!roster) return { success: false, message: "Roster draft not found." };
+  var planCheck = supabasePlanForCaptain_(env, roster.planId);
+  if (!planCheck.success) return planCheck;
+  if (normalizeTournamentRosterStatus_(roster.rosterStatus || "") !== "DRAFT") return { success: false, message: "Only draft rosters can be edited." };
+  var playerId = String(firstValue_(data.rosterPlayerId, data.playerId, "") || "").trim();
+  var username = String(firstValue_(data.playerUsername, data.username, "") || "").trim();
+  var rows = [];
+  (playerHubSnapshotRosterPlayers_(env.ctx) || []).forEach(function(player) {
+    if (String(player.rosterId || "") !== rosterId) return;
+    if (playerId && String(player.rosterPlayerId || "") !== playerId) return;
+    if (username && playerHubSnapshotUsernameKey_(player.playerUsername) !== playerHubSnapshotUsernameKey_(username)) return;
+    rows = rows.concat(supabasePatchRows_(env.config, "roster_players", { player_status: "REMOVED", updated_at: nowIso_() }, { legacy_roster_player_id: player.rosterPlayerId }));
+  });
+  var fresh = supabaseReloadEnv_(env);
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "removePlayerFromRosterDraft", "roster_players", rosterId, { playerUsername: username });
+  return Object.assign({ removed: rows.map(supabaseRosterPlayer_) }, supabaseRosterPayloadForPlan_(fresh.ctx, planCheck.plan));
+}
+
+function supabaseCancelRosterDraft_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var rosterId = String(firstValue_(data.rosterId, data.draftId, "") || "").trim();
+  var roster = supabaseRosterById_(env.ctx, rosterId);
+  if (!roster) return { success: false, message: "Roster draft not found." };
+  var planCheck = supabasePlanForCaptain_(env, roster.planId);
+  if (!planCheck.success) return planCheck;
+  if (normalizeTournamentRosterStatus_(roster.rosterStatus || "") === "LOCKED") return { success: false, message: "Locked rosters cannot be cancelled." };
+  var now = nowIso_();
+  var rows = supabasePatchRows_(env.config, "roster_drafts", {
+    roster_status: "CANCELLED",
+    updated_at: now
+  }, { legacy_roster_id: roster.rosterId });
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "cancelRosterDraft", "roster_drafts", roster.rosterId, {});
+  return { success: true, roster: rows[0] ? supabaseRoster_(rows[0]) : null, message: "Roster draft cancelled." };
+}
+
+function supabaseReviewRosterDraft_(data) {
+  var env = supabaseReviewerContext_(data);
+  if (!env.success) return env;
+  var rosterId = String(firstValue_(data.rosterId, data.draftId, "") || "").trim();
+  var decision = normalizeTournamentRosterStatus_(firstValue_(data.status, data.decision, ""));
+  if (!rosterId || (decision !== "APPROVED" && decision !== "REJECTED")) return { success: false, message: "A valid roster and decision are required." };
+  var roster = supabaseRosterById_(env.ctx, rosterId);
+  if (!roster) return { success: false, message: "Roster draft not found." };
+  if (normalizeTournamentRosterStatus_(roster.rosterStatus || "") !== "SUBMITTED") return { success: false, message: "Only submitted rosters can be reviewed." };
+  var now = nowIso_();
+  var patch = { roster_status: decision, admin_note: firstValue_(data.adminNote, data.reviewNote, ""), updated_at: now };
+  if (decision === "APPROVED") {
+    patch.reviewed_by_username = playerHubUsername_(env.context.user);
+    patch.reviewed_at = now;
+  } else {
+    patch.reviewed_by_username = playerHubUsername_(env.context.user);
+    patch.reviewed_at = now;
+  }
+  var rows = supabasePatchRows_(env.config, "roster_drafts", patch, { legacy_roster_id: rosterId });
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "reviewRosterDraft", "roster_drafts", rosterId, { status: decision });
+  return { success: true, roster: rows[0] ? supabaseRoster_(rows[0]) : null, message: decision === "APPROVED" ? "Roster approved." : "Roster rejected." };
+}
+
+function supabaseLockOfficialRoster_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var rosterId = String(firstValue_(data.rosterId, data.draftId, "") || "").trim();
+  var roster = supabaseRosterById_(env.ctx, rosterId);
+  if (!roster) return { success: false, message: "Roster draft not found." };
+  var planCheck = supabasePlanForCaptain_(env, roster.planId);
+  if (!planCheck.success) return planCheck;
+  if (normalizeTournamentRosterStatus_(roster.rosterStatus || "") !== "APPROVED") return { success: false, message: "Roster must be approved before locking." };
+  var players = (playerHubSnapshotRosterPlayers_(env.ctx) || []).filter(function(player) {
+    return String(player.rosterId || "") === roster.rosterId && normalizeTournamentRosterPlayerStatus_(player.playerStatus || "ACTIVE") === "ACTIVE";
+  });
+  if (!players.length) return { success: false, message: "Roster has no active players." };
+  var now = nowIso_();
+  supabaseUpsertRows_(env.config, "official_rosters", players.map(function(player) {
+    return supabaseOfficialRosterRowFromOfficial_({
+      officialRosterId: "official-roster-" + roster.rosterId + "-" + player.playerUsername,
+      draftId: roster.rosterId,
+      tournamentId: roster.tournamentId,
+      tournamentName: roster.tournamentName,
+      teamId: roster.clubTeamId,
+      teamName: roster.clubTeamName,
+      squadLabel: roster.squadLabel,
+      groupName: player.assignedSquad,
+      playerUsername: player.playerUsername,
+      playerDisplayName: player.playerDisplayName,
+      playerCountry: player.playerCountry,
+      status: "LOCKED",
+      lockedAt: now,
+      lockedBy: playerHubUsername_(env.context.user),
+      createdAt: now
+    });
+  }), "legacy_official_roster_id");
+  supabasePatchRows_(env.config, "roster_drafts", {
+    roster_status: "LOCKED",
+    locked_by_username: playerHubUsername_(env.context.user),
+    locked_at: now,
+    lock_reason: firstValue_(data.lockReason, ""),
+    updated_at: now
+  }, { legacy_roster_id: roster.rosterId });
+  var fresh = supabaseReloadEnv_(env);
+  supabaseAuditLog_(env.config, playerHubUsername_(env.context.user), "lockOfficialRoster", "roster_drafts", roster.rosterId, { players: players.length });
+  return Object.assign({ message: "Official roster locked." }, supabaseRosterPayloadForPlan_(fresh.ctx, planCheck.plan));
 }
 
 function supabasePlayerHubDiagnosticTables_() {
@@ -10183,7 +13057,9 @@ function supabasePlayerHubSnapshotTables_() {
     { key: "tournamentAvailability", table: "tournament_availability" },
     { key: "squadPlanning", table: "tournament_squad_planning" },
     { key: "rosters", table: "roster_drafts" },
-    { key: "rosterPlayers", table: "roster_players" }
+    { key: "rosterPlayers", table: "roster_players" },
+    { key: "officialRosters", table: "official_rosters" },
+    { key: "tournaments", table: "tournaments" }
   ];
 }
 
@@ -10600,6 +13476,52 @@ function supabaseRosterPlayer_(row) {
   };
 }
 
+function supabaseOfficialRoster_(row) {
+  return {
+    officialRosterId: supabaseText_(row.legacy_official_roster_id),
+    draftId: supabaseText_(row.legacy_draft_id),
+    tournamentId: supabaseText_(row.legacy_tournament_id),
+    tournamentName: supabaseText_(row.tournament_name),
+    teamId: supabaseText_(row.legacy_team_id),
+    teamName: supabaseText_(row.team_name),
+    squadLabel: supabaseText_(row.squad_label),
+    groupName: supabaseText_(row.group_name),
+    playerUsername: supabaseText_(row.player_username),
+    playerDisplayName: supabaseText_(row.player_display_name),
+    playerCountry: supabaseText_(row.player_country),
+    status: supabaseText_(row.status || "LOCKED").toUpperCase() || "LOCKED",
+    lockedAt: supabaseText_(row.locked_at),
+    lockedBy: supabaseText_(row.locked_by_username),
+    createdAt: supabaseText_(row.created_at)
+  };
+}
+
+function supabaseTournament_(row) {
+  return {
+    id: supabaseText_(row.legacy_tournament_id),
+    tournamentId: supabaseText_(row.legacy_tournament_id),
+    TournamentId: supabaseText_(row.legacy_tournament_id),
+    name: supabaseText_(row.name),
+    country: supabaseText_(row.country),
+    city: supabaseText_(row.city),
+    startDate: supabaseText_(row.start_date),
+    endDate: supabaseText_(row.end_date),
+    registrationDeadline: supabaseText_(row.registration_deadline),
+    visibility: supabaseText_(row.visibility),
+    status: supabaseText_(row.status),
+    organizerUsername: supabaseText_(row.organizer_username),
+    ownerUsername: supabaseText_(row.organizer_username),
+    publicCode: supabaseText_(row.public_code),
+    published: supabaseBool_(row.published, false),
+    publishedAt: supabaseText_(row.published_at),
+    updatedAt: supabaseText_(row.updated_at),
+    groups: [],
+    matches: [],
+    series: [],
+    knockout: {}
+  };
+}
+
 function supabasePlayerHubContext_(config, user) {
   var tables = supabasePlayerHubSnapshotTables_();
   var data = {};
@@ -10629,7 +13551,9 @@ function supabasePlayerHubContext_(config, user) {
       ),
       squadPlanning: data.squadPlanning.map(supabaseSquadPlanning_),
       rosters: data.rosters.map(supabaseRoster_),
-      rosterPlayers: data.rosterPlayers.map(supabaseRosterPlayer_)
+      rosterPlayers: data.rosterPlayers.map(supabaseRosterPlayer_),
+      officialRosters: data.officialRosters.map(supabaseOfficialRoster_),
+      tournaments: data.tournaments.map(supabaseTournament_)
     },
     maps: {}
   };
@@ -10643,6 +13567,7 @@ function fetchSupabasePlayerHubSnapshot_(data, context, options) {
 
   var config = getSupabaseConfig_();
   if (!diagnosticMode) {
+    playerHubBackendLog_("supabase getPlayerHubSnapshot");
     playerHubSnapshotLog_("[Snapshot] source supabase");
     return playerHubSnapshotPayloadFromContext_(
       supabasePlayerHubContext_(config, context.user),
@@ -10689,10 +13614,11 @@ function testSupabasePlayerHubSnapshot(data) {
       counts: {},
       config: {
         hasUrl: !!config.url,
-        hasServiceRoleKey: !!config.serviceRoleKey
+        hasServiceRoleKey: !!config.serviceRoleKey,
+        playerHubBackend: config.playerHubBackend || "sheets"
       },
       message:
-        "Supabase Player Hub reads are disabled. Set SUPABASE_PLAYER_HUB_READS_ENABLED=true in Script Properties to run this diagnostic."
+        "Supabase Player Hub reads are disabled. Set PLAYER_HUB_BACKEND=supabase or SUPABASE_PLAYER_HUB_READS_ENABLED=true in Script Properties to run this diagnostic."
     };
   }
 
@@ -10816,6 +13742,9 @@ function getPlayerHubSnapshot(data) {
       return supabaseSnapshot;
     }
 
+    playerHubBackendLog_(
+      snapshotFallbackWarning ? "fallback getPlayerHubSnapshot" : "sheets"
+    );
     playerHubSnapshotLog_("[Snapshot] source sheets");
     var ctx = playerHubSnapshotContext_(context.user);
     var payload = playerHubSnapshotPayloadFromContext_(

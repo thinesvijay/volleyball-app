@@ -19,16 +19,18 @@ In Apps Script, open **Project Settings -> Script Properties** and add:
 ```text
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+PLAYER_HUB_BACKEND=sheets
 SUPABASE_PLAYER_HUB_READS_ENABLED=false
 ```
 
 Default value:
 
 ```text
+PLAYER_HUB_BACKEND=sheets
 SUPABASE_PLAYER_HUB_READS_ENABLED=false
 ```
 
-Set it to `true` only when intentionally running the diagnostic in the Apps Script dev deployment.
+For read-only diagnostics, set `SUPABASE_PLAYER_HUB_READS_ENABLED=true` temporarily. For the controlled Player Hub backend beta, use `PLAYER_HUB_BACKEND=supabase` instead.
 
 ## Behavior
 
@@ -65,6 +67,7 @@ Keep the read flag off while authorizing:
 
 ```text
 SUPABASE_PLAYER_HUB_READS_ENABLED=false
+PLAYER_HUB_BACKEND=sheets
 ```
 
 After deploying the latest `Code.gs`, authorize UrlFetch once:
@@ -116,7 +119,7 @@ Invoke-RestMethod -Method Post -Uri "YOUR_APPS_SCRIPT_WEB_APP_URL" -ContentType 
 - The API URL is unchanged.
 - Login/auth is unchanged.
 - Google Sheets remains the default source of truth.
-- `getPlayerHubSnapshot` still uses Google Sheets.
+- `getPlayerHubSnapshot` uses Google Sheets unless `PLAYER_HUB_BACKEND=supabase` or the old read-only diagnostic flag is enabled.
 - Do not commit Supabase service keys.
 - Do not enable public/anon policies for this diagnostic.
 
@@ -126,6 +129,7 @@ Set:
 
 ```text
 SUPABASE_PLAYER_HUB_READS_ENABLED=false
+PLAYER_HUB_BACKEND=sheets
 ```
 
 The diagnostic will stop reading Supabase and normal Player Hub behavior remains Google Sheets-backed.

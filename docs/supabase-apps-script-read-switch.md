@@ -13,7 +13,9 @@ For the temporary diagnostic toggle procedure, use [Supabase Diagnostic Toggle R
 ## Current State
 
 - Google Sheets remains the default source of truth.
-- `getPlayerHubSnapshot` uses Google Sheets when `SUPABASE_PLAYER_HUB_READS_ENABLED` is false or missing.
+- `getPlayerHubSnapshot` uses Google Sheets when `PLAYER_HUB_BACKEND=sheets` or the property is missing.
+- `PLAYER_HUB_BACKEND=supabase` is the main controlled switch for Player Hub Supabase reads through Apps Script.
+- The older `SUPABASE_PLAYER_HUB_READS_ENABLED=true` flag still works for read-only diagnostics.
 - Apps Script now has a server-side Supabase read path behind the flag:
   - `getSupabaseConfig_()`
   - `isSupabasePlayerHubReadsEnabled_()`
@@ -28,10 +30,11 @@ In Apps Script, open **Project Settings -> Script Properties** and add these onl
 ```text
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+PLAYER_HUB_BACKEND=sheets
 SUPABASE_PLAYER_HUB_READS_ENABLED=false
 ```
 
-Keep `SUPABASE_PLAYER_HUB_READS_ENABLED=false` unless you are intentionally testing the server-side Supabase read path.
+Keep `PLAYER_HUB_BACKEND=sheets` unless you are intentionally testing the Apps Script Supabase backend path. Use `PLAYER_HUB_BACKEND=supabase` for the controlled beta switch.
 
 ## Safety Rules
 
@@ -57,7 +60,9 @@ Keep `SUPABASE_PLAYER_HUB_READS_ENABLED=false` unless you are intentionally test
 Set this Apps Script property back to false:
 
 ```text
-SUPABASE_PLAYER_HUB_READS_ENABLED=false
+PLAYER_HUB_BACKEND=sheets
 ```
 
-With the flag false, `getPlayerHubSnapshot` uses Google Sheets.
+With the backend mode set to sheets, `getPlayerHubSnapshot` and Player Hub actions use Google Sheets.
+
+See [Player Hub Supabase Backend Switch](supabase-player-hub-backend-switch.md) for the fuller beta checklist.
