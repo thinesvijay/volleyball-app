@@ -33,6 +33,10 @@ function doGet(e) {
     return jsonResponse(getPlayerHubSnapshot(e ? e.parameter : {}));
   }
 
+  if (action === "testSupabasePlayerHubSnapshot") {
+    return jsonResponse(testSupabasePlayerHubSnapshot(e ? e.parameter : {}));
+  }
+
   if (action === "listClubTeams") {
     return jsonResponse(listClubTeams(e ? e.parameter : {}));
   }
@@ -139,6 +143,10 @@ function doPost(e) {
 
   if (data.action === "getPlayerHubSnapshot") {
     return jsonResponse(getPlayerHubSnapshot(data));
+  }
+
+  if (data.action === "testSupabasePlayerHubSnapshot") {
+    return jsonResponse(testSupabasePlayerHubSnapshot(data));
   }
 
   if (data.action === "listEventComments") {
@@ -10106,15 +10114,170 @@ function isSupabasePlayerHubReadsEnabled_() {
   }
 }
 
-function fetchSupabasePlayerHubSnapshot_(data, context) {
+function supabasePlayerHubDiagnosticTables_() {
+  return [
+    { key: "appUsers", table: "app_users", select: "username" },
+    {
+      key: "playerProfiles",
+      table: "player_profiles",
+      select: "legacy_profile_id"
+    },
+    { key: "clubTeams", table: "club_teams", select: "legacy_team_id" },
+    {
+      key: "teamProfiles",
+      table: "team_profiles",
+      select: "legacy_team_profile_id"
+    },
+    {
+      key: "teamMembers",
+      table: "team_members",
+      select: "legacy_team_member_id"
+    },
+    { key: "teamNeeds", table: "team_needs", select: "legacy_need_id" },
+    {
+      key: "rosterDrafts",
+      table: "roster_drafts",
+      select: "legacy_roster_id"
+    },
+    {
+      key: "rosterPlayers",
+      table: "roster_players",
+      select: "legacy_roster_player_id"
+    },
+    {
+      key: "tournaments",
+      table: "tournaments",
+      select: "legacy_tournament_id"
+    }
+  ];
+}
+
+function supabaseContentRangeCount_(response, fallbackCount) {
+  var headers = response.getAllHeaders ? response.getAllHeaders() : {};
+  var contentRange =
+    headers["Content-Range"] ||
+    headers["content-range"] ||
+    headers["Content-range"] ||
+    "";
+  var match = String(contentRange).match(/\/(\d+|\*)$/);
+  if (match && match[1] !== "*") {
+    return Number(match[1]);
+  }
+  return fallbackCount;
+}
+
+function fetchSupabaseTableCount_(config, tableConfig) {
+  var url =
+    String(config.url || "").replace(/\/+$/, "") +
+    "/rest/v1/" +
+    tableConfig.table +
+    "?select=" +
+    encodeURIComponent(tableConfig.select || "*");
+  var response = UrlFetchApp.fetch(url, {
+    method: "get",
+    muteHttpExceptions: true,
+    headers: {
+      apikey: config.serviceRoleKey,
+      Authorization: "Bearer " + config.serviceRoleKey,
+      Prefer: "count=exact",
+      Range: "0-0",
+      "Range-Unit": "items"
+    }
+  });
+  var statusCode = response.getResponseCode();
+  var body = response.getContentText() || "[]";
+  if (statusCode < 200 || statusCode >= 300) {
+    throw new Error(
+      tableConfig.table +
+        " read failed: " +
+        statusCode +
+        " " +
+        body.slice(0, 160)
+    );
+  }
+  var rows = [];
+  try {
+    rows = JSON.parse(body || "[]");
+  } catch (err) {
+    rows = [];
+  }
+  return supabaseContentRangeCount_(
+    response,
+    Array.isArray(rows) ? rows.length : 0
+  );
+}
+
+function fetchSupabasePlayerHubSnapshot_(data, context, options) {
+  var diagnosticMode = !!(options && options.diagnostic);
   if (!isSupabasePlayerHubReadsEnabled_()) {
     return null;
   }
 
-  playerHubSnapshotLog_(
-    "[Snapshot] Supabase Player Hub reads enabled but not active; using Google Sheets"
-  );
-  return null;
+  if (!diagnosticMode) {
+    playerHubSnapshotLog_(
+      "[Snapshot] Supabase Player Hub reads enabled but diagnostics-only; using Google Sheets"
+    );
+    return null;
+  }
+
+  var config = getSupabaseConfig_();
+  var tables = supabasePlayerHubDiagnosticTables_();
+  var counts = {};
+  for (var i = 0; i < tables.length; i++) {
+    counts[tables[i].key] = fetchSupabaseTableCount_(config, tables[i]);
+  }
+
+  return {
+    success: true,
+    enabled: true,
+    source: "supabase",
+    message: "Supabase Player Hub diagnostic read succeeded.",
+    counts: counts
+  };
+}
+
+function testSupabasePlayerHubSnapshot(data) {
+  var adminCheck = requireAdmin(data || {});
+  if (!adminCheck.success) {
+    return {
+      success: false,
+      enabled: false,
+      message: adminCheck.message || "Admin access required"
+    };
+  }
+
+  var config = getSupabaseConfig_();
+  var enabled = isSupabasePlayerHubReadsEnabled_();
+  if (!enabled) {
+    return {
+      success: true,
+      enabled: false,
+      counts: {},
+      config: {
+        hasUrl: !!config.url,
+        hasServiceRoleKey: !!config.serviceRoleKey
+      },
+      message:
+        "Supabase Player Hub reads are disabled. Set SUPABASE_PLAYER_HUB_READS_ENABLED=true in Script Properties to run this diagnostic."
+    };
+  }
+
+  try {
+    return fetchSupabasePlayerHubSnapshot_(
+      data || {},
+      { authenticated: true, user: adminCheck.admin },
+      { diagnostic: true }
+    );
+  } catch (err) {
+    return {
+      success: false,
+      enabled: true,
+      counts: {},
+      message:
+        "Supabase Player Hub diagnostic read failed: " +
+        (err && err.message ? err.message : String(err))
+    };
+  }
 }
 
 function getPlayerHubSnapshot(data) {
