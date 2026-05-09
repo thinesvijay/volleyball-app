@@ -57,6 +57,22 @@ Counts currently cover:
 
 ## Manual Test
 
+Local scripted test, using `supabase/.env.import`:
+
+```powershell
+npm.cmd run supabase:test:apps-script-diagnostic
+```
+
+The script reads:
+
+```text
+APPS_SCRIPT_WEB_APP_URL
+APPS_SCRIPT_ADMIN_USERNAME
+APPS_SCRIPT_ADMIN_PASSWORD
+```
+
+from `supabase/.env.import`. It does not print passwords or Supabase service keys.
+
 Use an admin account only. Prefer POST so credentials are not placed in a browser URL:
 
 ```powershell
