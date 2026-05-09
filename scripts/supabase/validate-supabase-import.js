@@ -118,6 +118,9 @@ async function main() {
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const strictCounts =
+    String(process.env.SUPABASE_VALIDATE_STRICT_COUNTS || "true").toLowerCase() !==
+    "false";
   if (!supabaseUrl || !serviceRoleKey) {
     console.log("Supabase validation env is not configured. No remote check was run.");
     console.log(`Create ${path.relative(PROJECT_ROOT, envPath)} from supabase/.env.import.example.`);
@@ -144,8 +147,14 @@ async function main() {
 
   const failures = results.filter((result) => result.status === "below-export");
   if (failures.length) {
-    console.log("Some Supabase tables have fewer rows than the current export.");
-    process.exitCode = 1;
+    if (strictCounts) {
+      console.log("Some Supabase tables have fewer rows than the current export.");
+      process.exitCode = 1;
+    } else {
+      console.log(
+        "Some Supabase tables have fewer rows than the export, which is expected during dry-run because no rows are written."
+      );
+    }
   }
 }
 

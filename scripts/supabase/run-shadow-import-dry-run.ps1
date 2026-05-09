@@ -122,7 +122,9 @@ if ($envValues.ContainsKey("SUPABASE_IMPORT_DRY_RUN") -and $envValues["SUPABASE_
 }
 
 $previousDryRun = $env:SUPABASE_IMPORT_DRY_RUN
+$previousStrictCounts = $env:SUPABASE_VALIDATE_STRICT_COUNTS
 $env:SUPABASE_IMPORT_DRY_RUN = "true"
+$env:SUPABASE_VALIDATE_STRICT_COUNTS = "false"
 
 Push-Location $RepoRoot
 try {
@@ -134,6 +136,11 @@ try {
     Remove-Item Env:\SUPABASE_IMPORT_DRY_RUN -ErrorAction SilentlyContinue
   } else {
     $env:SUPABASE_IMPORT_DRY_RUN = $previousDryRun
+  }
+  if ($null -eq $previousStrictCounts) {
+    Remove-Item Env:\SUPABASE_VALIDATE_STRICT_COUNTS -ErrorAction SilentlyContinue
+  } else {
+    $env:SUPABASE_VALIDATE_STRICT_COUNTS = $previousStrictCounts
   }
   Pop-Location
 }

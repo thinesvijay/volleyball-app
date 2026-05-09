@@ -10,6 +10,370 @@ const DEFAULT_EXPORT_PATH = path.join(
   "player-hub-export.json"
 );
 
+const TABLE_COLUMNS = {
+  app_users: [
+    "legacy_username",
+    "username",
+    "password_hash",
+    "role",
+    "display_name",
+    "email",
+    "phone",
+    "active",
+    "can_use_team_builder",
+    "can_use_tournaments",
+    "spreadsheet_id",
+    "skill_view",
+    "skill_scale",
+  ],
+  club_teams: ["legacy_team_id", "name", "country", "city", "active"],
+  player_profiles: [
+    "legacy_profile_id",
+    "user_id",
+    "username",
+    "first_name",
+    "last_name",
+    "display_name",
+    "email",
+    "phone",
+    "country",
+    "region",
+    "club_team_id",
+    "legacy_club_team_id",
+    "club_team_name",
+    "club_or_team",
+    "team_note",
+    "profile_type",
+    "free_agent",
+    "primary_role",
+    "secondary_role",
+    "custom_role",
+    "level",
+    "availability",
+    "looking_for_team",
+    "available_as_substitute",
+    "can_guest_for_teams",
+    "interested_abroad",
+    "public_visible",
+    "approved",
+  ],
+  access_requests: [
+    "legacy_request_id",
+    "user_id",
+    "username",
+    "display_name",
+    "email",
+    "request_type",
+    "club_team_id",
+    "legacy_club_team_id",
+    "club_team_name",
+    "message",
+    "status",
+    "admin_note",
+    "reviewed_by_username",
+    "reviewed_at",
+  ],
+  team_profiles: [
+    "legacy_team_profile_id",
+    "club_team_id",
+    "legacy_club_team_id",
+    "club_team_name",
+    "country",
+    "captain_user_id",
+    "captain_username",
+    "captain_display_name",
+    "team_level",
+    "team_description",
+    "contact_note",
+    "needs_players",
+    "needs_text",
+    "active",
+    "public_visible",
+    "approved",
+  ],
+  team_identity_change_requests: [
+    "legacy_request_id",
+    "club_team_id",
+    "legacy_team_id",
+    "current_name",
+    "requested_name",
+    "current_country",
+    "requested_country",
+    "current_city",
+    "requested_city",
+    "requested_by_user_id",
+    "requested_by_username",
+    "reason",
+    "status",
+    "admin_note",
+    "reviewed_by_username",
+    "reviewed_at",
+  ],
+  team_members: [
+    "legacy_team_member_id",
+    "team_profile_id",
+    "legacy_team_profile_id",
+    "club_team_id",
+    "legacy_club_team_id",
+    "club_team_name",
+    "captain_user_id",
+    "captain_username",
+    "player_user_id",
+    "player_username",
+    "player_display_name",
+    "player_email",
+    "player_phone",
+    "player_country",
+    "source_interest_id",
+    "legacy_source_interest_id",
+    "member_status",
+    "confirmed_by_username",
+    "confirmed_at",
+  ],
+  team_membership_requests: [
+    "legacy_request_id",
+    "club_team_id",
+    "legacy_club_team_id",
+    "club_team_name",
+    "player_user_id",
+    "player_username",
+    "player_display_name",
+    "player_email",
+    "player_phone",
+    "player_country",
+    "legacy_player_profile_id",
+    "status",
+    "requested_at",
+    "reviewed_by_username",
+    "reviewed_at",
+    "review_note",
+  ],
+  tournaments: [
+    "legacy_tournament_id",
+    "name",
+    "country",
+    "city",
+    "start_date",
+    "end_date",
+    "registration_deadline",
+    "visibility",
+    "status",
+    "organizer_username",
+    "public_code",
+    "published",
+    "published_at",
+    "tournament_json",
+  ],
+  team_needs: [
+    "legacy_need_id",
+    "team_profile_id",
+    "legacy_team_profile_id",
+    "club_team_id",
+    "legacy_club_team_id",
+    "club_team_name",
+    "captain_user_id",
+    "captain_username",
+    "need_type",
+    "need_text",
+    "needed_count",
+    "status",
+    "visibility",
+    "is_published",
+    "need_context",
+    "tournament_id",
+    "legacy_tournament_id",
+    "tournament_name",
+    "squad_label",
+    "class_name",
+    "deadline_at",
+    "source_type",
+    "published_at",
+    "public_visible",
+    "approved",
+  ],
+  team_need_interests: [
+    "legacy_interest_id",
+    "need_id",
+    "legacy_need_id",
+    "team_profile_id",
+    "legacy_team_profile_id",
+    "club_team_id",
+    "legacy_club_team_id",
+    "club_team_name",
+    "player_user_id",
+    "player_username",
+    "player_display_name",
+    "player_email",
+    "player_phone",
+    "player_country",
+    "message",
+    "status",
+    "reviewed_by_username",
+    "reviewed_at",
+  ],
+  tournament_events: [
+    "legacy_plan_id",
+    "tournament_id",
+    "legacy_tournament_id",
+    "tournament_name",
+    "team_profile_id",
+    "legacy_team_profile_id",
+    "club_team_id",
+    "legacy_club_team_id",
+    "club_team_name",
+    "captain_user_id",
+    "captain_username",
+    "squad_label",
+    "class_name",
+    "status",
+    "deadline_at",
+    "note",
+  ],
+  tournament_availability: [
+    "legacy_availability_id",
+    "event_id",
+    "legacy_plan_id",
+    "tournament_id",
+    "legacy_tournament_id",
+    "tournament_name",
+    "team_profile_id",
+    "legacy_team_profile_id",
+    "club_team_id",
+    "legacy_club_team_id",
+    "club_team_name",
+    "player_user_id",
+    "player_username",
+    "player_display_name",
+    "player_email",
+    "player_phone",
+    "player_country",
+    "response_status",
+    "preferred_squad",
+    "player_note",
+    "requested_by_username",
+    "requested_at",
+    "responded_at",
+  ],
+  tournament_squad_planning: [
+    "legacy_planning_id",
+    "event_id",
+    "legacy_plan_id",
+    "tournament_id",
+    "legacy_tournament_id",
+    "tournament_name",
+    "team_profile_id",
+    "legacy_team_profile_id",
+    "club_team_id",
+    "legacy_club_team_id",
+    "club_team_name",
+    "player_user_id",
+    "player_username",
+    "player_display_name",
+    "player_country",
+    "availability_status",
+    "preferred_squad",
+    "assigned_squad",
+    "planning_status",
+    "assigned_by_username",
+    "assigned_at",
+  ],
+  roster_drafts: [
+    "legacy_roster_id",
+    "event_id",
+    "legacy_plan_id",
+    "tournament_id",
+    "legacy_tournament_id",
+    "tournament_name",
+    "team_profile_id",
+    "legacy_team_profile_id",
+    "club_team_id",
+    "legacy_club_team_id",
+    "club_team_name",
+    "squad_label",
+    "captain_user_id",
+    "captain_username",
+    "roster_status",
+    "submitted_by_username",
+    "submitted_at",
+    "reviewed_by_username",
+    "reviewed_at",
+    "admin_note",
+    "locked_at",
+    "locked_by_username",
+    "lock_reason",
+  ],
+  roster_players: [
+    "legacy_roster_player_id",
+    "roster_id",
+    "legacy_roster_id",
+    "event_id",
+    "legacy_plan_id",
+    "tournament_id",
+    "legacy_tournament_id",
+    "tournament_name",
+    "team_profile_id",
+    "legacy_team_profile_id",
+    "club_team_id",
+    "legacy_club_team_id",
+    "club_team_name",
+    "squad_label",
+    "player_user_id",
+    "player_username",
+    "player_display_name",
+    "player_country",
+    "assigned_squad",
+    "roster_role",
+    "source",
+    "player_status",
+    "added_by_username",
+    "added_at",
+  ],
+  official_rosters: [
+    "legacy_official_roster_id",
+    "draft_id",
+    "legacy_draft_id",
+    "tournament_id",
+    "legacy_tournament_id",
+    "tournament_name",
+    "club_team_id",
+    "legacy_team_id",
+    "team_name",
+    "squad_label",
+    "group_name",
+    "player_user_id",
+    "player_username",
+    "player_display_name",
+    "player_country",
+    "status",
+    "locked_at",
+    "locked_by_username",
+  ],
+  event_comments: [
+    "legacy_comment_id",
+    "event_id",
+    "legacy_plan_id",
+    "team_profile_id",
+    "legacy_team_profile_id",
+    "club_team_id",
+    "legacy_club_team_id",
+    "club_team_name",
+    "user_id",
+    "username",
+    "display_name",
+    "message",
+    "active",
+  ],
+  audit_log: [
+    "actor_user_id",
+    "actor_username",
+    "action",
+    "entity_table",
+    "entity_id",
+    "legacy_entity_id",
+    "metadata",
+  ],
+};
+
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) return;
   const lines = fs.readFileSync(filePath, "utf8").split(/\r?\n/);
@@ -95,6 +459,43 @@ function addUniqueBy(array, row, key) {
   array.push(row);
 }
 
+function normalizeRowsForTable(rows, columns) {
+  if (!Array.isArray(columns) || !columns.length) {
+    throw new Error("Importer table columns are missing.");
+  }
+
+  return (rows || []).filter(Boolean).map((row) => {
+    const normalized = {};
+    for (const column of columns) {
+      if (Object.prototype.hasOwnProperty.call(row, column)) {
+        normalized[column] = row[column] === undefined ? null : row[column];
+      } else {
+        normalized[column] = null;
+      }
+    }
+    return normalized;
+  });
+}
+
+function validateConsistentRowKeys(table, rows, columns) {
+  const expected = columns.join("\u0001");
+  rows.forEach((row, index) => {
+    const actualColumns = Object.keys(row);
+    const actual = actualColumns.join("\u0001");
+    if (actual !== expected) {
+      throw new Error(
+        `${table} row ${index + 1} has inconsistent columns. Expected ${columns.join(", ")}; got ${actualColumns.join(", ")}`
+      );
+    }
+
+    for (const column of columns) {
+      if (row[column] === undefined) {
+        throw new Error(`${table} row ${index + 1} column ${column} is undefined after normalization.`);
+      }
+    }
+  });
+}
+
 class SupabaseRest {
   constructor(url, serviceRoleKey, dryRun) {
     this.url = url.replace(/\/+$/, "");
@@ -103,10 +504,20 @@ class SupabaseRest {
   }
 
   async upsert(table, rows, onConflict) {
-    const cleanRows = rows.filter(Boolean);
+    const columns = TABLE_COLUMNS[table];
+    if (!columns) {
+      throw new Error(`No explicit import column list configured for ${table}.`);
+    }
+
+    const cleanRows = normalizeRowsForTable(rows, columns);
+    validateConsistentRowKeys(table, cleanRows, columns);
+
+    console.log(
+      `[${this.dryRun ? "dry-run" : "import"}] ${table}: rows=${cleanRows.length}, conflict=${onConflict}`
+    );
+
     if (!cleanRows.length) return [];
     if (this.dryRun) {
-      console.log(`[dry-run] ${table}: would upsert ${cleanRows.length}`);
       return cleanRows.map((row, index) => ({ id: `dry-run-${table}-${index}`, ...row }));
     }
 
@@ -186,6 +597,8 @@ function buildUsers(collections) {
       username: normalized,
       role: "player",
       active: true,
+      can_use_team_builder: false,
+      can_use_tournaments: false,
     };
     byUsername.set(normalized, { ...existing, ...patch, username: normalized });
   }
@@ -199,6 +612,14 @@ function buildUsers(collections) {
       email: nullableText(pick(profile, ["email", "Email"])),
       phone: nullableText(pick(profile, ["phone", "Phone"])),
       active: bool(pick(profile, ["active", "Active"], true), true),
+      can_use_team_builder: bool(
+        pick(profile, ["canUseTeamBuilder", "CanUseTeamBuilder"], false),
+        false
+      ),
+      can_use_tournaments: bool(
+        pick(profile, ["canUseTournaments", "CanUseTournaments"], false),
+        false
+      ),
     });
   }
 
