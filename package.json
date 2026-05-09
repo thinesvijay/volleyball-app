@@ -19,6 +19,9 @@
     "test": "react-scripts test",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
+    "supabase:export:player-hub": "node scripts/supabase/export-player-hub-from-apps-script.js",
+    "supabase:import:player-hub": "node scripts/supabase/import-player-hub-to-supabase.js",
+    "supabase:validate:player-hub": "node scripts/supabase/validate-supabase-import.js",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
