@@ -10068,6 +10068,55 @@ function playerHubAdminCounts_(ctx, user) {
   };
 }
 
+function getSupabaseConfig_() {
+  var properties = PropertiesService.getScriptProperties();
+  var enabledValue = String(
+    properties.getProperty("SUPABASE_PLAYER_HUB_READS_ENABLED") || ""
+  )
+    .trim()
+    .toLowerCase();
+  return {
+    url: String(properties.getProperty("SUPABASE_URL") || "").trim(),
+    serviceRoleKey: String(
+      properties.getProperty("SUPABASE_SERVICE_ROLE_KEY") || ""
+    ).trim(),
+    playerHubReadsEnabled:
+      enabledValue === "true" ||
+      enabledValue === "1" ||
+      enabledValue === "yes" ||
+      enabledValue === "on"
+  };
+}
+
+function isSupabasePlayerHubReadsEnabled_() {
+  try {
+    var config = getSupabaseConfig_();
+    return !!(
+      config &&
+      config.playerHubReadsEnabled &&
+      config.url &&
+      config.serviceRoleKey
+    );
+  } catch (err) {
+    playerHubSnapshotLog_(
+      "[Snapshot] Supabase config unavailable " +
+        (err && err.message ? err.message : String(err))
+    );
+    return false;
+  }
+}
+
+function fetchSupabasePlayerHubSnapshot_(data, context) {
+  if (!isSupabasePlayerHubReadsEnabled_()) {
+    return null;
+  }
+
+  playerHubSnapshotLog_(
+    "[Snapshot] Supabase Player Hub reads enabled but not active; using Google Sheets"
+  );
+  return null;
+}
+
 function getPlayerHubSnapshot(data) {
   var timer = playerHubSnapshotTimer_();
   playerHubSnapshotLog_("[Snapshot] start");
@@ -10078,6 +10127,13 @@ function getPlayerHubSnapshot(data) {
         success: false,
         message: "Login required"
       };
+    }
+
+    var supabaseSnapshot = fetchSupabasePlayerHubSnapshot_(data || {}, context);
+    if (supabaseSnapshot) {
+      playerHubSnapshotStep_(timer, "supabaseSnapshot");
+      playerHubSnapshotTotal_(timer);
+      return supabaseSnapshot;
     }
 
     var ctx = playerHubSnapshotContext_(context.user);
