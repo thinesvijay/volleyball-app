@@ -499,6 +499,25 @@ function normalizeRowsForTable(rows, columns) {
     throw new Error("Importer table columns are missing.");
   }
 
+  const importTimestamp = new Date().toISOString();
+  const booleanDefaults = new Map([
+    ["active", true],
+    ["published", false],
+    ["approved", false],
+    ["public_visible", false],
+    ["free_agent", false],
+    ["looking_for_team", false],
+    ["available_as_substitute", false],
+    ["can_guest_for_teams", false],
+    ["interested_abroad", false],
+    ["needs_players", false],
+    ["is_published", false],
+    ["can_request_team_profile", false],
+    ["can_use_team_builder", false],
+    ["can_use_tournaments", false],
+    ["can_create_tournaments", false],
+  ]);
+
   return (rows || []).filter(Boolean).map((row) => {
     const normalized = {};
     for (const column of columns) {
@@ -506,6 +525,27 @@ function normalizeRowsForTable(rows, columns) {
         normalized[column] = row[column] === undefined ? null : row[column];
       } else {
         normalized[column] = null;
+      }
+    }
+    if (columns.includes("created_at")) {
+      normalized.created_at = dateOrNull(normalized.created_at) || importTimestamp;
+    }
+    if (columns.includes("updated_at")) {
+      normalized.updated_at =
+        dateOrNull(normalized.updated_at) || normalized.created_at || importTimestamp;
+    }
+    if (columns.includes("metadata") && normalized.metadata == null) {
+      normalized.metadata = {};
+    }
+    if (columns.includes("teams_json") && normalized.teams_json == null) {
+      normalized.teams_json = [];
+    }
+    if (columns.includes("cannot_play_with") && normalized.cannot_play_with == null) {
+      normalized.cannot_play_with = [];
+    }
+    for (const [column, fallback] of booleanDefaults.entries()) {
+      if (columns.includes(column) && normalized[column] == null) {
+        normalized[column] = fallback;
       }
     }
     return normalized;
