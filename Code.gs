@@ -10167,6 +10167,26 @@ function supabasePlayerHubDiagnosticTables_() {
   ];
 }
 
+function supabasePlayerHubSnapshotTables_() {
+  return [
+    { key: "appUsers", table: "app_users" },
+    { key: "profiles", table: "player_profiles" },
+    { key: "clubs", table: "club_teams" },
+    { key: "accessRequests", table: "access_requests" },
+    { key: "teamProfiles", table: "team_profiles" },
+    { key: "teamChangeRequests", table: "team_identity_change_requests" },
+    { key: "teamMembers", table: "team_members" },
+    { key: "membershipRequests", table: "team_membership_requests" },
+    { key: "teamNeeds", table: "team_needs" },
+    { key: "teamNeedInterests", table: "team_need_interests" },
+    { key: "tournamentPlans", table: "tournament_events" },
+    { key: "tournamentAvailability", table: "tournament_availability" },
+    { key: "squadPlanning", table: "tournament_squad_planning" },
+    { key: "rosters", table: "roster_drafts" },
+    { key: "rosterPlayers", table: "roster_players" }
+  ];
+}
+
 function supabaseContentRangeCount_(response, fallbackCount) {
   var headers = response.getAllHeaders ? response.getAllHeaders() : {};
   var contentRange =
@@ -10181,13 +10201,13 @@ function supabaseContentRangeCount_(response, fallbackCount) {
   return fallbackCount;
 }
 
-function fetchSupabaseTableCount_(config, tableConfig) {
+function fetchSupabaseTablePage_(config, tableName, select, from, to) {
   var url =
     String(config.url || "").replace(/\/+$/, "") +
     "/rest/v1/" +
-    tableConfig.table +
+    tableName +
     "?select=" +
-    encodeURIComponent(tableConfig.select || "*");
+    encodeURIComponent(select || "*");
   var response = UrlFetchApp.fetch(url, {
     method: "get",
     muteHttpExceptions: true,
@@ -10195,7 +10215,7 @@ function fetchSupabaseTableCount_(config, tableConfig) {
       apikey: config.serviceRoleKey,
       Authorization: "Bearer " + config.serviceRoleKey,
       Prefer: "count=exact",
-      Range: "0-0",
+      Range: from + "-" + to,
       "Range-Unit": "items"
     }
   });
@@ -10203,7 +10223,7 @@ function fetchSupabaseTableCount_(config, tableConfig) {
   var body = response.getContentText() || "[]";
   if (statusCode < 200 || statusCode >= 300) {
     throw new Error(
-      tableConfig.table +
+      tableName +
         " read failed: " +
         statusCode +
         " " +
@@ -10216,10 +10236,403 @@ function fetchSupabaseTableCount_(config, tableConfig) {
   } catch (err) {
     rows = [];
   }
-  return supabaseContentRangeCount_(
-    response,
-    Array.isArray(rows) ? rows.length : 0
+  return {
+    response: response,
+    rows: Array.isArray(rows) ? rows : []
+  };
+}
+
+function fetchSupabaseTableCount_(config, tableConfig) {
+  var page = fetchSupabaseTablePage_(
+    config,
+    tableConfig.table,
+    tableConfig.select || "*",
+    0,
+    0
   );
+  return supabaseContentRangeCount_(
+    page.response,
+    Array.isArray(page.rows) ? page.rows.length : 0
+  );
+}
+
+function fetchSupabaseTableRows_(config, tableName) {
+  var pageSize = 1000;
+  var from = 0;
+  var rows = [];
+  while (true) {
+    var page = fetchSupabaseTablePage_(
+      config,
+      tableName,
+      "*",
+      from,
+      from + pageSize - 1
+    );
+    rows = rows.concat(page.rows || []);
+    if (!page.rows || page.rows.length < pageSize) break;
+    from += pageSize;
+  }
+  playerHubSnapshotLog_(
+    "[Snapshot] Supabase " + tableName + " rows=" + rows.length
+  );
+  return rows;
+}
+
+function supabaseText_(value) {
+  return value === undefined || value === null ? "" : String(value).trim();
+}
+
+function supabaseBool_(value, defaultValue) {
+  if (value === undefined || value === null || value === "") return !!defaultValue;
+  return truthy_(value);
+}
+
+function supabaseProfile_(row, user) {
+  return {
+    profileId: supabaseText_(row.legacy_profile_id),
+    username: supabaseText_(row.username) || playerHubUsername_(user),
+    firstName: supabaseText_(row.first_name),
+    lastName: supabaseText_(row.last_name),
+    displayName: supabaseText_(row.display_name),
+    email: supabaseText_(row.email),
+    phone: supabaseText_(row.phone),
+    country: supabaseText_(row.country || row.region),
+    clubOrTeam: supabaseText_(row.club_or_team),
+    clubTeamId: supabaseText_(row.legacy_club_team_id),
+    clubTeamName: supabaseText_(row.club_team_name),
+    teamNote: supabaseText_(row.team_note || row.club_or_team),
+    profileType: supabaseText_(row.profile_type) === "Captain" ? "Captain" : "Player",
+    freeAgent: supabaseBool_(row.free_agent, false),
+    region: supabaseText_(row.region),
+    primaryRole: supabaseText_(row.primary_role),
+    secondaryRole: supabaseText_(row.secondary_role),
+    customRole: supabaseText_(row.custom_role),
+    level: supabaseText_(row.level),
+    availability: supabaseText_(row.availability),
+    lookingForTeam: supabaseBool_(row.looking_for_team, false),
+    availableAsSubstitute: supabaseBool_(row.available_as_substitute, false),
+    canGuestForTeams: supabaseBool_(row.can_guest_for_teams, false),
+    interestedAbroad: supabaseBool_(row.interested_abroad, false),
+    publicVisible: supabaseBool_(row.public_visible, false),
+    approved: supabaseBool_(row.approved, false),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at)
+  };
+}
+
+function supabaseClub_(row) {
+  return {
+    teamId: supabaseText_(row.legacy_team_id),
+    name: supabaseText_(row.name),
+    country: supabaseText_(row.country),
+    city: supabaseText_(row.city),
+    active: supabaseBool_(row.active, true),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at)
+  };
+}
+
+function supabaseAccessRequest_(row) {
+  return {
+    requestId: supabaseText_(row.legacy_request_id),
+    username: supabaseText_(row.username),
+    displayName: supabaseText_(row.display_name),
+    email: supabaseText_(row.email),
+    requestType: normalizeAccessRequestType_(row.request_type),
+    clubTeamId: supabaseText_(row.legacy_club_team_id),
+    clubTeamName: supabaseText_(row.club_team_name),
+    message: supabaseText_(row.message),
+    status: normalizeAccessRequestStatus_(row.status),
+    adminNote: supabaseText_(row.admin_note),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at),
+    reviewedBy: supabaseText_(row.reviewed_by_username),
+    reviewedAt: supabaseText_(row.reviewed_at)
+  };
+}
+
+function supabaseTeamProfile_(row) {
+  return {
+    teamProfileId: supabaseText_(row.legacy_team_profile_id),
+    clubTeamId: supabaseText_(row.legacy_club_team_id),
+    clubTeamName: supabaseText_(row.club_team_name),
+    country: supabaseText_(row.country),
+    captainUsername: supabaseText_(row.captain_username),
+    captainDisplayName: supabaseText_(row.captain_display_name),
+    teamLevel: supabaseText_(row.team_level),
+    teamDescription: supabaseText_(row.team_description),
+    contactNote: supabaseText_(row.contact_note),
+    needsPlayers: supabaseBool_(row.needs_players, false),
+    needsText: supabaseText_(row.needs_text),
+    active: supabaseBool_(row.active, true),
+    publicVisible: supabaseBool_(row.public_visible, false),
+    approved: supabaseBool_(row.approved, false),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at)
+  };
+}
+
+function supabaseTeamChangeRequest_(row) {
+  return {
+    requestId: supabaseText_(row.legacy_request_id),
+    teamId: supabaseText_(row.legacy_team_id),
+    currentName: supabaseText_(row.current_name),
+    requestedName: supabaseText_(row.requested_name),
+    currentCountry: supabaseText_(row.current_country),
+    requestedCountry: supabaseText_(row.requested_country),
+    currentCity: supabaseText_(row.current_city),
+    requestedCity: supabaseText_(row.requested_city),
+    requestedByUsername: supabaseText_(row.requested_by_username),
+    reason: supabaseText_(row.reason),
+    status: normalizeTeamChangeRequestStatus_(row.status),
+    adminNote: supabaseText_(row.admin_note),
+    createdAt: supabaseText_(row.created_at),
+    reviewedAt: supabaseText_(row.reviewed_at),
+    reviewedBy: supabaseText_(row.reviewed_by_username)
+  };
+}
+
+function supabaseTeamMember_(row) {
+  return {
+    teamMemberId: supabaseText_(row.legacy_team_member_id),
+    teamProfileId: supabaseText_(row.legacy_team_profile_id),
+    clubTeamId: supabaseText_(row.legacy_club_team_id),
+    clubTeamName: supabaseText_(row.club_team_name),
+    captainUsername: supabaseText_(row.captain_username),
+    playerUsername: supabaseText_(row.player_username),
+    playerDisplayName: supabaseText_(row.player_display_name),
+    playerEmail: supabaseText_(row.player_email),
+    playerPhone: supabaseText_(row.player_phone),
+    playerCountry: supabaseText_(row.player_country),
+    sourceInterestId: supabaseText_(row.legacy_source_interest_id),
+    memberStatus: normalizeTeamMemberStatus_(row.member_status),
+    confirmedBy: supabaseText_(row.confirmed_by_username),
+    confirmedAt: supabaseText_(row.confirmed_at),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at)
+  };
+}
+
+function supabaseMembershipRequest_(row) {
+  return {
+    requestId: supabaseText_(row.legacy_request_id),
+    clubTeamId: supabaseText_(row.legacy_club_team_id),
+    clubTeamName: supabaseText_(row.club_team_name),
+    playerUsername: supabaseText_(row.player_username),
+    playerDisplayName: supabaseText_(row.player_display_name),
+    playerEmail: supabaseText_(row.player_email),
+    playerPhone: supabaseText_(row.player_phone),
+    playerCountry: supabaseText_(row.player_country),
+    playerProfileId: supabaseText_(row.legacy_player_profile_id),
+    status: normalizeTeamMembershipRequestStatus_(row.status),
+    requestedAt: supabaseText_(row.requested_at),
+    reviewedBy: supabaseText_(row.reviewed_by_username),
+    reviewedAt: supabaseText_(row.reviewed_at),
+    reviewNote: supabaseText_(row.review_note),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at)
+  };
+}
+
+function supabaseTeamNeed_(row) {
+  return {
+    needId: supabaseText_(row.legacy_need_id),
+    teamProfileId: supabaseText_(row.legacy_team_profile_id),
+    clubTeamId: supabaseText_(row.legacy_club_team_id),
+    clubTeamName: supabaseText_(row.club_team_name),
+    captainUsername: supabaseText_(row.captain_username),
+    needType: normalizeTeamNeedType_(row.need_type),
+    needText: supabaseText_(row.need_text),
+    neededCount: Number(row.needed_count) || 1,
+    status: normalizeTeamNeedStatus_(row.status),
+    visibility: normalizeTeamNeedVisibility_(row.visibility),
+    isPublished: supabaseBool_(row.is_published, false),
+    needContext: normalizeTeamNeedContext_(row.need_context),
+    tournamentId: supabaseText_(row.legacy_tournament_id),
+    tournamentName: supabaseText_(row.tournament_name),
+    squadLabel: supabaseText_(row.squad_label),
+    className: supabaseText_(row.class_name),
+    deadlineAt: supabaseText_(row.deadline_at),
+    sourceType: supabaseText_(row.source_type),
+    publishedAt: supabaseText_(row.published_at),
+    publicVisible: supabaseBool_(row.public_visible, false),
+    approved: supabaseBool_(row.approved, false),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at)
+  };
+}
+
+function supabaseTeamNeedInterest_(row) {
+  return {
+    interestId: supabaseText_(row.legacy_interest_id),
+    needId: supabaseText_(row.legacy_need_id),
+    teamProfileId: supabaseText_(row.legacy_team_profile_id),
+    clubTeamId: supabaseText_(row.legacy_club_team_id),
+    clubTeamName: supabaseText_(row.club_team_name),
+    playerUsername: supabaseText_(row.player_username),
+    playerDisplayName: supabaseText_(row.player_display_name),
+    playerEmail: supabaseText_(row.player_email),
+    playerPhone: supabaseText_(row.player_phone),
+    playerCountry: supabaseText_(row.player_country),
+    message: supabaseText_(row.message),
+    status: normalizeTeamNeedInterestStatus_(row.status),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at),
+    reviewedBy: supabaseText_(row.reviewed_by_username),
+    reviewedAt: supabaseText_(row.reviewed_at)
+  };
+}
+
+function supabaseTournamentPlan_(row) {
+  return {
+    planId: supabaseText_(row.legacy_plan_id),
+    tournamentId: supabaseText_(row.legacy_tournament_id),
+    tournamentName: supabaseText_(row.tournament_name),
+    teamProfileId: supabaseText_(row.legacy_team_profile_id),
+    clubTeamId: supabaseText_(row.legacy_club_team_id),
+    clubTeamName: supabaseText_(row.club_team_name),
+    captainUsername: supabaseText_(row.captain_username),
+    squadLabel: supabaseText_(row.squad_label),
+    className: supabaseText_(row.class_name),
+    planStatus: normalizeTournamentPlanStatus_(row.status),
+    deadlineAt: supabaseText_(row.deadline_at),
+    note: supabaseText_(row.note),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at)
+  };
+}
+
+function supabaseTournamentAvailability_(row) {
+  return {
+    availabilityId: supabaseText_(row.legacy_availability_id),
+    planId: supabaseText_(row.legacy_plan_id),
+    tournamentId: supabaseText_(row.legacy_tournament_id),
+    tournamentName: supabaseText_(row.tournament_name),
+    teamProfileId: supabaseText_(row.legacy_team_profile_id),
+    clubTeamId: supabaseText_(row.legacy_club_team_id),
+    clubTeamName: supabaseText_(row.club_team_name),
+    playerUsername: supabaseText_(row.player_username),
+    playerDisplayName: supabaseText_(row.player_display_name),
+    playerEmail: supabaseText_(row.player_email),
+    playerPhone: supabaseText_(row.player_phone),
+    playerCountry: supabaseText_(row.player_country),
+    responseStatus: normalizeTournamentAvailabilityStatus_(row.response_status),
+    preferredSquad: normalizePreferredSquad_(row.preferred_squad),
+    playerNote: supabaseText_(row.player_note),
+    requestedBy: supabaseText_(row.requested_by_username),
+    requestedAt: supabaseText_(row.requested_at),
+    respondedAt: supabaseText_(row.responded_at),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at)
+  };
+}
+
+function supabaseSquadPlanning_(row) {
+  return {
+    planningId: supabaseText_(row.legacy_planning_id),
+    planId: supabaseText_(row.legacy_plan_id),
+    tournamentId: supabaseText_(row.legacy_tournament_id),
+    tournamentName: supabaseText_(row.tournament_name),
+    teamProfileId: supabaseText_(row.legacy_team_profile_id),
+    clubTeamId: supabaseText_(row.legacy_club_team_id),
+    clubTeamName: supabaseText_(row.club_team_name),
+    playerUsername: supabaseText_(row.player_username),
+    playerDisplayName: supabaseText_(row.player_display_name),
+    playerCountry: supabaseText_(row.player_country),
+    availabilityStatus: normalizeTournamentAvailabilityStatus_(row.availability_status),
+    preferredSquad: normalizePreferredSquad_(row.preferred_squad),
+    assignedSquad: normalizeAssignedSquad_(row.assigned_squad),
+    planningStatus: normalizeTournamentSquadPlanningStatus_(row.planning_status),
+    assignedBy: supabaseText_(row.assigned_by_username),
+    assignedAt: supabaseText_(row.assigned_at),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at)
+  };
+}
+
+function supabaseRoster_(row) {
+  return {
+    rosterId: supabaseText_(row.legacy_roster_id),
+    planId: supabaseText_(row.legacy_plan_id),
+    tournamentId: supabaseText_(row.legacy_tournament_id),
+    tournamentName: supabaseText_(row.tournament_name),
+    teamProfileId: supabaseText_(row.legacy_team_profile_id),
+    clubTeamId: supabaseText_(row.legacy_club_team_id),
+    clubTeamName: supabaseText_(row.club_team_name),
+    squadLabel: supabaseText_(row.squad_label),
+    captainUsername: supabaseText_(row.captain_username),
+    rosterStatus: normalizeTournamentRosterStatus_(row.roster_status),
+    submittedBy: supabaseText_(row.submitted_by_username),
+    submittedAt: supabaseText_(row.submitted_at),
+    reviewedBy: supabaseText_(row.reviewed_by_username),
+    reviewedAt: supabaseText_(row.reviewed_at),
+    adminNote: supabaseText_(row.admin_note),
+    lockedAt: supabaseText_(row.locked_at),
+    lockedBy: supabaseText_(row.locked_by_username),
+    lockReason: supabaseText_(row.lock_reason),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at)
+  };
+}
+
+function supabaseRosterPlayer_(row) {
+  return {
+    rosterPlayerId: supabaseText_(row.legacy_roster_player_id),
+    rosterId: supabaseText_(row.legacy_roster_id),
+    planId: supabaseText_(row.legacy_plan_id),
+    tournamentId: supabaseText_(row.legacy_tournament_id),
+    tournamentName: supabaseText_(row.tournament_name),
+    teamProfileId: supabaseText_(row.legacy_team_profile_id),
+    clubTeamId: supabaseText_(row.legacy_club_team_id),
+    clubTeamName: supabaseText_(row.club_team_name),
+    squadLabel: supabaseText_(row.squad_label),
+    playerUsername: supabaseText_(row.player_username),
+    playerDisplayName: supabaseText_(row.player_display_name),
+    playerCountry: supabaseText_(row.player_country),
+    assignedSquad: normalizeAssignedSquad_(row.assigned_squad),
+    rosterRole: normalizeTournamentRosterRole_(row.roster_role),
+    source: normalizeTournamentRosterSource_(row.source),
+    playerStatus: normalizeTournamentRosterPlayerStatus_(row.player_status),
+    addedBy: supabaseText_(row.added_by_username),
+    addedAt: supabaseText_(row.added_at),
+    createdAt: supabaseText_(row.created_at),
+    updatedAt: supabaseText_(row.updated_at)
+  };
+}
+
+function supabasePlayerHubContext_(config, user) {
+  var tables = supabasePlayerHubSnapshotTables_();
+  var data = {};
+  for (var i = 0; i < tables.length; i++) {
+    data[tables[i].key] = fetchSupabaseTableRows_(config, tables[i].table);
+  }
+
+  return {
+    spreadsheet: null,
+    user: user,
+    rows: {},
+    data: {
+      profiles: data.profiles.map(function (row) {
+        return supabaseProfile_(row, { username: row.username });
+      }),
+      clubs: data.clubs.map(supabaseClub_),
+      accessRequests: data.accessRequests.map(supabaseAccessRequest_),
+      teamProfiles: data.teamProfiles.map(supabaseTeamProfile_),
+      teamChangeRequests: data.teamChangeRequests.map(supabaseTeamChangeRequest_),
+      teamMembers: data.teamMembers.map(supabaseTeamMember_),
+      membershipRequests: data.membershipRequests.map(supabaseMembershipRequest_),
+      teamNeeds: data.teamNeeds.map(supabaseTeamNeed_),
+      teamNeedInterests: data.teamNeedInterests.map(supabaseTeamNeedInterest_),
+      tournamentPlans: data.tournamentPlans.map(supabaseTournamentPlan_),
+      tournamentAvailability: data.tournamentAvailability.map(
+        supabaseTournamentAvailability_
+      ),
+      squadPlanning: data.squadPlanning.map(supabaseSquadPlanning_),
+      rosters: data.rosters.map(supabaseRoster_),
+      rosterPlayers: data.rosterPlayers.map(supabaseRosterPlayer_)
+    },
+    maps: {}
+  };
 }
 
 function fetchSupabasePlayerHubSnapshot_(data, context, options) {
@@ -10228,14 +10641,16 @@ function fetchSupabasePlayerHubSnapshot_(data, context, options) {
     return null;
   }
 
+  var config = getSupabaseConfig_();
   if (!diagnosticMode) {
-    playerHubSnapshotLog_(
-      "[Snapshot] Supabase Player Hub reads enabled but diagnostics-only; using Google Sheets"
+    playerHubSnapshotLog_("[Snapshot] source supabase");
+    return playerHubSnapshotPayloadFromContext_(
+      supabasePlayerHubContext_(config, context.user),
+      context,
+      options && options.timer
     );
-    return null;
   }
 
-  var config = getSupabaseConfig_();
   var tables = supabasePlayerHubDiagnosticTables_();
   var counts = {};
   for (var i = 0; i < tables.length; i++) {
@@ -10295,6 +10710,70 @@ function testSupabasePlayerHubSnapshot(data) {
   }
 }
 
+function playerHubSnapshotPayloadFromContext_(ctx, context, timer) {
+  var username = playerHubUsername_(context.user);
+
+  var profile = playerHubSnapshotProfile_(ctx, context.user);
+  playerHubSnapshotStep_(timer, "profile");
+
+  var availableClubs = playerHubSnapshotAvailableClubs_(ctx);
+  playerHubSnapshotStep_(timer, "clubs");
+
+  var myTeams = playerHubSnapshotMyTeams_(ctx, username);
+  var teamMembershipRequests = playerHubSnapshotMembershipRequestsForPlayer_(
+    ctx,
+    username
+  );
+  playerHubSnapshotStep_(timer, "myTeams");
+
+  var teamNeeds = playerHubSnapshotVisibleTeamNeeds_(ctx, username);
+  playerHubSnapshotStep_(timer, "teamNeeds");
+
+  var myTeamNeedInterests = playerHubSnapshotMyTeamNeedInterests_(ctx, username);
+  var accessRequests = playerHubSnapshotAccessRequestsForUser_(ctx, username);
+  playerHubSnapshotStep_(timer, "interests");
+
+  var tournamentAvailability =
+    playerHubSnapshotTournamentAvailabilityForPlayer_(ctx, username);
+  playerHubSnapshotStep_(timer, "tournamentAvailability");
+
+  var plannedTeams = playerHubSnapshotPlannedTeamsForPlayer_(ctx, username);
+  playerHubSnapshotStep_(timer, "plannedTeams");
+
+  var rosterDraftsForPlayer = playerHubSnapshotRosterStatusForPlayer_(ctx, username);
+  playerHubSnapshotStep_(timer, "rosterDrafts");
+
+  var captainTeamControl = playerHubCaptainSnapshot_(ctx, context.user, profile);
+  playerHubSnapshotStep_(timer, "captainControl");
+
+  var adminCounts = playerHubAdminCounts_(ctx, context.user);
+  playerHubSnapshotStep_(timer, "adminCounts");
+
+  return {
+    success: true,
+    profile: profile || null,
+    availableClubs: Array.isArray(availableClubs) ? availableClubs : [],
+    accessRequests: Array.isArray(accessRequests) ? accessRequests : [],
+    myTeams: Array.isArray(myTeams) ? myTeams : [],
+    teamMembershipRequests: Array.isArray(teamMembershipRequests)
+      ? teamMembershipRequests
+      : [],
+    teamNeeds: Array.isArray(teamNeeds) ? teamNeeds : [],
+    myTeamNeedInterests: Array.isArray(myTeamNeedInterests)
+      ? myTeamNeedInterests
+      : [],
+    tournamentAvailability: Array.isArray(tournamentAvailability)
+      ? tournamentAvailability
+      : [],
+    plannedTeams: Array.isArray(plannedTeams) ? plannedTeams : [],
+    rosterDraftsForPlayer: Array.isArray(rosterDraftsForPlayer)
+      ? rosterDraftsForPlayer
+      : [],
+    captainTeamControl: captainTeamControl,
+    adminCounts: adminCounts
+  };
+}
+
 function getPlayerHubSnapshot(data) {
   var timer = playerHubSnapshotTimer_();
   playerHubSnapshotLog_("[Snapshot] start");
@@ -10307,13 +10786,26 @@ function getPlayerHubSnapshot(data) {
       };
     }
 
-    var supabaseSnapshot = fetchSupabasePlayerHubSnapshot_(data || {}, context);
+    var supabaseSnapshot = null;
+    try {
+      supabaseSnapshot = fetchSupabasePlayerHubSnapshot_(data || {}, context, {
+        timer: timer
+      });
+    } catch (supabaseErr) {
+      playerHubSnapshotLog_(
+        "[Snapshot] Supabase read failed; falling back to sheets: " +
+          (supabaseErr && supabaseErr.message
+            ? supabaseErr.message
+            : String(supabaseErr))
+      );
+    }
     if (supabaseSnapshot) {
       playerHubSnapshotStep_(timer, "supabaseSnapshot");
       playerHubSnapshotTotal_(timer);
       return supabaseSnapshot;
     }
 
+    playerHubSnapshotLog_("[Snapshot] source sheets");
     var ctx = playerHubSnapshotContext_(context.user);
     var username = playerHubUsername_(context.user);
 

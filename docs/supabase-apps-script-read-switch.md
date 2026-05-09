@@ -8,18 +8,18 @@ React -> Apps Script Code.gs -> Google Sheets
 
 Supabase reads are not enabled by default and the React app is not connected to Supabase.
 
-For the current diagnostic-only toggle procedure, use [Supabase Diagnostic Toggle Runbook](supabase-diagnostic-toggle-runbook.md).
+For the temporary diagnostic toggle procedure, use [Supabase Diagnostic Toggle Runbook](supabase-diagnostic-toggle-runbook.md).
 
 ## Current State
 
-- Google Sheets remains the source of truth.
-- `getPlayerHubSnapshot` still returns the existing Google Sheets snapshot.
-- Apps Script now has dormant helper stubs for a future server-side Supabase read path:
+- Google Sheets remains the default source of truth.
+- `getPlayerHubSnapshot` uses Google Sheets when `SUPABASE_PLAYER_HUB_READS_ENABLED` is false or missing.
+- Apps Script now has a server-side Supabase read path behind the flag:
   - `getSupabaseConfig_()`
   - `isSupabasePlayerHubReadsEnabled_()`
   - `fetchSupabasePlayerHubSnapshot_()`
-- The helper path is disabled unless Apps Script properties explicitly enable it.
-- The current stub logs and falls back to Google Sheets if someone enables the flag before the real read implementation is promoted.
+- If the flag is true, Apps Script attempts to read Player Hub snapshot data from Supabase and maps it into the same response shape used by React.
+- If the Supabase read fails, Apps Script logs the failure and falls back to Google Sheets for that request.
 
 ## Manual Apps Script Properties
 
@@ -31,7 +31,7 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 SUPABASE_PLAYER_HUB_READS_ENABLED=false
 ```
 
-Keep `SUPABASE_PLAYER_HUB_READS_ENABLED=false` until a later step implements and verifies the server-side Supabase snapshot read.
+Keep `SUPABASE_PLAYER_HUB_READS_ENABLED=false` unless you are intentionally testing the server-side Supabase read path.
 
 ## Safety Rules
 
@@ -45,11 +45,12 @@ Keep `SUPABASE_PLAYER_HUB_READS_ENABLED=false` until a later step implements and
 ## Planned Promotion Path
 
 1. Keep Google Sheets as default.
-2. Implement `fetchSupabasePlayerHubSnapshot_()` behind the server-side flag.
-3. Test in Apps Script dev deployment with `SUPABASE_PLAYER_HUB_READS_ENABLED=true`.
-4. Compare Supabase snapshot output to the Google Sheets snapshot for the same users.
-5. Only after parity is proven, consider enabling Supabase reads for a limited dev account.
-6. Keep writes on Google Sheets until a separate write migration is designed.
+2. Run the admin-only diagnostic with `SUPABASE_PLAYER_HUB_READS_ENABLED=true`.
+3. Temporarily test Player Hub snapshot reads in Apps Script dev deployment with the flag true.
+4. Watch Apps Script logs for `[Snapshot] source supabase` or fallback logs.
+5. Compare Player Hub behavior against the flag-off Google Sheets view.
+6. Turn the flag back to false after the test.
+7. Keep writes on Google Sheets until a separate write migration is designed.
 
 ## Rollback
 
