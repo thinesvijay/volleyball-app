@@ -28,6 +28,7 @@
     "supabase:compare:player-hub": "node scripts/supabase/compare-player-hub-shadow.js",
     "supabase:test:apps-script-diagnostic": "node scripts/supabase/test-apps-script-supabase-diagnostic.js",
     "supabase:test:player-hub-snapshot-source": "node scripts/supabase/test-player-hub-snapshot-source.js",
+    "supabase:beta:read-checklist": "node scripts/supabase/beta-read-session-checklist.js",
     "supabase:shadow:dry-run": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/supabase/run-shadow-import-dry-run.ps1",
     "supabase:shadow:real-import": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/supabase/run-shadow-import-real.ps1",
     "eject": "react-scripts eject"
