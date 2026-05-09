@@ -20,11 +20,36 @@ const TABLE_COLUMNS = {
     "email",
     "phone",
     "active",
+    "archived_at",
+    "can_request_team_profile",
     "can_use_team_builder",
     "can_use_tournaments",
+    "can_create_tournaments",
     "spreadsheet_id",
     "skill_view",
     "skill_scale",
+  ],
+  team_builder_players: [
+    "legacy_player_id",
+    "owner_username",
+    "owner_display_name",
+    "active",
+    "name",
+    "skill",
+    "cannot_play_with",
+    "club",
+    "notes",
+    "metadata",
+    "created_at",
+    "updated_at",
+  ],
+  team_builder_saved_teams: [
+    "legacy_saved_team_id",
+    "owner_username",
+    "label",
+    "teams_json",
+    "created_at",
+    "updated_at",
   ],
   club_teams: ["legacy_team_id", "name", "country", "city", "active"],
   player_profiles: [
@@ -419,6 +444,16 @@ function nullableText(value) {
   return next ? next : null;
 }
 
+function stringList(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => text(item)).filter(Boolean);
+  }
+  return text(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function lowerUsername(value) {
   return text(value).toLowerCase();
 }
@@ -565,6 +600,9 @@ function collect(data) {
   }
 
   return {
+    users: c.users || [],
+    teamBuilderPlayers: c.teamBuilderPlayers || [],
+    teamBuilderSavedTeams: c.teamBuilderSavedTeams || [],
     clubTeams: c.clubTeams || [],
     playerProfiles: c.playerProfiles || [],
     accessRequests: c.accessRequests || [],
@@ -582,6 +620,7 @@ function collect(data) {
     rosterPlayers: [...(c.rosterPlayers || []), ...rosterPlayersFromDrafts],
     officialRosters: c.officialRosters || [],
     eventComments: c.eventComments || [],
+    auditLogs: c.auditLogs || [],
   };
 }
 
@@ -650,6 +689,41 @@ function buildUsers(collections) {
 
   for (const [rows, keys] of usernameFields) {
     for (const row of rows || []) remember(pick(row, keys));
+  }
+
+  for (const user of collections.users || []) {
+    const username = pick(user, ["username", "Username", "legacyUsername", "LegacyUsername"]);
+    const normalized = lowerUsername(username);
+    if (!normalized) continue;
+    const role = oneOf(pick(user, ["role", "Role"], "PLAYER"), ["ADMIN", "TRAINER", "PLAYER"], "PLAYER").toLowerCase();
+    remember(normalized, {
+      legacy_username: nullableText(pick(user, ["legacyUsername", "LegacyUsername"], username)) || normalized,
+      password_hash: nullableText(pick(user, ["passwordHash", "PasswordHash", "password", "Password", "password_hash"])),
+      role,
+      display_name: nullableText(pick(user, ["displayName", "DisplayName", "name", "Name"])),
+      email: nullableText(pick(user, ["email", "Email"])),
+      phone: nullableText(pick(user, ["phone", "Phone"])),
+      active: bool(pick(user, ["active", "Active"], true), true),
+      archived_at: dateOrNull(pick(user, ["archivedAt", "ArchivedAt", "archived_at"])),
+      can_request_team_profile: bool(
+        pick(user, ["canRequestTeamProfile", "CanRequestTeamProfile"], false),
+        false
+      ),
+      can_use_team_builder:
+        role === "admin" ||
+        bool(pick(user, ["canUseTeamBuilder", "CanUseTeamBuilder"], false), false),
+      can_use_tournaments:
+        role === "admin" ||
+        bool(pick(user, ["canUseTournaments", "CanUseTournaments"], false), false),
+      can_create_tournaments:
+        role === "admin" ||
+        bool(pick(user, ["canCreateTournaments", "CanCreateTournaments"], false), false),
+      spreadsheet_id: nullableText(pick(user, ["spreadsheetId", "SpreadsheetId", "spreadsheet_id"])),
+      skill_view: nullableText(pick(user, ["skillView", "SkillView"], "numbers")),
+      skill_scale: intValue(pick(user, ["skillScale", "SkillScale"], 5), 5),
+      created_at: dateOrNull(pick(user, ["createdAt", "CreatedAt"])) || undefined,
+      updated_at: dateOrNull(pick(user, ["updatedAt", "UpdatedAt"])) || undefined,
+    });
   }
 
   for (const user of byUsername.values()) users.push(user);
@@ -752,7 +826,7 @@ async function main() {
 
   if (!fs.existsSync(sourcePath)) {
     console.log(`Export file not found: ${sourcePath}`);
-    console.log("Run npm.cmd run supabase:export:player-hub first, or create the JSON manually.");
+    console.log("Run the matching Supabase export script first, or create the JSON manually.");
     return;
   }
 
@@ -770,6 +844,63 @@ async function main() {
 
   const appUsers = await db.upsert("app_users", buildUsers(collections), "username");
   const usersByUsername = usernameMap(appUsers);
+
+  await db.upsert(
+    "team_builder_players",
+    collections.teamBuilderPlayers
+      .map((player) => {
+        const ownerUsername = lowerUsername(
+          pick(player, ["ownerUsername", "OwnerUsername"], "__main__")
+        ) || "__main__";
+        const name = text(pick(player, ["name", "Name"]));
+        return {
+          legacy_player_id:
+            nullableText(pick(player, ["legacyPlayerId", "LegacyPlayerId", "playerId", "PlayerId"])) ||
+            stableLegacyId("team-builder-player", [ownerUsername, name]),
+          owner_username: ownerUsername,
+          owner_display_name: nullableText(
+            pick(player, ["ownerDisplayName", "OwnerDisplayName"], ownerUsername)
+          ),
+          active: bool(pick(player, ["active", "Active"], true), true),
+          name,
+          skill: intValue(pick(player, ["skill", "Skill"], 1), 1),
+          cannot_play_with: stringList(pick(player, ["cannot", "Cannot", "cannotPlayWith", "CannotPlayWith"], "")),
+          club: nullableText(pick(player, ["club", "Club"])),
+          notes: nullableText(pick(player, ["notes", "Notes"])),
+          metadata: {
+            spreadsheetId: nullableText(pick(player, ["spreadsheetId", "SpreadsheetId"])),
+          },
+          created_at: dateOrNull(pick(player, ["createdAt", "CreatedAt"])) || undefined,
+          updated_at: dateOrNull(pick(player, ["updatedAt", "UpdatedAt"])) || undefined,
+        };
+      })
+      .filter((row) => row.legacy_player_id && row.owner_username && row.name),
+    "legacy_player_id"
+  );
+
+  await db.upsert(
+    "team_builder_saved_teams",
+    collections.teamBuilderSavedTeams
+      .map((saved) => {
+        const ownerUsername = lowerUsername(
+          pick(saved, ["ownerUsername", "OwnerUsername"], "__main__")
+        ) || "__main__";
+        return {
+          legacy_saved_team_id:
+            nullableText(pick(saved, ["legacySavedTeamId", "LegacySavedTeamId", "savedTeamId", "SavedTeamId"])) ||
+            stableLegacyId("team-builder-saved-teams", [ownerUsername, pick(saved, ["label", "Label"], "current")]),
+          owner_username: ownerUsername,
+          label: nullableText(pick(saved, ["label", "Label"], "Current teams")),
+          teams_json: Array.isArray(saved.teams)
+            ? saved.teams
+            : pick(saved, ["teamsJson", "TeamsJson"], []),
+          created_at: dateOrNull(pick(saved, ["createdAt", "CreatedAt"])) || undefined,
+          updated_at: dateOrNull(pick(saved, ["updatedAt", "UpdatedAt"])) || undefined,
+        };
+      })
+      .filter((row) => row.legacy_saved_team_id && row.owner_username),
+    "legacy_saved_team_id"
+  );
 
   const clubTeams = await db.upsert(
     "club_teams",

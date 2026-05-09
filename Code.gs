@@ -185,6 +185,10 @@ function doPost(e) {
     return jsonResponse(testSupabasePlayerHubSnapshot(data));
   }
 
+  if (data.action === "exportAllSheetsDataForSupabaseMigration") {
+    return jsonResponse(exportAllSheetsDataForSupabaseMigration(data));
+  }
+
   var playerHubSupabaseResponse = handlePlayerHubSupabaseAction_(data);
   if (playerHubSupabaseResponse) {
     return jsonResponse(playerHubSupabaseResponse);
@@ -2646,6 +2650,213 @@ function supabaseSaveUserSettings_(data) {
       skillView: skillView,
       skillScale: skillScale
     }
+  };
+}
+
+function migrationSheetPlayersForOwner_(ownerUsername, ownerDisplayName, spreadsheetId, spreadsheet) {
+  var players = [];
+  try {
+    var sheet = spreadsheet && spreadsheet.getSheetByName("Players");
+    if (!sheet || sheet.getLastRow() < 2) return players;
+    var values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 5).getValues();
+    values.forEach(function(row, index) {
+      var player = mapPlayerRow(row);
+      if (!player.name) return;
+      players.push({
+        legacyPlayerId: stableMigrationId_("team-builder-player", [
+          ownerUsername,
+          player.name,
+          index + 2
+        ]),
+        ownerUsername: ownerUsername,
+        ownerDisplayName: ownerDisplayName || ownerUsername,
+        spreadsheetId: spreadsheetId || "",
+        active: player.active,
+        name: player.name,
+        skill: player.skill,
+        cannot: player.cannot,
+        club: player.club
+      });
+    });
+  } catch (err) {
+    Logger.log("[MigrationExport] players skipped " + ownerUsername + " " + (err && err.message ? err.message : err));
+  }
+  return players;
+}
+
+function migrationSheetTeamsForOwner_(ownerUsername, spreadsheetId, spreadsheet) {
+  var teams = [];
+  try {
+    var sheet = spreadsheet && spreadsheet.getSheetByName("Teams");
+    if (!sheet || sheet.getLastRow() < 1) return teams;
+    var values = sheet.getRange(1, 1, sheet.getLastRow(), Math.max(3, sheet.getLastColumn())).getValues();
+    var current = null;
+    values.forEach(function(row) {
+      var first = String(row[0] || "").trim();
+      var second = String(row[1] || "").trim();
+      if (!first && !second) {
+        current = null;
+        return;
+      }
+      if (first && !second) {
+        current = {
+          name: first,
+          players: []
+        };
+        teams.push(current);
+        return;
+      }
+      if (current && first) {
+        current.players.push({
+          name: first,
+          skill: Number(row[1]) || 1,
+          locked: String(row[2] || "").trim().toUpperCase() === "LOCKED"
+        });
+      }
+    });
+  } catch (err) {
+    Logger.log("[MigrationExport] teams skipped " + ownerUsername + " " + (err && err.message ? err.message : err));
+  }
+
+  if (!teams.length) return [];
+  return [{
+    legacySavedTeamId: "team-builder-current-" + ownerUsername,
+    ownerUsername: ownerUsername,
+    spreadsheetId: spreadsheetId || "",
+    label: "Current teams",
+    teams: teams
+  }];
+}
+
+function stableMigrationId_(prefix, parts) {
+  var raw = String(prefix || "legacy") + "-" + (parts || []).join("-");
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 180);
+}
+
+function migrationUserExportRows_() {
+  return getUserRecords().map(function(user) {
+    return {
+      username: user.username,
+      legacyUsername: user.username,
+      passwordHash: user.password,
+      role: user.role,
+      active: !!user.active,
+      spreadsheetId: user.spreadsheetId,
+      skillView: user.skillView || "numbers",
+      skillScale: normalizeSkillScale(user.skillScale),
+      canUseTeamBuilder: !!user.canUseTeamBuilder,
+      canUseTournaments: !!user.canUseTournaments,
+      access: {
+        teamBuilder: !!user.canUseTeamBuilder,
+        tournaments: !!user.canUseTournaments
+      }
+    };
+  });
+}
+
+function migrationTeamBuilderExport_(users) {
+  var players = [];
+  var savedTeams = [];
+  try {
+    var mainSpreadsheet = getMainSpreadsheet();
+    players = players.concat(migrationSheetPlayersForOwner_(
+      "__main__",
+      "Main Team Builder",
+      "",
+      mainSpreadsheet
+    ));
+    savedTeams = savedTeams.concat(migrationSheetTeamsForOwner_(
+      "__main__",
+      "",
+      mainSpreadsheet
+    ));
+  } catch (err) {
+    Logger.log("[MigrationExport] main Team Builder skipped " + (err && err.message ? err.message : err));
+  }
+
+  (users || []).forEach(function(user) {
+    if (!user || !user.spreadsheetId) return;
+    try {
+      var spreadsheet = SpreadsheetApp.openById(user.spreadsheetId);
+      players = players.concat(migrationSheetPlayersForOwner_(
+        user.username,
+        user.username,
+        user.spreadsheetId,
+        spreadsheet
+      ));
+      savedTeams = savedTeams.concat(migrationSheetTeamsForOwner_(
+        user.username,
+        user.spreadsheetId,
+        spreadsheet
+      ));
+    } catch (err) {
+      Logger.log("[MigrationExport] trainer spreadsheet skipped " + user.username + " " + (err && err.message ? err.message : err));
+    }
+  });
+
+  return {
+    players: players,
+    savedTeams: savedTeams
+  };
+}
+
+function exportAllSheetsDataForSupabaseMigration(data) {
+  var adminCheck = requireAdmin(data || {});
+  if (!adminCheck.success) {
+    return {
+      success: false,
+      message: adminCheck.message
+    };
+  }
+
+  var users = migrationUserExportRows_();
+  var teamBuilder = migrationTeamBuilderExport_(users);
+
+  var collections = {
+    users: users,
+    teamBuilderPlayers: teamBuilder.players,
+    teamBuilderSavedTeams: teamBuilder.savedTeams,
+    clubTeams: clubTeamRows_().map(clubTeamFromRow_).filter(Boolean),
+    playerProfiles: playerProfileRows_().map(function(row) {
+      return playerProfileFromRow_(row, getUserByUsernameCaseInsensitive_(row.Username));
+    }).filter(Boolean),
+    accessRequests: accessRequestRows_().map(accessRequestFromRow_).filter(Boolean),
+    teamIdentityChangeRequests: teamChangeRequestRows_().map(teamChangeRequestFromRow_).filter(Boolean),
+    teamProfiles: teamProfileRows_().map(teamProfileFromRow_).filter(Boolean),
+    teamNeeds: teamNeedsRows_().map(teamNeedFromRow_).filter(Boolean),
+    teamNeedInterests: teamNeedInterestRows_().map(teamNeedInterestFromRow_).filter(Boolean),
+    teamMembers: teamMemberRows_().map(teamMemberFromRow_).filter(Boolean),
+    teamMembershipRequests: teamMembershipRequestRows_().map(teamMembershipRequestFromRow_).filter(Boolean),
+    tournaments: tournamentRows_().map(tournamentFromRow_).filter(Boolean),
+    tournamentEvents: tournamentTeamPlanRows_().map(tournamentTeamPlanFromRow_).filter(Boolean),
+    tournamentAvailability: tournamentAvailabilityRows_().map(tournamentAvailabilityFromRow_).filter(Boolean),
+    tournamentSquadPlanning: tournamentSquadPlanningRows_().map(tournamentSquadPlanningFromRow_).filter(Boolean),
+    rosterDrafts: tournamentRosterRows_().map(tournamentRosterFromRow_).filter(Boolean),
+    rosterPlayers: tournamentRosterPlayerRows_().map(tournamentRosterPlayerFromRow_).filter(Boolean),
+    officialRosters: officialRosterRows_().map(officialRosterFromRow_).filter(Boolean),
+    eventComments: teamEventCommentRows_().map(teamEventCommentFromRow_).filter(Boolean)
+  };
+
+  var counts = {};
+  Object.keys(collections).forEach(function(key) {
+    counts[key] = Array.isArray(collections[key]) ? collections[key].length : 0;
+  });
+
+  return {
+    success: true,
+    meta: {
+      createdAt: new Date().toISOString(),
+      source: "apps-script-google-sheets",
+      mode: "full-backend-migration-export",
+      exportedBy: adminCheck.admin.username
+    },
+    collections: collections,
+    counts: counts
   };
 }
 

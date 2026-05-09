@@ -12,6 +12,8 @@ const DEFAULT_EXPORT_PATH = path.join(
 
 const TABLES = [
   "app_users",
+  "team_builder_players",
+  "team_builder_saved_teams",
   "player_profiles",
   "club_teams",
   "team_identity_change_requests",
@@ -33,6 +35,9 @@ const TABLES = [
 ];
 
 const EXPORT_TO_TABLE = {
+  users: "app_users",
+  teamBuilderPlayers: "team_builder_players",
+  teamBuilderSavedTeams: "team_builder_saved_teams",
   clubTeams: "club_teams",
   playerProfiles: "player_profiles",
   accessRequests: "access_requests",
