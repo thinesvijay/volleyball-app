@@ -32,6 +32,7 @@
     "supabase:test:tournament-backend-mode": "node scripts/supabase/test-tournament-backend-mode.js",
     "supabase:test:team-builder-backend-mode": "node scripts/supabase/test-team-builder-backend-mode.js",
     "supabase:test:auth-backend-mode": "node scripts/supabase/test-auth-backend-mode.js",
+    "supabase:test:full-backend-mode": "node scripts/supabase/test-full-backend-mode.js",
     "supabase:beta:read-checklist": "node scripts/supabase/beta-read-session-checklist.js",
     "supabase:shadow:dry-run": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/supabase/run-shadow-import-dry-run.ps1",
     "supabase:shadow:real-import": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/supabase/run-shadow-import-real.ps1",

@@ -9,6 +9,7 @@ When `AUTH_BACKEND=supabase`, these actions use Supabase first:
 - `login`
 - `getProfile`
 - `saveUserSettings`
+- `registerPlayerAccount`
 - `listTrainerUsers`
 - `createTrainerUser`
 - `updateTrainerAccess`
