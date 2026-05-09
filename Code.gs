@@ -21,12 +21,16 @@ function doGet(e) {
   }
 
   if (action === "login") {
-    return jsonResponse(loginUser(e ? e.parameter : {}));
+    return jsonResponse(runAuthAction_("login", e ? e.parameter : {}, function () {
+      return loginUser(e ? e.parameter : {});
+    }));
   }
 
   if (action === "getProfile") {
     var profileContext = resolveRequestContext(e ? e.parameter : {});
-    return jsonResponse(getProfile(profileContext));
+    return jsonResponse(runAuthAction_("getProfile", e ? e.parameter : {}, function () {
+      return getProfile(profileContext);
+    }));
   }
 
   if (action === "getMyPlayerProfile") {
@@ -158,7 +162,9 @@ function doPost(e) {
   }
 
   if (data.action === "saveUserSettings") {
-    return jsonResponse(saveUserSettings(data));
+    return jsonResponse(runAuthAction_("saveUserSettings", data, function () {
+      return saveUserSettings(data);
+    }));
   }
 
   if (data.action === "registerPlayerAccount") {
@@ -207,7 +213,9 @@ function doPost(e) {
   }
 
   if (data.action === "resetPlayerPassword") {
-    return jsonResponse(resetPlayerPassword(data));
+    return jsonResponse(runAuthAction_("resetPlayerPassword", data, function () {
+      return resetPlayerPassword(data);
+    }));
   }
 
   if (data.action === "listClubTeams") {
@@ -431,31 +439,45 @@ function doPost(e) {
   }
 
   if (data.action === "createTrainerUser") {
-    return jsonResponse(createTrainerUserRecordFromAdmin(data));
+    return jsonResponse(runAuthAction_("createTrainerUser", data, function () {
+      return createTrainerUserRecordFromAdmin(data);
+    }));
   }
 
   if (data.action === "listTrainerUsers") {
-    return jsonResponse(listTrainerUsers(data));
+    return jsonResponse(runAuthAction_("listTrainerUsers", data, function () {
+      return listTrainerUsers(data);
+    }));
   }
 
   if (data.action === "updateTrainerAccess") {
-    return jsonResponse(updateTrainerAccess(data));
+    return jsonResponse(runAuthAction_("updateTrainerAccess", data, function () {
+      return updateTrainerAccess(data);
+    }));
   }
 
   if (data.action === "updateTrainerStatus") {
-    return jsonResponse(updateTrainerStatus(data));
+    return jsonResponse(runAuthAction_("updateTrainerStatus", data, function () {
+      return updateTrainerStatus(data);
+    }));
   }
 
   if (data.action === "resetTrainerPassword") {
-    return jsonResponse(resetTrainerPassword(data));
+    return jsonResponse(runAuthAction_("resetTrainerPassword", data, function () {
+      return resetTrainerPassword(data);
+    }));
   }
 
   if (data.action === "archiveTrainerUser") {
-    return jsonResponse(archiveTrainerUser(data));
+    return jsonResponse(runAuthAction_("archiveTrainerUser", data, function () {
+      return archiveTrainerUser(data);
+    }));
   }
 
   if (data.action === "restoreTrainerUser") {
-    return jsonResponse(restoreTrainerUser(data));
+    return jsonResponse(runAuthAction_("restoreTrainerUser", data, function () {
+      return restoreTrainerUser(data);
+    }));
   }
 
   if (
@@ -887,6 +909,24 @@ function maybeUpgradeUserPasswordHash(user, inputPassword) {
   var plain = String(inputPassword || "");
   if (!plain) return;
 
+  if (!user.rowNumber && isSupabaseAuthBackendEnabled_()) {
+    try {
+      supabasePatchRows_(getSupabaseConfig_(), "app_users", {
+        username: user.username
+      }, {
+        password_hash: hashPassword(plain),
+        updated_at: new Date().toISOString()
+      });
+      user.password = hashPassword(plain);
+      return;
+    } catch (err) {
+      authBackendLog_(
+        "password hash upgrade fallback " +
+          (err && err.message ? err.message : String(err))
+      );
+    }
+  }
+
   setUserPasswordHash(user.rowNumber, plain);
   user.password = hashPassword(plain);
 }
@@ -948,6 +988,22 @@ function findUser(username, password) {
 
   if (!normalizedUsername || !normalizedPassword) return null;
 
+  if (isSupabaseAuthBackendEnabled_()) {
+    authBackendLog_("supabase findUser");
+    try {
+      var supabaseUser = supabaseFindUserByCredentials_(
+        normalizedUsername,
+        normalizedPassword
+      );
+      if (supabaseUser) return supabaseUser;
+      authBackendLog_("fallback findUser no Supabase match");
+    } catch (err) {
+      authBackendLog_(
+        "fallback findUser " + (err && err.message ? err.message : String(err))
+      );
+    }
+  }
+
   var users = getUserRecords();
 
   for (var i = 0; i < users.length; i++) {
@@ -969,6 +1025,20 @@ function findUser(username, password) {
 function getUserByUsername(username) {
   var normalizedUsername = String(username || "").trim();
   if (!normalizedUsername) return null;
+
+  if (isSupabaseAuthBackendEnabled_()) {
+    authBackendLog_("supabase getUserByUsername");
+    try {
+      var supabaseUser = supabaseGetUserByUsername_(normalizedUsername);
+      if (supabaseUser) return supabaseUser;
+      authBackendLog_("fallback getUserByUsername no Supabase match");
+    } catch (err) {
+      authBackendLog_(
+        "fallback getUserByUsername " +
+          (err && err.message ? err.message : String(err))
+      );
+    }
+  }
 
   var users = getUserRecords();
   for (var i = 0; i < users.length; i++) {
@@ -1220,6 +1290,29 @@ function ensureBlankTrainerSpreadsheetForUser_(user) {
 
   var trainerSpreadsheet = createBlankTrainerSpreadsheet_(user.username);
   var spreadsheetId = trainerSpreadsheet.getId();
+
+  if (!user.rowNumber && isSupabaseAuthBackendEnabled_()) {
+    try {
+      supabasePatchRows_(getSupabaseConfig_(), "app_users", {
+        username: user.username
+      }, {
+        spreadsheet_id: spreadsheetId,
+        updated_at: new Date().toISOString()
+      });
+      user.spreadsheetId = spreadsheetId;
+      return spreadsheetId;
+    } catch (err) {
+      authBackendLog_(
+        "trainer spreadsheet Supabase patch skipped " +
+          (err && err.message ? err.message : String(err))
+      );
+    }
+  }
+
+  if (!user.rowNumber) {
+    user.spreadsheetId = spreadsheetId;
+    return spreadsheetId;
+  }
 
   var usersSheet = getUsersSheet();
   usersSheet
@@ -1767,6 +1860,610 @@ function saveUserSettings(data) {
   sheet.getRange(user.rowNumber, 5).setValue(skillView);
   sheet.getRange(user.rowNumber, 6).setValue(skillScale);
 
+  return {
+    success: true,
+    settings: {
+      skillView: skillView,
+      skillScale: skillScale
+    }
+  };
+}
+
+function runAuthAction_(action, data, sheetsFn) {
+  if (isSupabaseAuthBackendEnabled_()) {
+    authBackendLog_("supabase " + action);
+    try {
+      return supabaseAuthResponse_(supabaseHandleAuthAction_(action, data || {}));
+    } catch (err) {
+      authBackendLog_(
+        "fallback " +
+          action +
+          " " +
+          (err && err.message ? err.message : String(err))
+      );
+      var fallback = typeof sheetsFn === "function" ? sheetsFn() : {
+        success: false,
+        message: "Auth action failed"
+      };
+      if (fallback && typeof fallback === "object" && !Array.isArray(fallback)) {
+        fallback.authBackend = "sheets";
+        fallback.authBackendFallbackUsed = true;
+        fallback.authBackendWarning =
+          "Supabase auth backend failed; used Google Sheets fallback.";
+      }
+      return fallback;
+    }
+  }
+
+  authBackendLog_("sheets " + action);
+  var response = typeof sheetsFn === "function" ? sheetsFn() : {
+    success: false,
+    message: "Auth action failed"
+  };
+  if (response && typeof response === "object" && !Array.isArray(response)) {
+    response.authBackend = "sheets";
+    response.authBackendFallbackUsed = false;
+  }
+  return response;
+}
+
+function supabaseAuthResponse_(response) {
+  if (response && typeof response === "object" && !Array.isArray(response)) {
+    response.authBackend = "supabase";
+    response.authBackendFallbackUsed = false;
+  }
+  return response;
+}
+
+function supabaseHandleAuthAction_(action, data) {
+  if (action === "login") {
+    return supabaseLoginUser_(data);
+  }
+
+  if (action === "getProfile") {
+    return supabaseGetProfile_(data);
+  }
+
+  if (action === "saveUserSettings") {
+    return supabaseSaveUserSettings_(data);
+  }
+
+  if (action === "createTrainerUser") {
+    return supabaseCreateTrainerUser_(data);
+  }
+
+  if (action === "listTrainerUsers") {
+    return supabaseListTrainerUsers_(data);
+  }
+
+  if (action === "updateTrainerAccess") {
+    return supabaseUpdateTrainerAccess_(data);
+  }
+
+  if (action === "updateTrainerStatus") {
+    return supabaseUpdateTrainerStatus_(data);
+  }
+
+  if (action === "resetTrainerPassword") {
+    return supabaseResetTrainerPassword_(data);
+  }
+
+  if (action === "resetPlayerPassword") {
+    return supabaseResetPlayerPassword_(data);
+  }
+
+  if (action === "archiveTrainerUser") {
+    return supabaseArchiveTrainerUser_(data);
+  }
+
+  if (action === "restoreTrainerUser") {
+    return supabaseRestoreTrainerUser_(data);
+  }
+
+  return {
+    success: false,
+    message: "Unknown auth action"
+  };
+}
+
+function supabaseGetAppUserRows_() {
+  return supabaseSelectRows_(getSupabaseConfig_(), "app_users", {});
+}
+
+function supabaseFindAppUserRow_(username) {
+  var target = String(username || "").trim().toLowerCase();
+  if (!target) return null;
+  var rows = supabaseGetAppUserRows_();
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i] || {};
+    if (
+      String(row.username || "").trim().toLowerCase() === target ||
+      String(row.legacy_username || "").trim().toLowerCase() === target
+    ) {
+      return row;
+    }
+  }
+  return null;
+}
+
+function supabaseMapAppUser_(row) {
+  if (!row) return null;
+  var role = String(row.role || "player").trim().toLowerCase() || "player";
+  var isAdmin = role === "admin";
+  var canUseTeamBuilder = isAdmin
+    ? true
+    : parseAccessBoolean_(row.can_use_team_builder, true);
+  var canUseTournaments = isAdmin
+    ? true
+    : parseAccessBoolean_(
+        firstValue_(row.can_use_tournaments, row.can_create_tournaments),
+        false
+      );
+  var username = String(firstValue_(row.username, row.legacy_username, "") || "").trim();
+  return {
+    rowNumber: null,
+    username: username,
+    password: String(row.password_hash || "").trim(),
+    role: role,
+    spreadsheetId: String(row.spreadsheet_id || "").trim(),
+    skillView: normalizeSkillView(row.skill_view),
+    skillScale: normalizeSkillScale(row.skill_scale),
+    active: parseAccessBoolean_(row.active, false),
+    canUseTeamBuilder: canUseTeamBuilder,
+    canUseTournaments: canUseTournaments,
+    displayName: String(row.display_name || "").trim(),
+    email: String(row.email || "").trim(),
+    phone: String(row.phone || "").trim(),
+    access: {
+      teamBuilder: canUseTeamBuilder,
+      tournaments: canUseTournaments
+    }
+  };
+}
+
+function supabaseGetUserByUsername_(username) {
+  return supabaseMapAppUser_(supabaseFindAppUserRow_(username));
+}
+
+function supabaseFindUserByCredentials_(username, password) {
+  var row = supabaseFindAppUserRow_(username);
+  if (!row) return null;
+
+  var user = supabaseMapAppUser_(row);
+  if (
+    user &&
+    user.active &&
+    user.role !== "archived" &&
+    passwordsMatch(String(password || "").trim(), user.password)
+  ) {
+    maybeUpgradeUserPasswordHash(user, password);
+    return user;
+  }
+
+  return null;
+}
+
+function supabaseRequireAdminAuth_(data) {
+  var user = supabaseFindUserByCredentials_(
+    data && data.username ? data.username : "",
+    data && data.password ? data.password : ""
+  );
+
+  if (!user) {
+    return {
+      success: false,
+      message: "Invalid username or password",
+      admin: null
+    };
+  }
+
+  if (!isAdminUser_(user)) {
+    return {
+      success: false,
+      message: "Only admin can do this action",
+      admin: null
+    };
+  }
+
+  return {
+    success: true,
+    admin: user
+  };
+}
+
+function supabaseUserProfilePayload_(user) {
+  var access = userAccessPayload_(user);
+  return {
+    username: user.username,
+    role: user.role,
+    canUseTeamBuilder: access.teamBuilder,
+    canUseTournaments: access.tournaments,
+    access: access,
+    settings: {
+      skillView: user.skillView || "numbers",
+      skillScale: normalizeSkillScale(user.skillScale)
+    }
+  };
+}
+
+function supabaseLoginUser_(params) {
+  var user = supabaseFindUserByCredentials_(
+    params && params.username ? params.username : "",
+    params && params.password ? params.password : ""
+  );
+
+  if (!user) {
+    return {
+      success: false,
+      message: "Invalid username or password"
+    };
+  }
+
+  return {
+    success: true,
+    profile: supabaseUserProfilePayload_(user)
+  };
+}
+
+function supabaseGetProfile_(params) {
+  var user = supabaseFindUserByCredentials_(
+    params && params.username ? params.username : "",
+    params && params.password ? params.password : ""
+  );
+
+  if (!user) {
+    return {
+      loggedIn: false,
+      role: "guest",
+      settings: {
+        skillView: "numbers",
+        skillScale: 5
+      }
+    };
+  }
+
+  return Object.assign({
+    loggedIn: true
+  }, supabaseUserProfilePayload_(user));
+}
+
+function supabasePatchAppUser_(username, patch) {
+  return supabasePatchRows_(getSupabaseConfig_(), "app_users", {
+    username: String(username || "").trim()
+  }, patch);
+}
+
+function supabaseTrainerUserPayload_(user) {
+  return {
+    username: user.username,
+    role: user.role,
+    spreadsheetId: user.spreadsheetId,
+    spreadsheetUrl: user.spreadsheetId
+      ? "https://docs.google.com/spreadsheets/d/" + user.spreadsheetId + "/edit"
+      : "",
+    skillView: user.skillView || "numbers",
+    skillScale: normalizeSkillScale(user.skillScale),
+    active: !!user.active,
+    canUseTeamBuilder: !!user.canUseTeamBuilder,
+    canUseTournaments: !!user.canUseTournaments,
+    access: {
+      teamBuilder: !!user.canUseTeamBuilder,
+      tournaments: !!user.canUseTournaments
+    }
+  };
+}
+
+function supabaseListTrainerUsers_(data) {
+  var adminCheck = supabaseRequireAdminAuth_(data);
+  if (!adminCheck.success) {
+    return {
+      success: false,
+      message: adminCheck.message,
+      users: []
+    };
+  }
+
+  var users = supabaseGetAppUserRows_()
+    .map(supabaseMapAppUser_)
+    .filter(function (user) {
+      return user && (user.role === "trainer" || user.role === "archived");
+    })
+    .map(supabaseTrainerUserPayload_);
+
+  return {
+    success: true,
+    users: users
+  };
+}
+
+function supabaseCreateTrainerUser_(data) {
+  var adminCheck = supabaseRequireAdminAuth_(data);
+  if (!adminCheck.success) {
+    return {
+      success: false,
+      message: adminCheck.message
+    };
+  }
+
+  var username = String(data && data.newUsername ? data.newUsername : "").trim();
+  var password = String(data && data.newPassword ? data.newPassword : "").trim();
+  var role = "trainer";
+  var skillView = normalizeSkillView(data && data.skillView ? data.skillView : "numbers");
+  var skillScale = normalizeSkillScale(data && data.skillScale ? data.skillScale : 5);
+  var active = data && data.active == 0 ? 0 : 1;
+  var canUseTeamBuilder = parseAccessBoolean_(
+    data && data.canUseTeamBuilder !== undefined
+      ? data.canUseTeamBuilder
+      : data && data.access
+        ? data.access.teamBuilder
+        : "",
+    true
+  );
+  var canUseTournaments = parseAccessBoolean_(
+    data && data.canUseTournaments !== undefined
+      ? data.canUseTournaments
+      : data && data.access
+        ? data.access.tournaments
+        : "",
+    false
+  );
+  var copyMode = normalizeTrainerCopyMode(data && data.copyMode ? data.copyMode : "main");
+  var copyFromTrainerUsername = String(
+    data && data.copyFromTrainerUsername ? data.copyFromTrainerUsername : ""
+  ).trim();
+
+  if (!username) return { success: false, message: "Username is required" };
+  if (!password) return { success: false, message: "Password is required" };
+  if (supabaseGetUserByUsername_(username)) {
+    return { success: false, message: "Username already exists" };
+  }
+  if (copyMode === "trainer" && !copyFromTrainerUsername) {
+    return { success: false, message: "copyFromTrainerUsername is required" };
+  }
+
+  try {
+    var trainerSpreadsheet = createTrainerSpreadsheet(
+      username,
+      copyMode,
+      copyFromTrainerUsername
+    );
+    var now = new Date().toISOString();
+    var row = {
+      legacy_username: username.toLowerCase(),
+      username: username,
+      password_hash: hashPassword(password),
+      role: role,
+      active: !!active,
+      can_use_team_builder: !!canUseTeamBuilder,
+      can_use_tournaments: !!canUseTournaments,
+      can_create_tournaments: !!canUseTournaments,
+      spreadsheet_id: trainerSpreadsheet.getId(),
+      skill_view: skillView,
+      skill_scale: skillScale,
+      created_at: now,
+      updated_at: now
+    };
+    supabaseInsertRows_(getSupabaseConfig_(), "app_users", [row]);
+    supabaseAuditLog_(getSupabaseConfig_(), adminCheck.admin.username, "createTrainerUser", "app_users", username, {
+      copyMode: copyMode,
+      copyFromTrainerUsername: copyFromTrainerUsername
+    });
+
+    return {
+      success: true,
+      user: {
+        username: username,
+        role: role,
+        spreadsheetId: trainerSpreadsheet.getId(),
+        spreadsheetUrl: trainerSpreadsheet.getUrl(),
+        skillView: skillView,
+        skillScale: skillScale,
+        active: active,
+        canUseTeamBuilder: canUseTeamBuilder,
+        canUseTournaments: canUseTournaments,
+        access: {
+          teamBuilder: canUseTeamBuilder,
+          tournaments: canUseTournaments
+        },
+        copyMode: copyMode,
+        copyFromTrainerUsername: copyFromTrainerUsername
+      }
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: error && error.message ? error.message : "Could not create trainer"
+    };
+  }
+}
+
+function supabaseUpdateTrainerAccess_(data) {
+  var adminCheck = supabaseRequireAdminAuth_(data);
+  if (!adminCheck.success) {
+    return {
+      success: false,
+      message: adminCheck.message === "Only admin can do this action"
+        ? "Admin access required"
+        : adminCheck.message
+    };
+  }
+
+  var targetUsername = String(data && data.targetUsername ? data.targetUsername : "").trim();
+  if (!targetUsername) return { success: false, message: "targetUsername is required" };
+
+  var targetUser = supabaseGetUserByUsername_(targetUsername);
+  if (!targetUser) return { success: false, message: "User not found" };
+
+  var canUseTeamBuilder = parseAccessBoolean_(data && data.canUseTeamBuilder, false);
+  var canUseTournaments = parseAccessBoolean_(data && data.canUseTournaments, false);
+  if (isAdminUser_(targetUser)) {
+    canUseTeamBuilder = true;
+    canUseTournaments = true;
+  }
+
+  supabasePatchAppUser_(targetUser.username, {
+    can_use_team_builder: canUseTeamBuilder,
+    can_use_tournaments: canUseTournaments,
+    can_create_tournaments: canUseTournaments,
+    updated_at: new Date().toISOString()
+  });
+
+  return {
+    success: true,
+    username: targetUser.username,
+    canUseTeamBuilder: canUseTeamBuilder,
+    canUseTournaments: canUseTournaments,
+    access: {
+      teamBuilder: canUseTeamBuilder,
+      tournaments: canUseTournaments
+    }
+  };
+}
+
+function supabaseUpdateTrainerStatus_(data) {
+  var adminCheck = supabaseRequireAdminAuth_(data);
+  if (!adminCheck.success) return { success: false, message: adminCheck.message };
+  var targetUsername = String(data && data.targetUsername ? data.targetUsername : "").trim();
+  var active = data && data.active == 1 ? 1 : 0;
+  if (!targetUsername) return { success: false, message: "targetUsername is required" };
+  var user = supabaseGetUserByUsername_(targetUsername);
+  if (!user) return { success: false, message: "Trainer not found" };
+  if (user.role !== "trainer") {
+    return {
+      success: false,
+      message: "Only active trainer users can be updated here"
+    };
+  }
+  supabasePatchAppUser_(user.username, {
+    active: !!active,
+    updated_at: new Date().toISOString()
+  });
+  return {
+    success: true,
+    message: active ? "Trainer activated" : "Trainer deactivated"
+  };
+}
+
+function supabaseResetTrainerPassword_(data) {
+  var adminCheck = supabaseRequireAdminAuth_(data);
+  if (!adminCheck.success) return { success: false, message: adminCheck.message };
+  var targetUsername = String(data && data.targetUsername ? data.targetUsername : "").trim();
+  var newPassword = String(data && data.newPassword ? data.newPassword : "").trim();
+  if (!targetUsername) return { success: false, message: "targetUsername is required" };
+  if (!newPassword) return { success: false, message: "newPassword is required" };
+  var user = supabaseGetUserByUsername_(targetUsername);
+  if (!user) return { success: false, message: "Trainer not found" };
+  if (user.role !== "trainer") {
+    return {
+      success: false,
+      message: "Only active trainer users can be updated here"
+    };
+  }
+  supabasePatchAppUser_(user.username, {
+    password_hash: hashPassword(newPassword),
+    updated_at: new Date().toISOString()
+  });
+  return {
+    success: true,
+    message: "Password updated"
+  };
+}
+
+function supabaseResetPlayerPassword_(data) {
+  var adminCheck = supabaseRequireAdminAuth_(data);
+  if (!adminCheck.success) return { success: false, message: adminCheck.message };
+  var targetUsername = String(
+    data && (data.targetUsername || data.profileUsername || data.playerUsername) || ""
+  ).trim();
+  var newPassword = String(data && data.newPassword ? data.newPassword : "").trim();
+  if (!targetUsername) return { success: false, message: "targetUsername is required" };
+  if (!newPassword) return { success: false, message: "newPassword is required" };
+  var user = supabaseGetUserByUsername_(targetUsername);
+  if (!user) return { success: false, message: "Player account not found" };
+  if (String(user.role || "").trim().toLowerCase() !== "player") {
+    return {
+      success: false,
+      message: "Only player account passwords can be reset here"
+    };
+  }
+  supabasePatchAppUser_(user.username, {
+    password_hash: hashPassword(newPassword),
+    updated_at: new Date().toISOString()
+  });
+  return {
+    success: true,
+    message: "Player password reset."
+  };
+}
+
+function supabaseArchiveTrainerUser_(data) {
+  var adminCheck = supabaseRequireAdminAuth_(data);
+  if (!adminCheck.success) return { success: false, message: adminCheck.message };
+  var targetUsername = String(data && data.targetUsername ? data.targetUsername : "").trim();
+  if (!targetUsername) return { success: false, message: "targetUsername is required" };
+  var user = supabaseGetUserByUsername_(targetUsername);
+  if (!user) return { success: false, message: "Trainer not found" };
+  if (user.role !== "trainer") {
+    return {
+      success: false,
+      message: "Only trainer users can be archived"
+    };
+  }
+  supabasePatchAppUser_(user.username, {
+    role: "archived",
+    active: false,
+    archived_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  });
+  return {
+    success: true,
+    message: "Trainer archived"
+  };
+}
+
+function supabaseRestoreTrainerUser_(data) {
+  var adminCheck = supabaseRequireAdminAuth_(data);
+  if (!adminCheck.success) return { success: false, message: adminCheck.message };
+  var targetUsername = String(data && data.targetUsername ? data.targetUsername : "").trim();
+  if (!targetUsername) return { success: false, message: "targetUsername is required" };
+  var user = supabaseGetUserByUsername_(targetUsername);
+  if (!user) return { success: false, message: "Trainer not found" };
+  if (user.role !== "archived") {
+    return {
+      success: false,
+      message: "Only archived users can be restored"
+    };
+  }
+  supabasePatchAppUser_(user.username, {
+    role: "trainer",
+    active: true,
+    archived_at: null,
+    updated_at: new Date().toISOString()
+  });
+  return {
+    success: true,
+    message: "Trainer restored"
+  };
+}
+
+function supabaseSaveUserSettings_(data) {
+  var user = supabaseFindUserByCredentials_(
+    data && data.username ? data.username : "",
+    data && data.password ? data.password : ""
+  );
+  if (!user) {
+    return {
+      success: false,
+      message: "Invalid username or password"
+    };
+  }
+  var skillView = normalizeSkillView(data.skillView || "numbers");
+  var skillScale = normalizeSkillScale(data.skillScale || 5);
+  supabasePatchAppUser_(user.username, {
+    skill_view: skillView,
+    skill_scale: skillScale,
+    updated_at: new Date().toISOString()
+  });
   return {
     success: true,
     settings: {
@@ -10581,6 +11278,42 @@ function playerHubBackendLog_(message) {
   playerHubSnapshotLog_("[PlayerHubBackend] " + message);
 }
 
+function authBackendMode_() {
+  try {
+    var mode = String(
+      PropertiesService.getScriptProperties().getProperty("AUTH_BACKEND") || "sheets"
+    )
+      .trim()
+      .toLowerCase();
+    return mode === "supabase" ? "supabase" : "sheets";
+  } catch (err) {
+    return "sheets";
+  }
+}
+
+function authBackendLog_(message) {
+  try {
+    Logger.log("[AuthBackend] " + message);
+  } catch (err) {}
+}
+
+function isSupabaseAuthBackendEnabled_() {
+  try {
+    var config = getSupabaseConfig_();
+    return !!(
+      config &&
+      config.authBackend === "supabase" &&
+      config.url &&
+      config.serviceRoleKey
+    );
+  } catch (err) {
+    authBackendLog_(
+      "mode check failed " + (err && err.message ? err.message : String(err))
+    );
+    return false;
+  }
+}
+
 function teamBuilderBackendMode_() {
   try {
     var mode = String(
@@ -10627,6 +11360,7 @@ function getSupabaseConfig_() {
   var backendMode = playerHubBackendMode_();
   var tournamentBackendMode = tournamentBackendMode_();
   var teamBuilderBackendMode = teamBuilderBackendMode_();
+  var authBackendMode = authBackendMode_();
   return {
     url: String(properties.getProperty("SUPABASE_URL") || "").trim(),
     serviceRoleKey: String(
@@ -10635,6 +11369,7 @@ function getSupabaseConfig_() {
     playerHubBackend: backendMode,
     tournamentBackend: tournamentBackendMode,
     teamBuilderBackend: teamBuilderBackendMode,
+    authBackend: authBackendMode,
     playerHubReadsEnabled:
       backendMode === "supabase" ||
       enabledValue === "true" ||
@@ -10982,7 +11717,7 @@ function supabaseSelectRows_(config, tableName, filters, select) {
 
 function supabaseTableWriteColumns_() {
   return {
-    app_users: ["username", "email", "display_name", "role", "active", "can_request_team_profile", "can_use_team_builder", "can_create_tournaments", "created_at", "updated_at"],
+    app_users: ["legacy_username", "username", "password_hash", "email", "phone", "display_name", "role", "active", "can_request_team_profile", "can_use_team_builder", "can_use_tournaments", "can_create_tournaments", "spreadsheet_id", "skill_view", "skill_scale", "archived_at", "created_at", "updated_at"],
     club_teams: ["legacy_team_id", "name", "country", "city", "level", "type", "active", "created_at", "updated_at"],
     player_profiles: ["legacy_profile_id", "username", "first_name", "last_name", "display_name", "email", "phone", "country", "region", "legacy_club_team_id", "club_team_name", "club_or_team", "team_note", "profile_type", "free_agent", "primary_role", "secondary_role", "custom_role", "level", "availability", "looking_for_team", "available_as_substitute", "can_guest_for_teams", "interested_abroad", "public_visible", "approved", "created_at", "updated_at"],
     access_requests: ["legacy_request_id", "username", "display_name", "email", "request_type", "legacy_club_team_id", "club_team_name", "message", "status", "admin_note", "reviewed_by_username", "reviewed_at", "created_at", "updated_at"],
