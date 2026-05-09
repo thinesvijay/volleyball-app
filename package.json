@@ -23,6 +23,8 @@
     "supabase:export:player-hub": "node scripts/supabase/export-player-hub-from-apps-script.js",
     "supabase:import:player-hub": "node scripts/supabase/import-player-hub-to-supabase.js",
     "supabase:validate:player-hub": "node scripts/supabase/validate-supabase-import.js",
+    "supabase:inspect:player-hub": "node scripts/supabase/inspect-player-hub-supabase.js",
+    "supabase:compare:player-hub": "node scripts/supabase/compare-player-hub-shadow.js",
     "supabase:shadow:dry-run": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/supabase/run-shadow-import-dry-run.ps1",
     "supabase:shadow:real-import": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/supabase/run-shadow-import-real.ps1",
     "eject": "react-scripts eject"
