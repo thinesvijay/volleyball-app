@@ -15,7 +15,9 @@ through the existing Apps Script web app URL using the admin credentials from `s
 It prints:
 
 - success/failure
-- source if the API returns one
+- `snapshotSource` when returned (`sheets` or `supabase`)
+- whether fallback was used
+- warning text only when fallback/error happens
 - key array counts
 - whether required Player Hub snapshot fields exist
 
@@ -61,10 +63,12 @@ Expected:
 
 ```text
 Success: true
+Source: sheets
+Fallback used: false
 Shape valid: true
 ```
 
-Source may say:
+If an older deployed `Code.gs` does not yet return metadata, source may say:
 
 ```text
 not returned; check Apps Script logs for [Snapshot] source ...
@@ -94,6 +98,8 @@ Expected:
 
 ```text
 Success: true
+Source: supabase
+Fallback used: false
 Shape valid: true
 ```
 
@@ -109,7 +115,13 @@ If Supabase fails, Apps Script should log:
 [Snapshot] Supabase read failed; falling back to sheets
 ```
 
-and the response should still keep the Player Hub shape.
+and the response should still keep the Player Hub shape with:
+
+```text
+Source: sheets
+Fallback used: true
+Warning: Supabase read failed; Google Sheets fallback used.
+```
 
 ## Turn The Flag Off
 

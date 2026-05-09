@@ -10647,7 +10647,11 @@ function fetchSupabasePlayerHubSnapshot_(data, context, options) {
     return playerHubSnapshotPayloadFromContext_(
       supabasePlayerHubContext_(config, context.user),
       context,
-      options && options.timer
+      options && options.timer,
+      {
+        snapshotSource: "supabase",
+        snapshotFallbackUsed: false
+      }
     );
   }
 
@@ -10710,8 +10714,9 @@ function testSupabasePlayerHubSnapshot(data) {
   }
 }
 
-function playerHubSnapshotPayloadFromContext_(ctx, context, timer) {
+function playerHubSnapshotPayloadFromContext_(ctx, context, timer, metadata) {
   var username = playerHubUsername_(context.user);
+  var safeMetadata = metadata || {};
 
   var profile = playerHubSnapshotProfile_(ctx, context.user);
   playerHubSnapshotStep_(timer, "profile");
@@ -10751,6 +10756,9 @@ function playerHubSnapshotPayloadFromContext_(ctx, context, timer) {
 
   return {
     success: true,
+    snapshotSource: safeMetadata.snapshotSource || "sheets",
+    snapshotFallbackUsed: !!safeMetadata.snapshotFallbackUsed,
+    snapshotWarning: safeMetadata.snapshotWarning || "",
     profile: profile || null,
     availableClubs: Array.isArray(availableClubs) ? availableClubs : [],
     accessRequests: Array.isArray(accessRequests) ? accessRequests : [],
@@ -10787,11 +10795,14 @@ function getPlayerHubSnapshot(data) {
     }
 
     var supabaseSnapshot = null;
+    var snapshotFallbackWarning = "";
     try {
       supabaseSnapshot = fetchSupabasePlayerHubSnapshot_(data || {}, context, {
         timer: timer
       });
     } catch (supabaseErr) {
+      snapshotFallbackWarning =
+        "Supabase read failed; Google Sheets fallback used.";
       playerHubSnapshotLog_(
         "[Snapshot] Supabase read failed; falling back to sheets: " +
           (supabaseErr && supabaseErr.message
@@ -10807,68 +10818,18 @@ function getPlayerHubSnapshot(data) {
 
     playerHubSnapshotLog_("[Snapshot] source sheets");
     var ctx = playerHubSnapshotContext_(context.user);
-    var username = playerHubUsername_(context.user);
-
-    var profile = playerHubSnapshotProfile_(ctx, context.user);
-    playerHubSnapshotStep_(timer, "profile");
-
-    var availableClubs = playerHubSnapshotAvailableClubs_(ctx);
-    playerHubSnapshotStep_(timer, "clubs");
-
-    var myTeams = playerHubSnapshotMyTeams_(ctx, username);
-    var teamMembershipRequests = playerHubSnapshotMembershipRequestsForPlayer_(
+    var payload = playerHubSnapshotPayloadFromContext_(
       ctx,
-      username
+      context,
+      timer,
+      {
+        snapshotSource: "sheets",
+        snapshotFallbackUsed: !!snapshotFallbackWarning,
+        snapshotWarning: snapshotFallbackWarning
+      }
     );
-    playerHubSnapshotStep_(timer, "myTeams");
-
-    var teamNeeds = playerHubSnapshotVisibleTeamNeeds_(ctx, username);
-    playerHubSnapshotStep_(timer, "teamNeeds");
-
-    var myTeamNeedInterests = playerHubSnapshotMyTeamNeedInterests_(ctx, username);
-    var accessRequests = playerHubSnapshotAccessRequestsForUser_(ctx, username);
-    playerHubSnapshotStep_(timer, "interests");
-
-    var tournamentAvailability =
-      playerHubSnapshotTournamentAvailabilityForPlayer_(ctx, username);
-    playerHubSnapshotStep_(timer, "tournamentAvailability");
-
-    var plannedTeams = playerHubSnapshotPlannedTeamsForPlayer_(ctx, username);
-    playerHubSnapshotStep_(timer, "plannedTeams");
-
-    var rosterDraftsForPlayer = playerHubSnapshotRosterStatusForPlayer_(ctx, username);
-    playerHubSnapshotStep_(timer, "rosterDrafts");
-
-    var captainTeamControl = playerHubCaptainSnapshot_(ctx, context.user, profile);
-    playerHubSnapshotStep_(timer, "captainControl");
-
-    var adminCounts = playerHubAdminCounts_(ctx, context.user);
-    playerHubSnapshotStep_(timer, "adminCounts");
     playerHubSnapshotTotal_(timer);
-
-    return {
-      success: true,
-      profile: profile || null,
-      availableClubs: Array.isArray(availableClubs) ? availableClubs : [],
-      accessRequests: Array.isArray(accessRequests) ? accessRequests : [],
-      myTeams: Array.isArray(myTeams) ? myTeams : [],
-      teamMembershipRequests: Array.isArray(teamMembershipRequests)
-        ? teamMembershipRequests
-        : [],
-      teamNeeds: Array.isArray(teamNeeds) ? teamNeeds : [],
-      myTeamNeedInterests: Array.isArray(myTeamNeedInterests)
-        ? myTeamNeedInterests
-        : [],
-      tournamentAvailability: Array.isArray(tournamentAvailability)
-        ? tournamentAvailability
-        : [],
-      plannedTeams: Array.isArray(plannedTeams) ? plannedTeams : [],
-      rosterDraftsForPlayer: Array.isArray(rosterDraftsForPlayer)
-        ? rosterDraftsForPlayer
-        : [],
-      captainTeamControl: captainTeamControl,
-      adminCounts: adminCounts
-    };
+    return payload;
   } catch (err) {
     playerHubSnapshotLog_(
       "[Snapshot] error " + (err && err.message ? err.message : String(err))

@@ -105,8 +105,8 @@ async function callAppsScript(config, action) {
 
 function sourceLabel(snapshot) {
   return (
-    snapshot.source ||
     snapshot.snapshotSource ||
+    snapshot.source ||
     (snapshot.meta && snapshot.meta.source) ||
     "not returned; check Apps Script logs for [Snapshot] source ..."
   );
@@ -162,6 +162,12 @@ async function main() {
   console.log(`Action: ${SNAPSHOT_ACTION}`);
   console.log(`Success: ${snapshot.success === false ? "false" : "true"}`);
   console.log(`Source: ${sourceLabel(snapshot)}`);
+  console.log(
+    `Fallback used: ${snapshot.snapshotFallbackUsed ? "true" : "false"}`
+  );
+  if (snapshot.snapshotWarning) {
+    console.log(`Warning: ${snapshot.snapshotWarning}`);
+  }
   console.log(`Shape valid: ${missing.length ? "false" : "true"}`);
 
   console.log("Key counts:");
