@@ -1,10 +1,12 @@
 const path = require("path");
 
 const PROJECT_ROOT = path.resolve(__dirname, "..", "..");
-
-process.env.PLAYER_HUB_EXPORT_PATH =
+const fullExportPath =
   process.env.SUPABASE_ALL_EXPORT_PATH ||
-  process.env.PLAYER_HUB_EXPORT_PATH ||
   path.join(PROJECT_ROOT, "supabase", ".tmp", "full-backend-export.json");
+
+process.env.PLAYER_HUB_EXPORT_PATH = fullExportPath;
+
+console.log(`Full backend validation export path: ${path.resolve(PROJECT_ROOT, fullExportPath)}`);
 
 require("./validate-supabase-import");

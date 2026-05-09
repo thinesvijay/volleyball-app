@@ -37,9 +37,7 @@ function ensureDir(filePath) {
 function exportPath() {
   return path.resolve(
     PROJECT_ROOT,
-    process.env.SUPABASE_ALL_EXPORT_PATH ||
-      process.env.PLAYER_HUB_EXPORT_PATH ||
-      DEFAULT_EXPORT_PATH
+    process.env.SUPABASE_ALL_EXPORT_PATH || DEFAULT_EXPORT_PATH
   );
 }
 
@@ -61,6 +59,7 @@ async function main() {
   const outPath = exportPath();
 
   console.log("Exporting full Google Sheets backend data through Apps Script admin action.");
+  console.log(`Full backend export path: ${outPath}`);
   const response = await fetch(`${url}?_ts=${Date.now()}`, {
     method: "POST",
     cache: "no-store",
