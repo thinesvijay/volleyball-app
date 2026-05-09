@@ -10076,6 +10076,21 @@ function playerHubAdminCounts_(ctx, user) {
   };
 }
 
+function authorizeSupabaseUrlFetchOnce() {
+  var response = UrlFetchApp.fetch(
+    "https://kmtvnirpfumleugnrjqe.supabase.co/rest/v1/",
+    {
+      method: "get",
+      muteHttpExceptions: true
+    }
+  );
+  var message =
+    "UrlFetch authorization check completed. HTTP " +
+    response.getResponseCode();
+  Logger.log(message);
+  return message;
+}
+
 function getSupabaseConfig_() {
   var properties = PropertiesService.getScriptProperties();
   var enabledValue = String(

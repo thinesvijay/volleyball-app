@@ -59,6 +59,29 @@ Counts currently cover:
 
 ## Manual Test
 
+## Authorize Apps Script External Requests
+
+Keep the read flag off while authorizing:
+
+```text
+SUPABASE_PLAYER_HUB_READS_ENABLED=false
+```
+
+After deploying the latest `Code.gs`, authorize UrlFetch once:
+
+1. Open the Apps Script editor.
+2. Confirm `SUPABASE_PLAYER_HUB_READS_ENABLED=false` in **Project Settings -> Script Properties**.
+3. In the function dropdown, select `authorizeSupabaseUrlFetchOnce`.
+4. Click **Run**.
+5. Approve the Google permission prompt for external requests.
+6. Confirm the execution log says:
+
+```text
+UrlFetch authorization check completed
+```
+
+This helper does not require app login, does not write data, and does not enable Supabase reads.
+
 Local scripted test, using `supabase/.env.import`:
 
 ```powershell

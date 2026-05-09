@@ -24,7 +24,25 @@ SUPABASE_PLAYER_HUB_READS_ENABLED=true
 
 Save the properties.
 
-## 2. Run The Local Diagnostic
+## 2. Authorize UrlFetch If Needed
+
+If the diagnostic says Apps Script does not have permission to call `UrlFetchApp.fetch`, keep the flag off while authorizing:
+
+```text
+SUPABASE_PLAYER_HUB_READS_ENABLED=false
+```
+
+Then:
+
+1. Deploy the latest `Code.gs`.
+2. Open the Apps Script editor.
+3. Select `authorizeSupabaseUrlFetchOnce`.
+4. Click **Run**.
+5. Approve the Google external request permission.
+6. Confirm the log says `UrlFetch authorization check completed`.
+7. Set `SUPABASE_PLAYER_HUB_READS_ENABLED=true` again only for the diagnostic test.
+
+## 3. Run The Local Diagnostic
 
 From the project folder:
 
@@ -56,7 +74,7 @@ Counts may change as real data changes. The important checks are:
 - No service key is printed.
 - Counts roughly match the latest `npm.cmd run supabase:snapshot:player-hub` output.
 
-## 3. Turn The Flag Off Immediately
+## 4. Turn The Flag Off Immediately
 
 In Apps Script **Project Settings -> Script Properties**, set:
 
@@ -66,7 +84,7 @@ SUPABASE_PLAYER_HUB_READS_ENABLED=false
 
 Save the property.
 
-## 4. Confirm Disabled State
+## 5. Confirm Disabled State
 
 Run:
 
@@ -81,7 +99,7 @@ Success: true
 Supabase reads enabled: false
 ```
 
-## 5. Run E2E
+## 6. Run E2E
 
 Run:
 
