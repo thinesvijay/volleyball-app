@@ -10161,12 +10161,14 @@ function getSupabaseConfig_() {
     .trim()
     .toLowerCase();
   var backendMode = playerHubBackendMode_();
+  var tournamentBackendMode = tournamentBackendMode_();
   return {
     url: String(properties.getProperty("SUPABASE_URL") || "").trim(),
     serviceRoleKey: String(
       properties.getProperty("SUPABASE_SERVICE_ROLE_KEY") || ""
     ).trim(),
     playerHubBackend: backendMode,
+    tournamentBackend: tournamentBackendMode,
     playerHubReadsEnabled:
       backendMode === "supabase" ||
       enabledValue === "true" ||
@@ -10174,6 +10176,43 @@ function getSupabaseConfig_() {
       enabledValue === "yes" ||
       enabledValue === "on"
   };
+}
+
+function tournamentBackendMode_() {
+  try {
+    var mode = String(
+      PropertiesService.getScriptProperties().getProperty("TOURNAMENT_BACKEND") || "sheets"
+    )
+      .trim()
+      .toLowerCase();
+    return mode === "supabase" ? "supabase" : "sheets";
+  } catch (err) {
+    return "sheets";
+  }
+}
+
+function tournamentBackendLog_(message) {
+  try {
+    Logger.log("[TournamentBackend] " + message);
+  } catch (err) {}
+}
+
+function isSupabaseTournamentBackendEnabled_() {
+  try {
+    var config = getSupabaseConfig_();
+    return !!(
+      config &&
+      config.tournamentBackend === "supabase" &&
+      config.url &&
+      config.serviceRoleKey
+    );
+  } catch (err) {
+    tournamentBackendLog_(
+      "Supabase backend config unavailable " +
+        (err && err.message ? err.message : String(err))
+    );
+    return false;
+  }
 }
 
 function isSupabasePlayerHubBackendEnabled_() {
@@ -10487,6 +10526,7 @@ function supabaseTableWriteColumns_() {
     team_membership_requests: ["legacy_request_id", "legacy_club_team_id", "club_team_name", "player_username", "player_display_name", "player_email", "player_phone", "player_country", "legacy_player_profile_id", "status", "requested_at", "reviewed_by_username", "reviewed_at", "review_note", "created_at", "updated_at"],
     team_needs: ["legacy_need_id", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "captain_username", "need_type", "need_text", "needed_count", "status", "visibility", "is_published", "need_context", "legacy_tournament_id", "tournament_name", "squad_label", "class_name", "deadline_at", "source_type", "published_at", "public_visible", "approved", "created_at", "updated_at"],
     team_need_interests: ["legacy_interest_id", "legacy_need_id", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "player_username", "player_display_name", "player_email", "player_phone", "player_country", "message", "status", "reviewed_by_username", "reviewed_at", "created_at", "updated_at"],
+    tournaments: ["legacy_tournament_id", "name", "country", "city", "start_date", "end_date", "registration_deadline", "visibility", "status", "organizer_username", "public_code", "published", "published_at", "tournament_json", "created_at", "updated_at"],
     tournament_events: ["legacy_plan_id", "legacy_tournament_id", "tournament_name", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "captain_username", "squad_label", "class_name", "status", "deadline_at", "note", "created_at", "updated_at"],
     tournament_availability: ["legacy_availability_id", "legacy_plan_id", "legacy_tournament_id", "tournament_name", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "player_username", "player_display_name", "player_email", "player_phone", "player_country", "response_status", "preferred_squad", "player_note", "requested_by_username", "requested_at", "responded_at", "created_at", "updated_at"],
     tournament_squad_planning: ["legacy_planning_id", "legacy_plan_id", "legacy_tournament_id", "tournament_name", "legacy_team_profile_id", "legacy_club_team_id", "club_team_name", "player_username", "player_display_name", "player_country", "availability_status", "preferred_squad", "assigned_squad", "planning_status", "assigned_by_username", "assigned_at", "created_at", "updated_at"],
@@ -10605,6 +10645,22 @@ function supabaseInsertRows_(config, tableName, rows) {
     "post",
     "",
     supabaseNormalizeRowsForWrite_(tableName, rows || []),
+    "return=representation"
+  );
+  return Array.isArray(result) ? result : [];
+}
+
+function supabaseDeleteRows_(config, tableName, filters) {
+  var parts = ["select=" + encodeURIComponent("*")];
+  Object.keys(filters || {}).forEach(function (key) {
+    parts.push(supabaseFilter_(key, filters[key]));
+  });
+  var result = supabaseApiRequest_(
+    config,
+    tableName,
+    "delete",
+    parts.join("&"),
+    null,
     "return=representation"
   );
   return Array.isArray(result) ? result : [];
@@ -14064,6 +14120,37 @@ var TOURNAMENT_HEADERS = [
 ];
 
 function handleTournamentAction_(action, data) {
+  if (isSupabaseTournamentBackendEnabled_()) {
+    tournamentBackendLog_("supabase " + action);
+    try {
+      return supabaseHandleTournamentAction_(action, data || {});
+    } catch (err) {
+      tournamentBackendLog_(
+        "fallback " +
+          action +
+          " " +
+          (err && err.message ? err.message : String(err))
+      );
+      var fallback = handleTournamentSheetsAction_(action, data || {});
+      if (fallback && typeof fallback === "object") {
+        fallback.tournamentBackend = "sheets";
+        fallback.tournamentBackendFallbackUsed = true;
+        fallback.tournamentBackendWarning =
+          "Supabase tournament backend failed; used Google Sheets fallback.";
+      }
+      return fallback;
+    }
+  }
+  tournamentBackendLog_("sheets " + action);
+  var response = handleTournamentSheetsAction_(action, data || {});
+  if (response && typeof response === "object") {
+    response.tournamentBackend = "sheets";
+    response.tournamentBackendFallbackUsed = false;
+  }
+  return response;
+}
+
+function handleTournamentSheetsAction_(action, data) {
   try {
     if (action === "getPublicTournament") {
       return {
@@ -14783,6 +14870,389 @@ function writeTournamentAudit_(username, action, tournamentId, message) {
       message || ""
     ]);
   } catch (err) {}
+}
+
+function supabaseTournamentResponse_(payload) {
+  var response = payload || {};
+  response.tournamentBackend = "supabase";
+  response.tournamentBackendFallbackUsed = false;
+  return response;
+}
+
+function supabaseTournamentConfig_() {
+  var config = getSupabaseConfig_();
+  if (!config.url || !config.serviceRoleKey) {
+    throw new Error("Supabase tournament backend is not configured.");
+  }
+  return config;
+}
+
+function supabaseTournamentFromRow_(row) {
+  if (!row) return null;
+  var tournament = {};
+  if (row.tournament_json) {
+    if (typeof row.tournament_json === "object") {
+      tournament = Object.assign({}, row.tournament_json);
+    } else {
+      try {
+        tournament = JSON.parse(String(row.tournament_json));
+      } catch (err) {
+        tournament = {};
+      }
+    }
+  }
+
+  tournament.id = firstNonEmpty_(
+    tournament.id,
+    tournament.tournamentId,
+    tournament.TournamentId,
+    row.legacy_tournament_id
+  );
+  tournament.tournamentId = tournament.id;
+  tournament.TournamentId = tournament.id;
+  tournament.name = firstNonEmpty_(tournament.name, row.name);
+  tournament.country = firstValue_(tournament.country, row.country, "");
+  tournament.city = firstValue_(tournament.city, row.city, "");
+  tournament.startDate = firstValue_(tournament.startDate, row.start_date, "");
+  tournament.endDate = firstValue_(tournament.endDate, row.end_date, "");
+  tournament.registrationDeadline = firstValue_(
+    tournament.registrationDeadline,
+    row.registration_deadline,
+    ""
+  );
+  tournament.visibility = firstValue_(tournament.visibility, row.visibility, "");
+  tournament.status = firstValue_(tournament.status, row.status, "");
+  tournament.organizerUsername = firstNonEmpty_(
+    tournament.organizerUsername,
+    row.organizer_username
+  );
+  tournament.ownerUsername = firstNonEmpty_(
+    tournament.ownerUsername,
+    tournament.organizerUsername
+  );
+  tournament.createdAt = firstValue_(tournament.createdAt, row.created_at, "");
+  tournament.publicCode = firstNonEmpty_(tournament.publicCode, row.public_code);
+  tournament.published = truthy_(firstValue_(row.published, tournament.published, false));
+  tournament.publishedAt = firstValue_(tournament.publishedAt, row.published_at, "");
+  tournament.updatedAt = firstValue_(tournament.updatedAt, row.updated_at, "");
+  tournament.groups = Array.isArray(tournament.groups) ? tournament.groups : [];
+  tournament.matches = Array.isArray(tournament.matches) ? tournament.matches : [];
+  tournament.series = Array.isArray(tournament.series) ? tournament.series : [];
+  tournament.knockout = tournament.knockout || {};
+
+  return tournament.id ? tournament : null;
+}
+
+function supabaseTournamentRowFromTournament_(tournament) {
+  return {
+    legacy_tournament_id: tournament.id || tournament.tournamentId || tournament.TournamentId || "",
+    name: tournament.name || "Untitled tournament",
+    country: supabaseDbText_(tournament.country),
+    city: supabaseDbText_(tournament.city),
+    start_date: supabaseDbText_(tournament.startDate),
+    end_date: supabaseDbText_(tournament.endDate),
+    registration_deadline: supabaseDbText_(tournament.registrationDeadline),
+    visibility: supabaseDbText_(tournament.visibility),
+    status: supabaseDbText_(tournament.status || "draft"),
+    organizer_username: supabaseDbText_(tournament.organizerUsername),
+    public_code: supabaseDbText_(tournament.publicCode),
+    published: truthy_(tournament.published),
+    published_at: supabaseDbText_(tournament.publishedAt),
+    tournament_json: tournament,
+    created_at: supabaseDbText_(tournament.createdAt),
+    updated_at: supabaseDbText_(tournament.updatedAt)
+  };
+}
+
+function supabaseFindTournamentById_(config, id) {
+  var target = String(id || "").trim();
+  if (!target) return null;
+  var rows = supabaseSelectRows_(config, "tournaments", {
+    legacy_tournament_id: target
+  }, "*");
+  return rows && rows[0] ? rows[0] : null;
+}
+
+function supabaseFindTournamentByPublicCode_(config, publicCode) {
+  var target = String(publicCode || "").trim();
+  if (!target) return null;
+  var rows = supabaseSelectRows_(config, "tournaments", {
+    public_code: target
+  }, "*");
+  if (rows && rows[0]) return rows[0];
+  var lowerTarget = target.toLowerCase();
+  rows = supabaseSelectRows_(config, "tournaments", {}, "*");
+  return (rows || []).find(function(row) {
+    return String(row.public_code || "").trim().toLowerCase() === lowerTarget;
+  }) || null;
+}
+
+function supabaseAuthorizeTournamentRow_(row, user) {
+  var tournament = supabaseTournamentFromRow_(row);
+  var owner = String((tournament && tournament.organizerUsername) || row.organizer_username || "").trim();
+  var username = tournamentUsername_(user);
+  if (!owner || !username || owner !== username) {
+    throw new Error("Access denied");
+  }
+  return tournament;
+}
+
+function supabaseTournamentIsPublished_(tournament) {
+  if (!tournament) return false;
+  return (
+    truthy_(tournament.published) ||
+    String(tournament.status || "").trim().toLowerCase() === "published"
+  );
+}
+
+function supabaseTournamentIsPublicListed_(tournament) {
+  if (!tournament) return false;
+  var isListed =
+    truthy_(tournament.publicListingEnabled) ||
+    truthy_(tournament.listPublicly) ||
+    truthy_(tournament.publicListed);
+  return supabaseTournamentIsPublished_(tournament) && isListed && String(tournament.publicCode || "").trim();
+}
+
+function supabaseListTournaments_(user) {
+  var username = tournamentUsername_(user);
+  if (!username) return [];
+  var config = supabaseTournamentConfig_();
+  return supabaseSelectRows_(config, "tournaments", {
+    organizer_username: username
+  }, "*")
+    .map(supabaseTournamentFromRow_)
+    .filter(Boolean);
+}
+
+function supabaseListPublicTournaments_() {
+  var config = supabaseTournamentConfig_();
+  return supabaseSelectRows_(config, "tournaments", {}, "*")
+    .map(supabaseTournamentFromRow_)
+    .filter(supabaseTournamentIsPublicListed_)
+    .sort(function(a, b) {
+      var now = Date.now();
+      var aTime = Date.parse(a.startDate || a.eventDate || "") || 9999999999999;
+      var bTime = Date.parse(b.startDate || b.eventDate || "") || 9999999999999;
+      var aUpcoming = aTime >= now;
+      var bUpcoming = bTime >= now;
+      if (aUpcoming !== bUpcoming) return aUpcoming ? -1 : 1;
+      return aUpcoming ? aTime - bTime : bTime - aTime;
+    })
+    .map(publicTournamentSummary_);
+}
+
+function supabaseGetTournament_(data, user) {
+  var config = supabaseTournamentConfig_();
+  var row = supabaseFindTournamentById_(config, data.tournamentId || data.TournamentId || data.id);
+  if (!row) return null;
+  return supabaseAuthorizeTournamentRow_(row, user);
+}
+
+function supabaseGetPublicTournament_(publicCode) {
+  var config = supabaseTournamentConfig_();
+  var row = supabaseFindTournamentByPublicCode_(config, publicCode);
+  if (!row) return null;
+  var tournament = supabaseTournamentFromRow_(row);
+  return supabaseTournamentIsPublished_(tournament) ? tournament : null;
+}
+
+function supabaseUpsertTournament_(data, user, mode) {
+  var config = supabaseTournamentConfig_();
+  var now = nowIso_();
+  var username = tournamentUsername_(user);
+  var incoming = parseTournament_(data);
+  if (!incoming.id) {
+    throw new Error("Missing tournament id");
+  }
+
+  var existingRow = supabaseFindTournamentById_(config, incoming.id);
+  var existingTournament = existingRow ? supabaseAuthorizeTournamentRow_(existingRow, user) || {} : {};
+  var tournament = Object.assign({}, existingTournament, incoming);
+  if (!tournament.name) tournament.name = "Untitled tournament";
+
+  var owner = existingRow
+    ? String(existingRow.organizer_username || "").trim()
+    : username;
+  tournament.organizerUsername = owner;
+  tournament.ownerUsername = owner;
+  tournament.createdAt = firstNonEmpty_(tournament.createdAt, existingRow && existingRow.created_at, now);
+  tournament.updatedAt = now;
+
+  if (mode === "publish") {
+    tournament.published = true;
+    tournament.status = "published";
+    tournament.publicCode = firstNonEmpty_(
+      data.publicCode,
+      data.PublicCode,
+      tournament.publicCode,
+      createTournamentPublicCode_(tournament.name)
+    );
+    tournament.publishedAt = firstNonEmpty_(tournament.publishedAt, now);
+  }
+
+  if (mode === "unpublish") {
+    tournament.published = false;
+    tournament.status = "unpublished";
+    tournament.publicCode = firstNonEmpty_(
+      tournament.publicCode,
+      data.publicCode,
+      data.PublicCode
+    );
+  }
+
+  var rows = supabaseUpsertRows_(
+    config,
+    "tournaments",
+    [supabaseTournamentRowFromTournament_(tournament)],
+    "legacy_tournament_id"
+  );
+  if (mode !== "save") {
+    supabaseAuditLog_(config, username, mode, "tournaments", tournament.id, {
+      name: tournament.name
+    });
+  }
+  return rows && rows[0] ? supabaseTournamentFromRow_(rows[0]) : tournament;
+}
+
+function supabaseDeleteTournament_(data, user) {
+  var config = supabaseTournamentConfig_();
+  var tournamentId = String(data.tournamentId || data.TournamentId || data.id || "").trim();
+  if (!tournamentId) throw new Error("Missing tournamentId");
+  var row = supabaseFindTournamentById_(config, tournamentId);
+  if (!row) {
+    return {
+      success: true,
+      deleted: false,
+      tournamentId: tournamentId
+    };
+  }
+  var tournament = supabaseAuthorizeTournamentRow_(row, user);
+  var status = String((tournament && tournament.status) || row.status || "draft").trim().toLowerCase();
+  if (supabaseTournamentIsPublished_(tournament) || status === "published") {
+    throw new Error("Published tournaments must be unpublished before deletion.");
+  }
+  supabaseDeleteRows_(config, "tournaments", { legacy_tournament_id: tournamentId });
+  supabaseAuditLog_(config, tournamentUsername_(user), "deleteTournament", "tournaments", tournamentId, {
+    name: tournament && tournament.name || ""
+  });
+  return {
+    success: true,
+    deleted: true,
+    tournamentId: tournamentId
+  };
+}
+
+function supabaseCleanupMyDraftTournaments_(data, user) {
+  var config = supabaseTournamentConfig_();
+  var username = tournamentUsername_(user);
+  var nameContains = String(data.nameContains || "").trim().toLowerCase();
+  var rows = supabaseSelectRows_(config, "tournaments", {
+    organizer_username: username
+  }, "*");
+  var deletedCount = 0;
+  (rows || []).forEach(function(row) {
+    var tournament = supabaseTournamentFromRow_(row) || {};
+    var status = String(row.status || tournament.status || "draft").trim().toLowerCase();
+    if (supabaseTournamentIsPublished_(tournament) || status === "published") return;
+    if (status !== "draft" && status !== "unpublished") return;
+    if (nameContains) {
+      var name = String(row.name || tournament.name || "").trim().toLowerCase();
+      if (name.indexOf(nameContains) === -1) return;
+    }
+    supabaseDeleteRows_(config, "tournaments", {
+      legacy_tournament_id: row.legacy_tournament_id
+    });
+    deletedCount += 1;
+  });
+  if (deletedCount > 0) {
+    supabaseAuditLog_(config, username, "cleanupMyDraftTournaments", "tournaments", "", {
+      deletedCount: deletedCount
+    });
+  }
+  return {
+    success: true,
+    deletedCount: deletedCount
+  };
+}
+
+function supabaseHandleTournamentAction_(action, data) {
+  if (action === "getPublicTournament") {
+    return supabaseTournamentResponse_({
+      success: true,
+      tournament: supabaseGetPublicTournament_(data.publicCode || data.PublicCode)
+    });
+  }
+
+  if (action === "listPublicTournaments") {
+    return supabaseTournamentResponse_({
+      success: true,
+      tournaments: supabaseListPublicTournaments_()
+    });
+  }
+
+  var user = requireTournamentUser_(data);
+  if (!user) {
+    return supabaseTournamentResponse_({
+      success: false,
+      message: "Login required"
+    });
+  }
+
+  if (!userCanUseTournaments_(user)) {
+    return supabaseTournamentResponse_({
+      success: false,
+      message: "Tournament access required"
+    });
+  }
+
+  if (action === "listTournaments") {
+    return supabaseTournamentResponse_({
+      success: true,
+      tournaments: supabaseListTournaments_(user)
+    });
+  }
+
+  if (action === "getTournament") {
+    return supabaseTournamentResponse_({
+      success: true,
+      tournament: supabaseGetTournament_(data, user)
+    });
+  }
+
+  if (action === "saveTournament") {
+    return supabaseTournamentResponse_({
+      success: true,
+      tournament: supabaseUpsertTournament_(data, user, "save")
+    });
+  }
+
+  if (action === "publishTournament") {
+    return supabaseTournamentResponse_({
+      success: true,
+      tournament: supabaseUpsertTournament_(data, user, "publish")
+    });
+  }
+
+  if (action === "unpublishTournament") {
+    return supabaseTournamentResponse_({
+      success: true,
+      tournament: supabaseUpsertTournament_(data, user, "unpublish")
+    });
+  }
+
+  if (action === "deleteTournament") {
+    return supabaseTournamentResponse_(supabaseDeleteTournament_(data, user));
+  }
+
+  if (action === "cleanupMyDraftTournaments") {
+    return supabaseTournamentResponse_(supabaseCleanupMyDraftTournaments_(data, user));
+  }
+
+  return supabaseTournamentResponse_({
+    success: false,
+    message: "Unknown tournament action"
+  });
 }
 
 function truthy_(value) {
