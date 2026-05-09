@@ -2,6 +2,43 @@
 
 This is Phase 2 of the Make Teams Pro Player Hub migration. It copies data from the current Apps Script/Google Sheets system into the Supabase dev project for comparison and performance testing. It does not change production app behavior.
 
+## Do This Now
+
+Run one setup command:
+
+```powershell
+npm.cmd run supabase:setup:import-env
+```
+
+Notepad will open `supabase/.env.import`. Paste:
+
+```text
+SUPABASE_URL=your make-teams-pro-dev project URL
+SUPABASE_SERVICE_ROLE_KEY=your service_role key
+```
+
+Keep this line set to `true` for the first run:
+
+```text
+SUPABASE_IMPORT_DRY_RUN=true
+```
+
+Then run the safe dry-run:
+
+```powershell
+npm.cmd run supabase:shadow:dry-run
+```
+
+Review the output and `supabase/.tmp/player-hub-export.json`.
+
+Only when you are ready to write to the Supabase dev project:
+
+```powershell
+npm.cmd run supabase:shadow:real-import
+```
+
+The real import command asks you to type `IMPORT_TO_SUPABASE_DEV` before it writes anything.
+
 ## Safety Rules
 
 - Apps Script and Google Sheets remain the source of truth.
@@ -17,14 +54,17 @@ This is Phase 2 of the Make Teams Pro Player Hub migration. It copies data from 
 - `scripts/supabase/export-player-hub-from-apps-script.js` - exports what current Apps Script admin actions expose, or creates a manual JSON template.
 - `scripts/supabase/import-player-hub-to-supabase.js` - upserts export JSON into Supabase using legacy IDs.
 - `scripts/supabase/validate-supabase-import.js` - prints Supabase row counts and compares them with the export JSON when present.
+- `scripts/supabase/setup-import-env.ps1` - creates/opens the local env file in Notepad.
+- `scripts/supabase/run-shadow-import-dry-run.ps1` - runs export/import/validate in forced dry-run mode.
+- `scripts/supabase/run-shadow-import-real.ps1` - runs the real dev import after typed confirmation.
 - `supabase/import-checklist.sql` - read-only SQL checks for the Supabase SQL editor.
 
 ## One-Time Local Setup
 
-Copy the env template:
+Use the guided setup:
 
 ```powershell
-Copy-Item supabase\.env.import.example supabase\.env.import
+npm.cmd run supabase:setup:import-env
 ```
 
 Fill:
@@ -46,10 +86,10 @@ Do not commit `supabase/.env.import`.
 
 ## Export Current Apps Script Data
 
-Run:
+The dry-run wrapper runs export, import dry-run, and validation in order:
 
 ```powershell
-npm.cmd run supabase:export:player-hub
+npm.cmd run supabase:shadow:dry-run
 ```
 
 If Apps Script admin credentials are configured, the exporter calls existing read actions:
@@ -77,7 +117,7 @@ You can fill that JSON from Sheet CSV exports without changing production code.
 
 ## Import Into Supabase Dev
 
-The import script is dry-run by default:
+The lower-level import script is dry-run by default:
 
 ```powershell
 npm.cmd run supabase:import:player-hub
@@ -97,7 +137,13 @@ npm.cmd run supabase:import:player-hub
 Remove-Item Env:\SUPABASE_IMPORT_DRY_RUN
 ```
 
-Or set `SUPABASE_IMPORT_DRY_RUN=false` in `supabase/.env.import` temporarily.
+Prefer the guided real-import wrapper instead:
+
+```powershell
+npm.cmd run supabase:shadow:real-import
+```
+
+It temporarily forces `SUPABASE_IMPORT_DRY_RUN=false` for the child import process only after you type `IMPORT_TO_SUPABASE_DEV`.
 
 ## Validation
 

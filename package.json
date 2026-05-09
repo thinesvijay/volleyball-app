@@ -19,9 +19,12 @@
     "test": "react-scripts test",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
+    "supabase:setup:import-env": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/supabase/setup-import-env.ps1",
     "supabase:export:player-hub": "node scripts/supabase/export-player-hub-from-apps-script.js",
     "supabase:import:player-hub": "node scripts/supabase/import-player-hub-to-supabase.js",
     "supabase:validate:player-hub": "node scripts/supabase/validate-supabase-import.js",
+    "supabase:shadow:dry-run": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/supabase/run-shadow-import-dry-run.ps1",
+    "supabase:shadow:real-import": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/supabase/run-shadow-import-real.ps1",
     "eject": "react-scripts eject"
   },
   "eslintConfig": {
