@@ -91,6 +91,126 @@ function bool(value) {
   return value ? "true" : "false";
 }
 
+function truthy(value) {
+  if (value === true) return true;
+  if (value === false || value === undefined || value === null) return false;
+  return ["true", "1", "yes", "y", "on"].includes(String(value).trim().toLowerCase());
+}
+
+function supabaseEnvAvailable() {
+  return !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY;
+}
+
+async function supabaseFetch(pathname, searchParams = {}) {
+  const url = new URL(
+    `${process.env.SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/${pathname}`
+  );
+  for (const [key, value] of Object.entries(searchParams)) {
+    url.searchParams.set(key, value);
+  }
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+      Prefer: "count=exact",
+    },
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`${pathname} Supabase read failed: ${response.status} ${text}`);
+  }
+  let rows = [];
+  try {
+    rows = text ? JSON.parse(text) : [];
+  } catch (error) {
+    rows = [];
+  }
+  return {
+    rows: Array.isArray(rows) ? rows : [],
+    count: parseContentRangeCount(response.headers.get("content-range")),
+  };
+}
+
+function parseContentRangeCount(contentRange) {
+  const match = String(contentRange || "").match(/\/(\d+)$/);
+  return match ? Number(match[1]) : 0;
+}
+
+async function countSupabaseTable(table, extraParams = {}) {
+  const result = await supabaseFetch(table, {
+    select: "id",
+    limit: "1",
+    ...extraParams,
+  });
+  return result.count;
+}
+
+function parseTournamentJson(row) {
+  const value = row && row.tournament_json;
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(String(value));
+  } catch (error) {
+    return {};
+  }
+}
+
+function isPublicListedTournament(row) {
+  const tournament = parseTournamentJson(row);
+  const published =
+    truthy(row.published) ||
+    truthy(tournament.published) ||
+    String(row.status || tournament.status || "").trim().toLowerCase() === "published";
+  const listed =
+    truthy(tournament.publicListingEnabled) ||
+    truthy(tournament.listPublicly) ||
+    truthy(tournament.publicListed);
+  const publicCode = row.public_code || tournament.publicCode;
+  return published && listed && !!String(publicCode || "").trim();
+}
+
+async function readGlobalSupabaseCounts() {
+  if (!supabaseEnvAvailable()) return null;
+  const [users, teamBuilderActive, teamBuilderArchived, tournaments, userRows] =
+    await Promise.all([
+      countSupabaseTable("app_users"),
+      countSupabaseTable("team_builder_players", { active: "eq.true" }),
+      countSupabaseTable("team_builder_players", { active: "eq.false" }),
+      supabaseFetch("tournaments", {
+        select: "id,published,status,visibility,public_code,tournament_json",
+      }),
+      supabaseFetch("app_users", {
+        select:
+          "id,role,can_use_team_builder,can_use_tournaments,can_create_tournaments",
+      }),
+    ]);
+
+  return {
+    appUsers: users,
+    trainerUsers: userRows.rows.filter((row) => {
+      return (
+        String(row.role || "").trim().toLowerCase() === "trainer" ||
+        truthy(row.can_use_team_builder) ||
+        truthy(row.can_use_tournaments) ||
+        truthy(row.can_create_tournaments)
+      );
+    }).length,
+    teamBuilderActivePlayers: teamBuilderActive,
+    teamBuilderArchivedPlayers: teamBuilderArchived,
+    teamBuilderSavedTeams: await countSupabaseTable("team_builder_saved_teams"),
+    privateTournaments: tournaments.rows.filter((row) => !isPublicListedTournament(row)).length,
+    publicTournaments: tournaments.rows.filter(isPublicListedTournament).length,
+    tournaments: tournaments.count || tournaments.rows.length,
+    playerProfiles: await countSupabaseTable("player_profiles"),
+    teamNeeds: await countSupabaseTable("team_needs"),
+    tournamentEvents: await countSupabaseTable("tournament_events"),
+    tournamentAvailability: await countSupabaseTable("tournament_availability"),
+    rosterDrafts: await countSupabaseTable("roster_drafts"),
+  };
+}
+
 async function main() {
   console.log("Make Teams Pro full backend mode check");
   console.log("Read-only: calls Apps Script backend surfaces, no writes.");
@@ -130,6 +250,11 @@ async function main() {
     action: "listTrainerUsers",
     ...authPayload,
   });
+  const backendStatus = await callPost(config, {
+    action: "getBackendStatus",
+    ...authPayload,
+  });
+  const globalSupabaseCounts = await readGlobalSupabaseCounts();
 
   const authBackend =
     login.authBackend || profile.authBackend || trainers.authBackend || "not returned";
@@ -144,7 +269,34 @@ async function main() {
   console.log(`Player Hub snapshot source: ${playerHubSource}`);
   console.log(`Team Builder backend: ${teamBuilderBackend}`);
   console.log(`Tournament backend: ${tournamentBackend}`);
+  if (backendStatus && backendStatus.success) {
+    console.log(`Backend status action all Supabase: ${bool(backendStatus.allSupabase)}`);
+  } else {
+    console.log(
+      `Backend status action: unavailable${
+        backendStatus && backendStatus.message ? ` (${backendStatus.message})` : ""
+      }`
+    );
+  }
   console.log("");
+  if (globalSupabaseCounts) {
+    console.log("Global Supabase imported counts:");
+    console.log(`  App users: ${globalSupabaseCounts.appUsers}`);
+    console.log(`  Trainer/access users: ${globalSupabaseCounts.trainerUsers}`);
+    console.log(`  Team Builder active players: ${globalSupabaseCounts.teamBuilderActivePlayers}`);
+    console.log(`  Team Builder archived players: ${globalSupabaseCounts.teamBuilderArchivedPlayers}`);
+    console.log(`  Team Builder saved teams: ${globalSupabaseCounts.teamBuilderSavedTeams}`);
+    console.log(`  Private tournaments: ${globalSupabaseCounts.privateTournaments}`);
+    console.log(`  Public tournaments: ${globalSupabaseCounts.publicTournaments}`);
+    console.log(`  Total tournaments: ${globalSupabaseCounts.tournaments}`);
+    console.log(`  Player profiles: ${globalSupabaseCounts.playerProfiles}`);
+    console.log(`  Team needs: ${globalSupabaseCounts.teamNeeds}`);
+    console.log(`  Tournament events: ${globalSupabaseCounts.tournamentEvents}`);
+    console.log(`  Tournament availability: ${globalSupabaseCounts.tournamentAvailability}`);
+    console.log(`  Roster drafts: ${globalSupabaseCounts.rosterDrafts}`);
+    console.log("");
+  }
+  console.log("User-visible API counts:");
   console.log(`Login success: ${bool(login.success)}`);
   console.log(`Profile logged in: ${bool(profile.loggedIn)}`);
   console.log(`Team Builder active players: ${count(teamBuilder.players)}`);

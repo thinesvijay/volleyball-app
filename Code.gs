@@ -49,6 +49,10 @@ function doGet(e) {
     return jsonResponse(testSupabasePlayerHubSnapshot(e ? e.parameter : {}));
   }
 
+  if (action === "getBackendStatus") {
+    return jsonResponse(getBackendStatus(e ? e.parameter : {}));
+  }
+
   if (action === "listClubTeams") {
     var listClubTeamsSupabaseResponse = handlePlayerHubSupabaseAction_(
       Object.assign({}, e ? e.parameter : {}, { action: action })
@@ -183,6 +187,10 @@ function doPost(e) {
 
   if (data.action === "testSupabasePlayerHubSnapshot") {
     return jsonResponse(testSupabasePlayerHubSnapshot(data));
+  }
+
+  if (data.action === "getBackendStatus") {
+    return jsonResponse(getBackendStatus(data));
   }
 
   if (data.action === "exportAllSheetsDataForSupabaseMigration") {
@@ -11818,6 +11826,179 @@ function getSupabaseConfig_() {
       enabledValue === "yes" ||
       enabledValue === "on"
   };
+}
+
+function getBackendStatus(data) {
+  var adminCheck = requireAdmin(data || {});
+  if (!adminCheck.success) {
+    return {
+      success: false,
+      message: adminCheck.message || "Admin access required"
+    };
+  }
+
+  var config = getSupabaseConfig_();
+  var modes = {
+    auth: authBackendMode_(),
+    playerHub: playerHubBackendMode_(),
+    teamBuilder: teamBuilderBackendMode_(),
+    tournament: tournamentBackendMode_()
+  };
+  var allSupabase =
+    modes.auth === "supabase" &&
+    modes.playerHub === "supabase" &&
+    modes.teamBuilder === "supabase" &&
+    modes.tournament === "supabase";
+
+  var counts = {
+    supabaseGlobal: {},
+    userVisible: {}
+  };
+  var warnings = [];
+
+  if (config.url && config.serviceRoleKey) {
+    try {
+      counts.supabaseGlobal = supabaseBackendStatusCounts_(config);
+    } catch (err) {
+      warnings.push(
+        "Could not read Supabase global counts: " +
+          (err && err.message ? err.message : String(err))
+      );
+    }
+  } else {
+    warnings.push("Supabase URL/service role key is not configured.");
+  }
+
+  try {
+    counts.userVisible = backendStatusUserVisibleCounts_(data || {});
+  } catch (err2) {
+    warnings.push(
+      "Could not read user-visible counts: " +
+        (err2 && err2.message ? err2.message : String(err2))
+    );
+  }
+
+  return {
+    success: true,
+    backendModes: modes,
+    allSupabase: allSupabase,
+    supabaseConfigured: !!(config.url && config.serviceRoleKey),
+    fallbackUsed: false,
+    rollback: {
+      auth: "Set AUTH_BACKEND=sheets",
+      playerHub: "Set PLAYER_HUB_BACKEND=sheets",
+      teamBuilder: "Set TEAM_BUILDER_BACKEND=sheets",
+      tournament: "Set TOURNAMENT_BACKEND=sheets"
+    },
+    counts: counts,
+    warnings: warnings
+  };
+}
+
+function supabaseBackendStatusCounts_(config) {
+  var teamBuilderRows = supabaseSelectRows_(config, "team_builder_players", {}, "id,active");
+  var tournamentRows = supabaseSelectRows_(config, "tournaments", {}, "id,published,status,visibility,public_code,tournament_json");
+  var userRows = supabaseSelectRows_(config, "app_users", {}, "id,role,can_use_team_builder,can_use_tournaments,can_create_tournaments,active");
+
+  var publicTournamentCount = tournamentRows.filter(function(row) {
+    var tournament = supabaseTournamentFromRow_(row);
+    return supabaseTournamentIsPublicListed_(tournament);
+  }).length;
+
+  return {
+    appUsers: fetchSupabaseTableCount_(config, {
+      table: "app_users",
+      select: "id"
+    }),
+    trainerUsers: userRows.filter(function(row) {
+      return (
+        String(row.role || "").trim().toLowerCase() === "trainer" ||
+        truthy_(row.can_use_team_builder) ||
+        truthy_(row.can_use_tournaments) ||
+        truthy_(row.can_create_tournaments)
+      );
+    }).length,
+    playerProfiles: fetchSupabaseTableCount_(config, {
+      table: "player_profiles",
+      select: "id"
+    }),
+    teamBuilderPlayers: teamBuilderRows.length,
+    teamBuilderActivePlayers: teamBuilderRows.filter(function(row) {
+      return truthy_(row.active);
+    }).length,
+    teamBuilderArchivedPlayers: teamBuilderRows.filter(function(row) {
+      return !truthy_(row.active);
+    }).length,
+    teamBuilderSavedTeams: fetchSupabaseTableCount_(config, {
+      table: "team_builder_saved_teams",
+      select: "id"
+    }),
+    tournaments: tournamentRows.length,
+    publicTournaments: publicTournamentCount,
+    playerHubTeamNeeds: fetchSupabaseTableCount_(config, {
+      table: "team_needs",
+      select: "id"
+    }),
+    tournamentEvents: fetchSupabaseTableCount_(config, {
+      table: "tournament_events",
+      select: "id"
+    }),
+    tournamentAvailability: fetchSupabaseTableCount_(config, {
+      table: "tournament_availability",
+      select: "id"
+    }),
+    rosterDrafts: fetchSupabaseTableCount_(config, {
+      table: "roster_drafts",
+      select: "id"
+    })
+  };
+}
+
+function backendStatusUserVisibleCounts_(data) {
+  var context = resolveRequestContext(data || {});
+  var visible = {};
+  if (context && context.authenticated && context.user) {
+    try {
+      var players = runTeamBuilderAction_("getPlayers", {
+        includeArchived: true
+      }, context, function() {
+        return getPlayers(context, true);
+      });
+      visible.teamBuilderActivePlayers = Array.isArray(players.players)
+        ? players.players.length
+        : 0;
+      visible.teamBuilderArchivedPlayers = Array.isArray(players.archivedPlayers)
+        ? players.archivedPlayers.length
+        : 0;
+      visible.teamBuilderBackend = players.teamBuilderBackend || "";
+      visible.teamBuilderFallbackUsed = !!players.teamBuilderBackendFallbackUsed;
+    } catch (err) {
+      visible.teamBuilderError = err && err.message ? err.message : String(err);
+    }
+
+    try {
+      var tournaments = handleTournamentAction_("listTournaments", data || {});
+      visible.privateTournaments = Array.isArray(tournaments.tournaments)
+        ? tournaments.tournaments.length
+        : 0;
+      visible.tournamentBackend = tournaments.tournamentBackend || "";
+      visible.tournamentFallbackUsed = !!tournaments.tournamentBackendFallbackUsed;
+    } catch (err2) {
+      visible.tournamentError = err2 && err2.message ? err2.message : String(err2);
+    }
+  }
+
+  try {
+    var publicTournaments = handleTournamentAction_("listPublicTournaments", {});
+    visible.publicTournaments = Array.isArray(publicTournaments.tournaments)
+      ? publicTournaments.tournaments.length
+      : 0;
+    visible.publicTournamentFallbackUsed = !!publicTournaments.tournamentBackendFallbackUsed;
+  } catch (err3) {
+    visible.publicTournamentError = err3 && err3.message ? err3.message : String(err3);
+  }
+
+  return visible;
 }
 
 function tournamentBackendMode_() {
