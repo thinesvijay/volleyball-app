@@ -112,9 +112,58 @@ function loadExpectedCounts() {
   const expected = {};
   for (const [collectionKey, table] of Object.entries(EXPORT_TO_TABLE)) {
     const rows = data.collections && data.collections[collectionKey];
-    if (Array.isArray(rows)) expected[table] = rows.length;
+    if (Array.isArray(rows)) {
+      expected[table] =
+        collectionKey === "tournaments"
+          ? countUniqueValidTournaments(rows)
+          : rows.length;
+    }
   }
   return { exportPath, expected };
+}
+
+function pickValue(item, keys) {
+  for (const key of keys) {
+    if (item && item[key] !== undefined && item[key] !== null && item[key] !== "") {
+      return String(item[key]).trim();
+    }
+  }
+  return "";
+}
+
+function countUniqueValidTournaments(rows) {
+  const seen = new Map();
+  const skipped = [];
+  rows.forEach((row, index) => {
+    const id = pickValue(row, ["tournamentId", "TournamentId", "id", "Id"]);
+    const name =
+      pickValue(row, ["name", "Name", "tournamentName", "TournamentName"]) ||
+      "Untitled tournament";
+    if (!id) {
+      skipped.push({ index: index + 1, reason: "missing legacy tournament id", name });
+      return;
+    }
+    if (seen.has(id)) {
+      skipped.push({
+        index: index + 1,
+        id,
+        reason: `duplicate of export row ${seen.get(id)}`,
+        name,
+      });
+      return;
+    }
+    seen.set(id, index + 1);
+  });
+
+  if (skipped.length) {
+    console.log("Tournament validation expected count uses unique valid legacy IDs.");
+    skipped.forEach((item) => {
+      console.log(
+        `- skipped tournament export row ${item.index}: ${item.reason}${item.id ? ` (${item.id})` : ""} ${item.name}`
+      );
+    });
+  }
+  return seen.size;
 }
 
 async function main() {

@@ -16641,7 +16641,7 @@ function supabaseAuthorizeTournamentRow_(row, user) {
   var tournament = supabaseTournamentFromRow_(row);
   var owner = String((tournament && tournament.organizerUsername) || row.organizer_username || "").trim();
   var username = tournamentUsername_(user);
-  if (!owner || !username || owner !== username) {
+  if (!owner || !username || owner.toLowerCase() !== username.toLowerCase()) {
     throw new Error("Access denied");
   }
   return tournament;
@@ -16668,9 +16668,11 @@ function supabaseListTournaments_(user) {
   var username = tournamentUsername_(user);
   if (!username) return [];
   var config = supabaseTournamentConfig_();
-  return supabaseSelectRows_(config, "tournaments", {
-    organizer_username: username
-  }, "*")
+  var target = username.toLowerCase();
+  return supabaseSelectRows_(config, "tournaments", {}, "*")
+    .filter(function(row) {
+      return String(row.organizer_username || "").trim().toLowerCase() === target;
+    })
     .map(supabaseTournamentFromRow_)
     .filter(Boolean);
 }

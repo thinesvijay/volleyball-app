@@ -772,28 +772,97 @@ function buildUsers(collections) {
 
 function buildTournaments(collections) {
   const tournaments = [];
-  for (const item of collections.tournaments) {
+  const seen = new Map();
+  const skipped = [];
+
+  function normalizeTournamentJson(item, legacyId, name, status, visibility, organizerUsername, publicCode, published, publishedAt) {
+    const rawJson = pick(item, ["tournamentJson", "TournamentJson"], null);
+    let tournamentJson = rawJson && typeof rawJson === "object" ? { ...rawJson } : null;
+    if (!tournamentJson && typeof rawJson === "string" && rawJson.trim()) {
+      try {
+        tournamentJson = JSON.parse(rawJson);
+      } catch (error) {
+        tournamentJson = null;
+      }
+    }
+    tournamentJson = tournamentJson || { ...item };
+    tournamentJson.id = tournamentJson.id || legacyId;
+    tournamentJson.tournamentId = tournamentJson.tournamentId || legacyId;
+    tournamentJson.TournamentId = tournamentJson.TournamentId || legacyId;
+    tournamentJson.name = tournamentJson.name || name;
+    tournamentJson.status = tournamentJson.status || status;
+    tournamentJson.visibility = tournamentJson.visibility || visibility;
+    tournamentJson.organizerUsername =
+      tournamentJson.organizerUsername || organizerUsername;
+    tournamentJson.ownerUsername = tournamentJson.ownerUsername || organizerUsername;
+    tournamentJson.publicCode = tournamentJson.publicCode || publicCode || "";
+    tournamentJson.published = bool(tournamentJson.published, published);
+    tournamentJson.publishedAt = tournamentJson.publishedAt || publishedAt || "";
+    return tournamentJson;
+  }
+
+  (collections.tournaments || []).forEach((item, index) => {
+    const legacyId = nullableText(pick(item, ["tournamentId", "TournamentId", "id", "Id"]));
+    const name = text(pick(item, ["name", "Name", "tournamentName", "TournamentName"], "Untitled tournament"));
+    if (!legacyId) {
+      skipped.push({ index: index + 1, reason: "missing legacy tournament id", name });
+      return;
+    }
+    if (seen.has(legacyId)) {
+      skipped.push({
+        index: index + 1,
+        reason: `duplicate legacy tournament id; kept export row ${seen.get(legacyId)}`,
+        id: legacyId,
+        name,
+      });
+      return;
+    }
+    seen.set(legacyId, index + 1);
+
+    const published = bool(pick(item, ["published", "Published"], false), false);
+    const status =
+      nullableText(pick(item, ["status", "Status"])) ||
+      (published ? "published" : "draft");
+    const visibility =
+      nullableText(pick(item, ["visibility", "Visibility"])) ||
+      (published ? "public" : "private");
+    const organizerUsername = nullableText(
+      pick(item, ["organizerUsername", "OrganizerUsername", "ownerUsername", "OwnerUsername"])
+    );
+    const publicCode = nullableText(pick(item, ["publicCode", "PublicCode"]));
+    const publishedAt = dateOrNull(pick(item, ["publishedAt", "PublishedAt"]));
+
     addUniqueBy(
       tournaments,
       {
-        legacy_tournament_id: nullableText(pick(item, ["tournamentId", "TournamentId"])),
-        name: text(pick(item, ["name", "Name", "tournamentName", "TournamentName"], "Untitled tournament")),
+        legacy_tournament_id: legacyId,
+        name,
         country: nullableText(pick(item, ["country", "Country"])),
         city: nullableText(pick(item, ["city", "City"])),
         start_date: nullableText(pick(item, ["startDate", "StartDate"])),
         end_date: nullableText(pick(item, ["endDate", "EndDate"])),
         registration_deadline: dateOrNull(pick(item, ["registrationDeadline", "RegistrationDeadline"])),
-        visibility: nullableText(pick(item, ["visibility", "Visibility"])),
-        status: nullableText(pick(item, ["status", "Status"])),
-        organizer_username: nullableText(pick(item, ["organizerUsername", "OrganizerUsername"])),
-        public_code: nullableText(pick(item, ["publicCode", "PublicCode"])),
-        published: bool(pick(item, ["published", "Published"], false), false),
-        published_at: dateOrNull(pick(item, ["publishedAt", "PublishedAt"])),
-        tournament_json: pick(item, ["tournamentJson", "TournamentJson"], null),
+        visibility,
+        status,
+        organizer_username: organizerUsername,
+        public_code: publicCode,
+        published,
+        published_at: publishedAt,
+        tournament_json: normalizeTournamentJson(
+          item,
+          legacyId,
+          name,
+          status,
+          visibility,
+          organizerUsername,
+          publicCode,
+          published,
+          publishedAt
+        ),
       },
       "legacy_tournament_id"
     );
-  }
+  });
 
   const tournamentSources = [
     collections.teamNeeds,
@@ -816,11 +885,27 @@ function buildTournaments(collections) {
           legacy_tournament_id: legacy,
           name,
           status: "shadow-import",
+          visibility: "private",
           published: false,
+          tournament_json: {
+            id: legacy,
+            tournamentId: legacy,
+            TournamentId: legacy,
+            name,
+            status: "shadow-import",
+            visibility: "private",
+            published: false,
+          },
         },
         "legacy_tournament_id"
       );
     }
+  }
+  if (skipped.length) {
+    console.log("Skipped exported tournament rows:");
+    skipped.forEach((item) => {
+      console.log(`- row ${item.index}: ${item.reason}${item.id ? ` (${item.id})` : ""}${item.name ? ` ${item.name}` : ""}`);
+    });
   }
   return tournaments;
 }
