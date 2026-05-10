@@ -17680,7 +17680,7 @@ const savedRound = readStorageWithTtl(
             <PlayerHubPage
               username={auth.username}
               isAdmin={currentUserIsAdmin}
-              canReviewRosterDrafts={currentUserIsAdmin || hasTournamentAccess}
+              canReviewRosterDrafts={currentUserIsAdmin}
               loadMyPlayerProfile={loadMyPlayerProfile}
               loadEventComments={loadEventComments}
               addEventComment={addEventComment}
