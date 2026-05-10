@@ -56,6 +56,258 @@ function isUsablePlayerHubSnapshot(snapshot) {
   );
 }
 
+function passportArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function passportText(...values) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function normalizePassportAvailabilityStatus(...values) {
+  const value = passportText(...values).toUpperCase();
+  if (value === "YES" || value === "GOING") return "YES";
+  if (value === "MAYBE") return "MAYBE";
+  if (value === "NO" || value === "NOT_GOING" || value === "NOT GOING") {
+    return "NO";
+  }
+  return "PENDING";
+}
+
+function passportAvailabilityLabel(status) {
+  const value = normalizePassportAvailabilityStatus(status);
+  if (value === "YES") return "Going";
+  if (value === "MAYBE") return "Maybe";
+  if (value === "NO") return "No";
+  return "Pending";
+}
+
+function normalizePassportRosterStatus(...values) {
+  const value = passportText(...values).toUpperCase();
+  if (
+    value === "SUBMITTED" ||
+    value === "APPROVED" ||
+    value === "REJECTED" ||
+    value === "LOCKED" ||
+    value === "CANCELLED"
+  ) {
+    return value;
+  }
+  return "DRAFT";
+}
+
+function passportRosterLabel(status) {
+  const value = normalizePassportRosterStatus(status);
+  if (value === "SUBMITTED") return "Submitted";
+  if (value === "APPROVED") return "Approved";
+  if (value === "REJECTED") return "Rejected";
+  if (value === "LOCKED") return "Locked";
+  if (value === "CANCELLED") return "Cancelled";
+  return "Draft";
+}
+
+function normalizePassportAssignedSquad(...values) {
+  const value = passportText(...values).toUpperCase();
+  if (value === "A" || value === "B" || value === "C") return `Team ${value}`;
+  if (value === "RESERVE") return "Reserve";
+  return "";
+}
+
+function getPassportSortTime(...values) {
+  for (const value of values) {
+    const text = passportText(value);
+    if (!text) continue;
+    const time = Date.parse(text);
+    if (!Number.isNaN(time)) return time;
+  }
+  return 0;
+}
+
+function calculatePlayerPassportStats({
+  confirmedTeams,
+  playerTournamentAvailability,
+  playerTournamentRosterStatus,
+  myTeamNeedInterests,
+}) {
+  const stats = {
+    teamMembershipCount: passportArray(confirmedTeams).length,
+    eventInvitationsCount: passportArray(playerTournamentAvailability).length,
+    goingResponsesCount: 0,
+    maybeResponsesCount: 0,
+    noResponsesCount: 0,
+    pendingResponsesCount: 0,
+    rosterApprovedCount: 0,
+    playerAdsInterestsCount: passportArray(myTeamNeedInterests).length,
+  };
+
+  passportArray(playerTournamentAvailability).forEach((item) => {
+    const status = normalizePassportAvailabilityStatus(
+      item?.responseStatus,
+      item?.availabilityStatus,
+      item?.status
+    );
+    if (status === "YES") stats.goingResponsesCount += 1;
+    else if (status === "MAYBE") stats.maybeResponsesCount += 1;
+    else if (status === "NO") stats.noResponsesCount += 1;
+    else stats.pendingResponsesCount += 1;
+  });
+
+  passportArray(playerTournamentRosterStatus).forEach((item) => {
+    const status = normalizePassportRosterStatus(item?.rosterStatus, item?.status);
+    if (status === "APPROVED" || status === "LOCKED") {
+      stats.rosterApprovedCount += 1;
+    }
+  });
+
+  return stats;
+}
+
+function buildPlayerAchievements({
+  profile,
+  stats,
+  hasCaptainRole,
+  squadActivityCount,
+}) {
+  const answeredCount =
+    (stats?.goingResponsesCount || 0) +
+    (stats?.maybeResponsesCount || 0) +
+    (stats?.noResponsesCount || 0);
+  const profileCompleted = Boolean(
+    passportText(profile?.displayName, profile?.profileId) &&
+      passportText(profile?.country, profile?.clubTeamName, profile?.clubOrTeam)
+  );
+
+  return [
+    {
+      id: "profile",
+      label: "First profile completed",
+      active: profileCompleted,
+      detail: profileCompleted ? "Identity ready" : "Complete profile",
+    },
+    {
+      id: "team",
+      label: "Team member",
+      active: (stats?.teamMembershipCount || 0) > 0,
+      detail: `${stats?.teamMembershipCount || 0} team${
+        (stats?.teamMembershipCount || 0) === 1 ? "" : "s"
+      }`,
+    },
+    {
+      id: "captain",
+      label: "Captain badge",
+      active: Boolean(hasCaptainRole),
+      detail: hasCaptainRole ? "Team control" : "Captain role",
+    },
+    {
+      id: "responder",
+      label: "Reliable responder",
+      active: answeredCount >= 2,
+      detail: `${answeredCount} response${answeredCount === 1 ? "" : "s"}`,
+    },
+    {
+      id: "ready",
+      label: "Tournament ready",
+      active: (stats?.goingResponsesCount || 0) > 0,
+      detail: `${stats?.goingResponsesCount || 0} Going`,
+    },
+    {
+      id: "squad",
+      label: "Squad player",
+      active: squadActivityCount > 0,
+      detail: squadActivityCount > 0 ? "Squad activity" : "No squad yet",
+    },
+    {
+      id: "helper",
+      label: "Community helper",
+      active: (stats?.playerAdsInterestsCount || 0) > 0,
+      detail: `${stats?.playerAdsInterestsCount || 0} interest${
+        (stats?.playerAdsInterestsCount || 0) === 1 ? "" : "s"
+      }`,
+    },
+  ];
+}
+
+function getRecentPlayerActivity(playerEvents) {
+  return passportArray(playerEvents)
+    .map((bundle) => {
+      const base =
+        bundle?.base ||
+        bundle?.availability ||
+        bundle?.planning ||
+        bundle?.roster ||
+        {};
+      const availability = bundle?.availability || {};
+      const planning = bundle?.planning || {};
+      const roster = bundle?.roster || {};
+      const hasRoster = Boolean(bundle?.roster);
+      const status = hasRoster
+        ? passportRosterLabel(roster.rosterStatus || roster.status)
+        : passportAvailabilityLabel(
+            availability.responseStatus ||
+              availability.availabilityStatus ||
+              planning.availabilityStatus ||
+              base.responseStatus
+          );
+      const assignedSquad = normalizePassportAssignedSquad(
+        planning.assignedSquad,
+        roster.assignedSquad,
+        base.assignedSquad
+      );
+      const preference = normalizePassportAssignedSquad(
+        availability.preferredSquad,
+        planning.preferredSquad,
+        base.preferredSquad
+      );
+      const sortTime = getPassportSortTime(
+        base.updatedAt,
+        base.respondedAt,
+        base.submittedAt,
+        base.lockedAt,
+        base.createdAt,
+        base.deadlineAt
+      );
+
+      return {
+        key:
+          bundle?.key ||
+          passportText(base.planId, base.tournamentId, base.tournamentName) ||
+          `activity-${sortTime}`,
+        tournamentName: passportText(
+          base.tournamentName,
+          availability.tournamentName,
+          planning.tournamentName,
+          roster.tournamentName,
+          "Tournament"
+        ),
+        teamName: passportText(
+          base.clubTeamName,
+          base.teamName,
+          availability.clubTeamName,
+          planning.clubTeamName,
+          roster.clubTeamName,
+          roster.teamName,
+          "Team"
+        ),
+        status,
+        note: passportText(
+          assignedSquad ? assignedSquad : "",
+          preference ? `Preferred ${preference.replace("Team ", "")}` : "",
+          availability.responseNote,
+          availability.note,
+          planning.note,
+          roster.adminNote
+        ),
+        sortTime,
+      };
+    })
+    .sort((left, right) => right.sortTime - left.sortTime)
+    .slice(0, 6);
+}
+
 const playerHubStyles = {
   shell: {
     display: "grid",
@@ -2415,6 +2667,183 @@ Object.assign(playerHubStyles, {
     ...playerHubStyles.hubNavButton,
     minHeight: "40px",
     padding: "9px 8px",
+  },
+});
+
+Object.assign(playerHubStyles, {
+  passportShell: {
+    ...hubGlassPanel,
+    display: "grid",
+    gap: "14px",
+    padding: "16px",
+    borderRadius: "26px",
+    background:
+      "linear-gradient(145deg, rgba(15,23,42,0.94), rgba(8,47,73,0.58) 52%, rgba(5,150,105,0.16))",
+    overflow: "hidden",
+    minWidth: 0,
+  },
+  passportHero: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+    gap: "14px",
+    alignItems: "stretch",
+    minWidth: 0,
+  },
+  passportSummaryCard: {
+    ...hubGlassPanelSoft,
+    display: "grid",
+    gridTemplateColumns: "auto minmax(0, 1fr)",
+    gap: "14px",
+    alignItems: "center",
+    padding: "16px",
+    borderRadius: "22px",
+    minWidth: 0,
+  },
+  passportAvatar: {
+    width: "72px",
+    height: "72px",
+    borderRadius: "24px",
+    display: "grid",
+    placeItems: "center",
+    color: hubDarkPalette.text,
+    fontWeight: "950",
+    fontSize: "30px",
+    background:
+      "linear-gradient(135deg, rgba(56,189,248,0.82), rgba(16,185,129,0.72))",
+    boxShadow: "0 18px 46px rgba(14,165,233,0.22)",
+    flex: "0 0 auto",
+  },
+  passportIdentity: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  passportName: {
+    color: hubDarkPalette.text,
+    fontSize: "24px",
+    lineHeight: 1.08,
+    fontWeight: "950",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  passportMeta: {
+    color: hubDarkPalette.muted,
+    fontSize: "13px",
+    lineHeight: 1.4,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  passportRoleRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    minWidth: 0,
+  },
+  passportRoleBadge: {
+    ...playerHubStyles.chip,
+    borderColor: "rgba(125,211,252,0.32)",
+    color: hubDarkPalette.text,
+    background: "rgba(14,165,233,0.14)",
+  },
+  passportStatsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+  passportStatCard: {
+    ...hubGlassRow,
+    display: "grid",
+    gap: "4px",
+    padding: "11px 12px",
+    borderRadius: "18px",
+    minWidth: 0,
+  },
+  passportStatValue: {
+    color: hubDarkPalette.text,
+    fontSize: "22px",
+    lineHeight: 1,
+    fontWeight: "950",
+  },
+  passportStatLabel: {
+    color: hubDarkPalette.muted,
+    fontSize: "11px",
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: "0.02em",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  passportGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 300px), 1fr))",
+    gap: "14px",
+    minWidth: 0,
+  },
+  passportPanel: {
+    ...hubGlassPanelSoft,
+    display: "grid",
+    gap: "10px",
+    padding: "14px",
+    borderRadius: "22px",
+    minWidth: 0,
+  },
+  passportActivityList: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  passportActivityRow: {
+    ...hubGlassRow,
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "center",
+    padding: "10px 12px",
+    borderRadius: "16px",
+    minWidth: 0,
+  },
+  passportAchievementGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+  passportAchievementBadge: {
+    ...hubGlassRow,
+    display: "grid",
+    gap: "5px",
+    padding: "11px 12px",
+    borderRadius: "16px",
+    border: "1px solid rgba(52,211,153,0.28)",
+    background:
+      "linear-gradient(135deg, rgba(16,185,129,0.16), rgba(14,165,233,0.10))",
+    minWidth: 0,
+  },
+  passportAchievementBadgeLocked: {
+    opacity: 0.58,
+    border: "1px solid rgba(148,163,184,0.16)",
+    background: "rgba(15,23,42,0.42)",
+  },
+  passportAchievementTitle: {
+    color: hubDarkPalette.text,
+    fontSize: "12px",
+    fontWeight: "900",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  passportAchievementDetail: {
+    color: hubDarkPalette.muted,
+    fontSize: "11px",
+    fontWeight: "750",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  passportEmpty: {
+    ...playerHubStyles.emptyPreview,
+    borderColor: "rgba(148,163,184,0.16)",
+    background: "rgba(15,23,42,0.28)",
+    color: hubDarkPalette.muted,
+    minHeight: "auto",
+    padding: "16px",
   },
 });
 
@@ -6910,6 +7339,21 @@ export default function PlayerHubPage({
     return text || fallback;
   }
 
+  function passportStatusStyle(label) {
+    const value = String(label || "").toUpperCase();
+    if (
+      value === "GOING" ||
+      value === "APPROVED" ||
+      value === "LOCKED"
+    ) {
+      return playerHubStyles.accessStatusApproved;
+    }
+    if (value === "NO" || value === "REJECTED" || value === "CANCELLED") {
+      return playerHubStyles.accessStatusRejected;
+    }
+    return playerHubStyles.accessStatusPending;
+  }
+
   async function confirmDeactivatePlayerAccount() {
     if (!pendingDeactivateProfile) return;
     const profile = pendingDeactivateProfile;
@@ -6957,6 +7401,57 @@ export default function PlayerHubPage({
   );
   const primaryPlayerEvent = playerDashboardEvents[0] || null;
   const secondaryPlayerEvents = playerDashboardEvents.slice(1);
+  const passportStats = calculatePlayerPassportStats({
+    confirmedTeams,
+    playerTournamentAvailability,
+    playerTournamentRosterStatus,
+    myTeamNeedInterests,
+  });
+  const passportTrainerRole = Boolean(
+    savedProfilePreview.canUseTeamBuilder ||
+      savedProfilePreview.trainerApproved ||
+      accessRequests.some((request) => {
+        const type = String(request?.requestType || request?.type || "").toUpperCase();
+        const status = String(request?.status || "").toUpperCase();
+        return (
+          type === "TRAINER" &&
+          (status === "APPROVED" || status === "ACCEPTED")
+        );
+      })
+  );
+  const passportRoleBadges = [
+    "Player",
+    canManageTeamProfile ? "Captain" : "",
+    passportTrainerRole ? "Trainer" : "",
+    isAdmin ? "Admin" : "",
+  ].filter(Boolean);
+  const passportMemberSince = formatCompactDate(
+    primaryConfirmedTeam?.memberSince ||
+      primaryConfirmedTeam?.confirmedAt ||
+      primaryConfirmedTeam?.createdAt
+  );
+  const passportActiveRosterCount = playerTournamentRosterStatus.filter(
+    (item) => normalizeRosterStatus(item?.rosterStatus || item?.status) !== "CANCELLED"
+  ).length;
+  const passportSquadActivityCount =
+    plannedTeamItems.length + passportActiveRosterCount;
+  const passportAchievements = buildPlayerAchievements({
+    profile: savedProfilePreview,
+    stats: passportStats,
+    hasCaptainRole: canManageTeamProfile,
+    squadActivityCount: passportSquadActivityCount,
+  });
+  const passportActivityItems = getRecentPlayerActivity(playerDashboardEvents);
+  const passportStatCards = [
+    ["Teams", passportStats.teamMembershipCount],
+    ["Invites", passportStats.eventInvitationsCount],
+    ["Going", passportStats.goingResponsesCount],
+    ["Maybe", passportStats.maybeResponsesCount],
+    ["No", passportStats.noResponsesCount],
+    ["Pending", passportStats.pendingResponsesCount],
+    ["Approved rosters", passportStats.rosterApprovedCount],
+    ["Player ads", passportStats.playerAdsInterestsCount],
+  ];
   const dedupedTournamentPlans = uniqueEventItems(tournamentPlans);
   const selectedTournamentAdOption = tournamentOptions.find(
     (option) =>
@@ -8865,6 +9360,146 @@ export default function PlayerHubPage({
           ) : null}
           </>
       </section>
+      ) : null}
+
+      {showHubPlayers ? (
+        <section style={playerHubStyles.passportShell} data-testid="player-passport">
+          <div style={playerHubStyles.feedHeader}>
+            <div style={playerHubStyles.profileMeta}>
+              <div style={playerHubStyles.sectionTitle}>Player Passport</div>
+              <div style={playerHubStyles.cardText}>
+                Identity, responses, squads and roster activity.
+              </div>
+            </div>
+            <span style={playerHubStyles.chip}>V1</span>
+          </div>
+
+          <div style={playerHubStyles.passportHero}>
+            <article style={playerHubStyles.passportSummaryCard}>
+              <div style={playerHubStyles.passportAvatar}>{previewInitial}</div>
+              <div style={playerHubStyles.passportIdentity}>
+                <strong style={playerHubStyles.passportName}>
+                  {previewDisplayName}
+                </strong>
+                <span style={playerHubStyles.passportMeta}>
+                  {savedProfilePreview.country || "No country"} /{" "}
+                  {savedProfilePreview.profileType || "Player"}
+                </span>
+                <span style={playerHubStyles.passportMeta}>
+                  {profileTeamLabel || "No confirmed team"}
+                </span>
+                {passportMemberSince ? (
+                  <span style={playerHubStyles.passportMeta}>
+                    Member since {passportMemberSince}
+                  </span>
+                ) : null}
+                <div style={playerHubStyles.passportRoleRow}>
+                  {passportRoleBadges.map((badge) => (
+                    <span key={badge} style={playerHubStyles.passportRoleBadge}>
+                      {badge}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </article>
+
+            <div style={playerHubStyles.passportStatsGrid}>
+              {passportStatCards.map(([label, value]) => (
+                <article key={label} style={playerHubStyles.passportStatCard}>
+                  <strong style={playerHubStyles.passportStatValue}>
+                    {value}
+                  </strong>
+                  <span style={playerHubStyles.passportStatLabel}>{label}</span>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div style={playerHubStyles.passportGrid}>
+            <article style={playerHubStyles.passportPanel}>
+              <div style={playerHubStyles.homeCardHeader}>
+                <div style={playerHubStyles.profileMeta}>
+                  <div style={playerHubStyles.sectionTitle}>
+                    Availability history
+                  </div>
+                  <div style={playerHubStyles.cardText}>
+                    Recent tournament responses and roster status.
+                  </div>
+                </div>
+                <span style={playerHubStyles.chip}>
+                  {passportActivityItems.length}
+                </span>
+              </div>
+              {passportActivityItems.length ? (
+                <div style={playerHubStyles.passportActivityList}>
+                  {passportActivityItems.map((activity) => (
+                    <div
+                      key={activity.key}
+                      style={playerHubStyles.passportActivityRow}
+                    >
+                      <div style={playerHubStyles.profileMeta}>
+                        <strong style={playerHubStyles.previewTitle}>
+                          {activity.tournamentName}
+                        </strong>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          {[activity.teamName, activity.note]
+                            .filter(Boolean)
+                            .join(" / ")}
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          ...playerHubStyles.accessStatusChip,
+                          ...passportStatusStyle(activity.status),
+                        }}
+                      >
+                        {activity.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={playerHubStyles.passportEmpty}>
+                  History appears after tournament responses and roster activity.
+                </div>
+              )}
+            </article>
+
+            <article style={playerHubStyles.passportPanel}>
+              <div style={playerHubStyles.homeCardHeader}>
+                <div style={playerHubStyles.profileMeta}>
+                  <div style={playerHubStyles.sectionTitle}>Achievements</div>
+                  <div style={playerHubStyles.cardText}>
+                    Badges from your current activity.
+                  </div>
+                </div>
+                <span style={playerHubStyles.chip}>
+                  {passportAchievements.filter((badge) => badge.active).length}
+                </span>
+              </div>
+              <div style={playerHubStyles.passportAchievementGrid}>
+                {passportAchievements.map((badge) => (
+                  <div
+                    key={badge.id}
+                    style={{
+                      ...playerHubStyles.passportAchievementBadge,
+                      ...(badge.active
+                        ? {}
+                        : playerHubStyles.passportAchievementBadgeLocked),
+                    }}
+                  >
+                    <span style={playerHubStyles.passportAchievementTitle}>
+                      {badge.label}
+                    </span>
+                    <span style={playerHubStyles.passportAchievementDetail}>
+                      {badge.detail}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </article>
+          </div>
+        </section>
       ) : null}
 
       {showPlayerAdsArea && (visibleTeamNeeds.length ||
