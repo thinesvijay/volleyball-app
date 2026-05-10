@@ -2158,6 +2158,7 @@ Object.assign(playerHubStyles, {
   feedItem: {
     ...hubGlassRow,
     gridTemplateColumns: "auto minmax(0, 1fr) auto",
+    alignItems: "center",
     padding: "10px 12px",
     borderRadius: "16px",
   },
@@ -2196,7 +2197,7 @@ Object.assign(playerHubStyles, {
   },
   eventTopRow: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
     gap: "12px",
     alignItems: "start",
     minWidth: 0,
@@ -2206,13 +2207,15 @@ Object.assign(playerHubStyles, {
     fontSize: "17px",
     lineHeight: 1.1,
     fontWeight: "980",
-    overflowWrap: "anywhere",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
   },
   eventMeta: {
     color: hubDarkPalette.muted,
     fontSize: "12px",
     fontWeight: "800",
-    overflowWrap: "anywhere",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
   },
   eventStats: {
     display: "flex",
@@ -2263,6 +2266,7 @@ Object.assign(playerHubStyles, {
     gap: "7px",
     flexWrap: "wrap",
     alignItems: "center",
+    justifyContent: "flex-start",
     minWidth: 0,
   },
   eventCommentDrawer: {
@@ -2297,7 +2301,7 @@ Object.assign(playerHubStyles, {
   },
   commentComposer: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
     gap: "8px",
     alignItems: "center",
     minWidth: 0,
@@ -2312,6 +2316,105 @@ Object.assign(playerHubStyles, {
     fontWeight: "950",
     cursor: "pointer",
     whiteSpace: "nowrap",
+  },
+  hubNav: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(92px, 1fr))",
+    gap: "7px",
+    padding: "7px",
+    borderRadius: "22px",
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(125,211,252,0.14)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+    minWidth: 0,
+  },
+  hubNavButton: {
+    border: "1px solid rgba(148,163,184,0.12)",
+    borderRadius: "16px",
+    padding: "10px 11px",
+    background: "rgba(15,23,42,0.54)",
+    color: hubDarkPalette.muted,
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+    minWidth: 0,
+    whiteSpace: "nowrap",
+  },
+  hubNavButtonActive: {
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    borderColor: "rgba(125,211,252,0.38)",
+    color: "#04111f",
+    boxShadow: "0 12px 28px rgba(14,165,233,0.22)",
+  },
+  previewTitle: {
+    ...playerHubStyles.previewTitle,
+    color: hubDarkPalette.text,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  compactRowTitle: {
+    ...playerHubStyles.compactRowTitle,
+    color: hubDarkPalette.text,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  compactRowMeta: {
+    ...playerHubStyles.compactRowMeta,
+    color: hubDarkPalette.muted,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+});
+
+Object.assign(playerHubStyles, {
+  teamSetupControls: {
+    ...playerHubStyles.teamSetupControls,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
+  },
+  heroActions: {
+    ...playerHubStyles.heroActions,
+    alignItems: "stretch",
+  },
+  teamControlActions: {
+    ...playerHubStyles.teamControlActions,
+    justifyContent: "flex-start",
+  },
+  teamControlActionsRow: {
+    ...playerHubStyles.teamControlActionsRow,
+    justifyContent: "flex-start",
+  },
+  adminActionButton: {
+    ...playerHubStyles.adminActionButton,
+    maxWidth: "100%",
+    whiteSpace: "normal",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+    textAlign: "center",
+  },
+  saveButton: {
+    ...playerHubStyles.saveButton,
+    maxWidth: "100%",
+    whiteSpace: "normal",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+    textAlign: "center",
+  },
+  feedTinyAction: {
+    ...playerHubStyles.feedTinyAction,
+    maxWidth: "100%",
+    whiteSpace: "normal",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+    textAlign: "center",
+  },
+  hubNav: {
+    ...playerHubStyles.hubNav,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 84px), 1fr))",
+  },
+  hubNavButton: {
+    ...playerHubStyles.hubNavButton,
+    minHeight: "40px",
+    padding: "9px 8px",
   },
 });
 
@@ -2579,6 +2682,9 @@ export default function PlayerHubPage({
     useState("");
   const [adminRosterReviewMessage, setAdminRosterReviewMessage] = useState("");
   const [openAdminPanel, setOpenAdminPanel] = useState("");
+  const [activeHubTab, setActiveHubTab] = useState(() =>
+    isAdmin ? "admin" : "home"
+  );
   const [adminCounts, setAdminCounts] = useState(null);
   const [snapshotInitialLoadComplete, setSnapshotInitialLoadComplete] =
     useState(false);
@@ -7013,6 +7119,32 @@ export default function PlayerHubPage({
       : null,
   ].filter(Boolean);
 
+  const canOpenAdminHubTab = adminDashboardCards.length > 0;
+  const hubTabs = [
+    { id: "home", label: "Home" },
+    { id: "events", label: "Events" },
+    { id: "team", label: "Team" },
+    { id: "players", label: "Players" },
+    canOpenAdminHubTab ? { id: "admin", label: "Admin" } : null,
+  ].filter(Boolean);
+  const showHubHome = activeHubTab === "home";
+  const showHubEvents = activeHubTab === "events";
+  const showHubTeam = activeHubTab === "team";
+  const showHubPlayers = activeHubTab === "players";
+  const showHubAdmin = activeHubTab === "admin" && canOpenAdminHubTab;
+  const showPlayerEventArea = showHubHome || showHubEvents;
+  const showTeamOverviewArea = showHubHome || showHubTeam;
+  const showTeamControlArea =
+    canManageTeamProfile &&
+    (showHubHome || showHubEvents || showHubTeam || showHubPlayers);
+  const showPlayerAdsArea = showHubHome || showHubPlayers;
+
+  useEffect(() => {
+    if (activeHubTab === "admin" && !canOpenAdminHubTab) {
+      setActiveHubTab("home");
+    }
+  }, [activeHubTab, canOpenAdminHubTab]);
+
   function openAdminDashboardPanel(card) {
     const isClosing = openAdminPanel === card.id;
     setOpenAdminPanel(isClosing ? "" : card.id);
@@ -7037,7 +7169,26 @@ export default function PlayerHubPage({
         </div>
       </section>
 
-      {needsClubTeamSetup ? (
+      <nav style={playerHubStyles.hubNav} aria-label="Player Hub views">
+        {hubTabs.map((tab) => {
+          const active = activeHubTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              style={{
+                ...playerHubStyles.hubNavButton,
+                ...(active ? playerHubStyles.hubNavButtonActive : {}),
+              }}
+              onClick={() => setActiveHubTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {showTeamOverviewArea && needsClubTeamSetup ? (
         <form
           onSubmit={handleSaveTeamSetup}
           style={playerHubStyles.teamSetupCard}
@@ -7616,10 +7767,12 @@ export default function PlayerHubPage({
           </details>
         </section>
 
-        {primaryPlayerEvent ? renderPlayerEventCard(primaryPlayerEvent, true) : null}
+        {showPlayerEventArea && primaryPlayerEvent
+          ? renderPlayerEventCard(primaryPlayerEvent, true)
+          : null}
       </section>
 
-      {secondaryPlayerEvents.length ? (
+      {showPlayerEventArea && secondaryPlayerEvents.length ? (
         <section style={playerHubStyles.feedPanel}>
           <div style={playerHubStyles.feedHeader}>
             <div style={playerHubStyles.profileMeta}>
@@ -7635,6 +7788,7 @@ export default function PlayerHubPage({
         </section>
       ) : null}
 
+      {showTeamOverviewArea ? (
       <section style={playerHubStyles.compactHomeGrid}>
         {homeTeamCard ? (
           <section style={playerHubStyles.homeCard}>
@@ -7693,7 +7847,8 @@ export default function PlayerHubPage({
         ) : null}
 
       </section>
-      {canManageTeamProfile ? (
+      ) : null}
+      {showTeamControlArea ? (
       <section style={playerHubStyles.profileCard} data-testid="team-control">
         <div style={playerHubStyles.profileHeader}>
           <div style={playerHubStyles.profileMeta}>
@@ -8712,9 +8867,9 @@ export default function PlayerHubPage({
       </section>
       ) : null}
 
-      {visibleTeamNeeds.length ||
+      {showPlayerAdsArea && (visibleTeamNeeds.length ||
       visibleTeamNeedsStatus === "loading" ||
-      teamInterestMessage ? (
+      teamInterestMessage) ? (
       <section style={playerHubStyles.profileCard}>
         <div style={playerHubStyles.profileHeader}>
           <div style={playerHubStyles.profileMeta}>
@@ -8922,7 +9077,7 @@ export default function PlayerHubPage({
       </section>
       ) : null}
 
-      {adminDashboardCards.length ? (
+      {showHubAdmin && adminDashboardCards.length ? (
         <section style={playerHubStyles.adminReviewCard}>
           <div style={playerHubStyles.adminReviewTop}>
             <div style={playerHubStyles.profileMeta}>
@@ -8990,7 +9145,7 @@ export default function PlayerHubPage({
         </section>
       ) : null}
 
-      {isAdmin && openAdminPanel === "players" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "players" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Player profile review</span>
@@ -9223,7 +9378,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "access" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "access" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Access request review</span>
@@ -9406,7 +9561,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "clubs" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "clubs" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Official clubs/teams</span>
@@ -9609,7 +9764,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "identity" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "identity" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Team identity requests</span>
@@ -9772,7 +9927,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "profiles" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "profiles" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Team profile review</span>
@@ -9891,7 +10046,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "needs" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "needs" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Team need interest review</span>
@@ -9961,7 +10116,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "members" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "members" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Team members review</span>
@@ -10056,7 +10211,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "membership" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "membership" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Team membership requests</span>
@@ -10147,7 +10302,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {canReviewRosterDrafts && openAdminPanel === "rosters" ? (
+      {showHubAdmin && canReviewRosterDrafts && openAdminPanel === "rosters" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Roster review</span>

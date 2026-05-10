@@ -157,8 +157,8 @@ export function getDefaultPublicTheme() {
 
 export function getDefaultPublicLiveTheme() {
   return {
-    ...PUBLIC_THEME_PRESETS["clean-white"],
-    preset: "clean-white",
+    ...PUBLIC_THEME_PRESETS["dark-cup"],
+    preset: "dark-cup",
     mode: "preset",
   };
 }
@@ -357,4 +357,3 @@ export function getPublicCardThemeStyle(theme, imageUrl = "") {
     color: safeTheme.text,
   };
 }
-
