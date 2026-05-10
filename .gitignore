@@ -12,6 +12,9 @@
 .env.e2e
 supabase/.env.import
 supabase/.tmp/
+.clasp.json
+.clasprc.json
+.apps-script-deploy.env
 
 # production
 /build

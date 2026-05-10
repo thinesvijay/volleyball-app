@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+<style>
+  body {
+    font-family: Arial;
+    margin: 0;
+    padding: 10px;
+    background: #f5f5f5;
+  }
+
+  h2 {
+    margin: 10px 0;
+  }
+
+  input, select, button {
+    font-size: 16px;
+  }
+
+  /* 🔥 FAST TOP BAR */
+  .top {
+    position: sticky;
+    top: 0;
+    background: #f5f5f5;
+    z-index: 10;
+    padding-bottom: 10px;
+  }
+
+  /* 🔥 SCROLL AREA */
+  #players {
+    max-height: 45vh;
+    overflow-y: auto;
+    background: white;
+    border-radius: 10px;
+    padding: 5px;
+  }
+
+  .player {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    border-bottom: 1px solid #eee;
+  }
+
+  .left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+  }
+
+  .right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* 🔥 STORE TOUCH TARGETS */
+  input[type="checkbox"] {
+    transform: scale(1.5);
+  }
+
+  button {
+    padding: 10px;
+    border-radius: 8px;
+    border: none;
+  }
+
+  .main-btn {
+    background: #4CAF50;
+    color: white;
+    width: 100%;
+    margin-top: 10px;
+    padding: 16px;
+    font-weight: bold;
+    border-radius: 12px;
+  }
+
+  .team {
+    background: white;
+    margin-top: 10px;
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  .team-player {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+  }
+
+  .locked {
+    background: #fff8dc;
+    padding: 6px;
+    border-radius: 6px;
+  }
+
+</style>
+</head>
+
+<body>
+
+<div class="top">
+
+<h2>🏐 Velg spillere</h2>
+
+<div>
+  <input id="newName" placeholder="Ny spiller">
+  <select id="newSkill">
+    <option>1</option><option>2</option><option>3</option>
+  </select>
+  <button onclick="addNewPlayer()">➕</button>
+</div>
+
+<button onclick="saveSkillChanges()">Lagre nivåer</button>
+
+</div>
+
+<div id="players"></div>
+
+<button class="main-btn" onclick="generate()">Generer lag</button>
+
+<div id="teamActions" style="display:none;">
+  <button onclick="saveCurrentTeams()">Lagre lag</button>
+  <button onclick="generate()">Generer på nytt</button>
+</div>
+
+<div id="result"></div>
+
+<script>
+
+let allPlayers = [];
+let currentTeams = [];
+let saveTimeout = null;
+
+/* 🔥 LOAD */
+function loadPlayers() {
+  google.script.run.withSuccessHandler(showPlayers).getPlayers();
+}
+
+/* 🔥 RENDER (OPTIMERT) */
+function showPlayers(data) {
+  allPlayers = data;
+
+  let html = "";
+
+  data.forEach((p,i)=>{
+    html += `
+      <div class="player">
+        <div class="left">
+          <input type="checkbox" id="p${i}">
+          <input value="${p.name}" onchange="renamePlayer(${i}, this.value)">
+        </div>
+
+        <div class="right">
+          <button onclick="changeSkill(${i}, -1)">-</button>
+          <span id="skill${i}">${p.skill}</span>
+          <button onclick="changeSkill(${i}, 1)">+</button>
+        </div>
+      </div>
+    `;
+  });
+
+  players.innerHTML = html;
+}
+
+/* 🔥 ADD */
+function addNewPlayer() {
+  let name = newName.value.trim();
+  let skill = Number(newSkill.value);
+
+  if (!name) return;
+
+  google.script.run.withSuccessHandler(loadPlayers)
+    .addPlayer({name, skill});
+}
+
+/* 🔥 RENAME */
+function renamePlayer(i, newNameVal) {
+  let old = allPlayers[i].name;
+  allPlayers[i].name = newNameVal;
+  google.script.run.updatePlayerName(old, newNameVal);
+}
+
+/* 🔥 SKILL (DEBOUNCE) */
+function changeSkill(i, change) {
+  let p = allPlayers[i];
+  p.skill = Math.max(1, Math.min(3, p.skill + change));
+
+  document.getElementById("skill"+i).innerText = p.skill;
+
+  if (saveTimeout) clearTimeout(saveTimeout);
+
+  saveTimeout = setTimeout(()=>{
+    google.script.run.saveSkills(allPlayers);
+  },800);
+}
+
+/* 🔥 GENERATE */
+function generate() {
+  let selected=[];
+
+  allPlayers.forEach((p,i)=>{
+    if(document.getElementById("p"+i).checked){
+      selected.push(p);
+    }
+  });
+
+  google.script.run.withSuccessHandler(showTeams)
+    .generateFromSelection(selected,currentTeams);
+}
+
+/* 🔥 SHOW TEAMS */
+function showTeams(data) {
+  currentTeams = data;
+  renderTeams();
+  teamActions.style.display="block";
+}
+
+/* 🔥 RENDER TEAMS */
+function renderTeams() {
+  let html="";
+
+  currentTeams.forEach((team,i)=>{
+
+    let total = team.players.reduce((s,p)=>s+p.skill,0);
+
+    html+=`<div class="team"><b>${team.name} (Total ${total})</b>`;
+
+    team.players.forEach((p,j)=>{
+
+      html+=`
+        <div class="team-player ${p.locked?'locked':''}">
+          <div>${p.name} (${p.skill}) ${p.locked?'🔒':''}</div>
+
+          <div>
+            <select id="move-${i}-${j}">
+              ${buildOptions(i)}
+            </select>
+
+            <button onclick="movePlayer(${i},${j})">Flytt</button>
+
+            <button onclick="toggleLock(${i},${j})">
+              ${p.locked?'Lås opp':'Lås'}
+            </button>
+          </div>
+        </div>
+      `;
+    });
+
+    html+="</div>";
+  });
+
+  result.innerHTML = html;
+}
+
+/* 🔥 OPTIONS */
+function buildOptions(current){
+  let o="";
+  currentTeams.forEach((t,i)=>{
+    o+=`<option value="${i}" ${i===current?'selected':''}>${t.name}</option>`;
+  });
+  return o;
+}
+
+/* 🔥 MOVE */
+function movePlayer(teamIndex, playerIndex){
+  let sel=document.getElementById(`move-${teamIndex}-${playerIndex}`);
+  let newIndex=Number(sel.value);
+
+  if(newIndex===teamIndex) return;
+
+  let p=currentTeams[teamIndex].players[playerIndex];
+
+  if(p.locked) return;
+
+  currentTeams[teamIndex].players.splice(playerIndex,1);
+  currentTeams[newIndex].players.push(p);
+
+  renderTeams();
+}
+
+/* 🔥 LOCK */
+function toggleLock(i,j){
+  currentTeams[i].players[j].locked =
+    !currentTeams[i].players[j].locked;
+
+  renderTeams();
+}
+
+/* 🔥 SAVE */
+function saveCurrentTeams(){
+  google.script.run.saveTeams(currentTeams);
+}
+
+function saveSkillChanges(){
+  google.script.run.saveSkills(allPlayers);
+}
+
+loadPlayers();
+
+</script>
+</body>
+</html>
