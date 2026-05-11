@@ -396,6 +396,10 @@ function doPost(e) {
     return jsonResponse(updateTournamentPlanStatus(data));
   }
 
+  if (data.action === "updateTournamentSquadLabels") {
+    return jsonResponse(updateTournamentSquadLabels(data));
+  }
+
   if (data.action === "syncSquadPlanningFromAvailability") {
     return jsonResponse(syncSquadPlanningFromAvailability(data));
   }
@@ -8130,6 +8134,35 @@ function normalizeAssignedSquad_(value) {
   return "UNASSIGNED";
 }
 
+function normalizeCaptainSquadLabelKey_(value) {
+  var text = String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
+  var teamMatch = text.match(/^TEAM ([ABCD])$/);
+  if (teamMatch) return teamMatch[1] === "D" ? "RESERVE" : teamMatch[1];
+  if (text === "A" || text === "B" || text === "C") return text;
+  if (text === "RESERVE" || text === "RES" || text === "D") return "RESERVE";
+  return "";
+}
+
+function normalizeCaptainSquadLabels_(value) {
+  var source = value;
+  if (typeof source === "string") {
+    try {
+      source = JSON.parse(source);
+    } catch (err) {
+      source = {};
+    }
+  }
+  if (!source || typeof source !== "object" || Array.isArray(source)) return {};
+
+  var labels = {};
+  Object.keys(source).forEach(function (key) {
+    var normalizedKey = normalizeCaptainSquadLabelKey_(key);
+    var label = playerProfileText_(source[key], 40);
+    if (normalizedKey && label) labels[normalizedKey] = label;
+  });
+  return labels;
+}
+
 function normalizeTournamentSquadPlanningStatus_(value) {
   var text = String(value || "").trim().toUpperCase();
   if (text === "REMOVED") return "REMOVED";
@@ -8937,20 +8970,148 @@ function tournamentPlanResponseSummary_(planId) {
   return summary;
 }
 
+function tournamentSquadLabelsFromTournament_(tournament, planId) {
+  var targetPlanId = String(planId || "").trim();
+  if (!tournament || !targetPlanId) return {};
+
+  var playerHub = tournament.playerHub &&
+    typeof tournament.playerHub === "object" &&
+    !Array.isArray(tournament.playerHub)
+    ? tournament.playerHub
+    : {};
+  var squadPlanning = playerHub.squadPlanning &&
+    typeof playerHub.squadPlanning === "object" &&
+    !Array.isArray(playerHub.squadPlanning)
+    ? playerHub.squadPlanning
+    : {};
+  var entry = squadPlanning[targetPlanId] || {};
+  var labels = normalizeCaptainSquadLabels_(entry.squadLabels);
+  if (Object.keys(labels).length) return labels;
+
+  var legacyByPlan = tournament.squadLabelsByPlanId &&
+    typeof tournament.squadLabelsByPlanId === "object" &&
+    !Array.isArray(tournament.squadLabelsByPlanId)
+    ? tournament.squadLabelsByPlanId
+    : {};
+  var legacyEntry = legacyByPlan[targetPlanId] || {};
+  return normalizeCaptainSquadLabels_(legacyEntry.squadLabels || legacyEntry);
+}
+
+function tournamentSquadLabelsForPlan_(plan) {
+  if (!plan || !plan.tournamentId || !plan.planId) return {};
+  var row = findTournamentRowById_(plan.tournamentId);
+  var tournament = tournamentFromRow_(row);
+  return tournamentSquadLabelsFromTournament_(tournament, plan.planId);
+}
+
+function tournamentSquadLabelsForPlanId_(planId) {
+  var plan = tournamentTeamPlanFromRow_(findTournamentTeamPlanRowById_(planId));
+  return tournamentSquadLabelsForPlan_(plan);
+}
+
+function decorateWithSquadLabels_(item, squadLabels) {
+  if (!item) return item;
+  var labels = normalizeCaptainSquadLabels_(squadLabels);
+  return Object.assign({}, item, {
+    squadLabels: labels
+  });
+}
+
+function writeTournamentRow_(tournament, existingRow) {
+  var sheet = ensureTournamentSheets_();
+  var headers = sheet
+    .getRange(1, 1, 1, Math.max(1, sheet.getLastColumn()))
+    .getValues()[0]
+    .map(function (header) {
+      return String(header || "").trim();
+    });
+  var rowValues = headers.map(function (header) {
+    return tournamentColumnValue_(header, tournament);
+  });
+
+  if (existingRow) {
+    sheet.getRange(existingRow.__rowNumber, 1, 1, headers.length).setValues([rowValues]);
+  } else {
+    sheet.appendRow(rowValues);
+  }
+
+  return tournament;
+}
+
+function persistTournamentSquadLabelsForPlan_(plan, labels, user) {
+  if (!plan || !plan.planId || !plan.tournamentId) {
+    return {
+      success: false,
+      message: "Tournament plan not found."
+    };
+  }
+
+  var row = findTournamentRowById_(plan.tournamentId);
+  var tournament = tournamentFromRow_(row);
+  if (!row || !tournament) {
+    return {
+      success: false,
+      message: "Tournament not found."
+    };
+  }
+
+  var normalizedLabels = normalizeCaptainSquadLabels_(labels);
+  var now = new Date().toISOString();
+  var playerHub = tournament.playerHub &&
+    typeof tournament.playerHub === "object" &&
+    !Array.isArray(tournament.playerHub)
+    ? Object.assign({}, tournament.playerHub)
+    : {};
+  var squadPlanning = playerHub.squadPlanning &&
+    typeof playerHub.squadPlanning === "object" &&
+    !Array.isArray(playerHub.squadPlanning)
+    ? Object.assign({}, playerHub.squadPlanning)
+    : {};
+
+  if (Object.keys(normalizedLabels).length) {
+    squadPlanning[plan.planId] = Object.assign(
+      {},
+      squadPlanning[plan.planId] || {},
+      {
+        squadLabels: normalizedLabels,
+        updatedAt: now,
+        updatedBy: playerHubUsername_(user)
+      }
+    );
+  } else {
+    delete squadPlanning[plan.planId];
+  }
+
+  playerHub.squadPlanning = squadPlanning;
+  tournament.playerHub = playerHub;
+  tournament.updatedAt = now;
+  writeTournamentRow_(tournament, row);
+
+  return {
+    success: true,
+    squadLabels: normalizedLabels,
+    tournament: tournament
+  };
+}
+
 function enrichTournamentAvailabilityWithPlan_(availability) {
   if (!availability) return availability;
   var plan = tournamentTeamPlanFromRow_(findTournamentTeamPlanRowById_(availability.planId));
+  var squadLabels = tournamentSquadLabelsForPlan_(plan);
   return Object.assign({}, availability, {
     squadLabel: plan ? plan.squadLabel : "",
     className: plan ? plan.className : "",
     deadlineAt: plan ? plan.deadlineAt : "",
-    planStatus: plan ? plan.planStatus : ""
+    planStatus: plan ? plan.planStatus : "",
+    squadLabels: squadLabels
   });
 }
 
 function decorateTournamentTeamPlan_(plan) {
   if (!plan) return plan;
+  var squadLabels = tournamentSquadLabelsForPlan_(plan);
   return Object.assign({}, plan, {
+    squadLabels: squadLabels,
     responseSummary: tournamentPlanResponseSummary_(plan.planId)
   });
 }
@@ -8992,15 +9153,19 @@ function tournamentAvailabilityForPlan_(planId) {
 function tournamentSquadPlanningForPlan_(planId, includeRemoved) {
   var targetPlanId = String(planId || "").trim();
   if (!targetPlanId) return [];
+  var squadLabels = tournamentSquadLabelsForPlanId_(targetPlanId);
 
   return tournamentSquadPlanningRows_()
     .map(tournamentSquadPlanningFromRow_)
     .filter(function (planning) {
       return (
         planning &&
-        planning.planId === targetPlanId &&
-        (includeRemoved || planning.planningStatus === "PLANNED")
+          planning.planId === targetPlanId &&
+          (includeRemoved || planning.planningStatus === "PLANNED")
       );
+    })
+    .map(function (planning) {
+      return decorateWithSquadLabels_(planning, squadLabels);
     })
     .sort(function (a, b) {
       var aName = String(a.playerDisplayName || a.playerUsername || "");
@@ -9012,6 +9177,8 @@ function tournamentSquadPlanningForPlan_(planId, includeRemoved) {
 function tournamentRosterPlayersForRoster_(rosterId, activeOnly) {
   var targetRosterId = String(rosterId || "").trim();
   if (!targetRosterId) return [];
+  var roster = tournamentRosterFromRow_(findTournamentRosterRowById_(targetRosterId));
+  var squadLabels = roster ? tournamentSquadLabelsForPlanId_(roster.planId) : {};
 
   return tournamentRosterPlayerRows_()
     .map(tournamentRosterPlayerFromRow_)
@@ -9021,6 +9188,9 @@ function tournamentRosterPlayersForRoster_(rosterId, activeOnly) {
         player.rosterId === targetRosterId &&
         (!activeOnly || player.playerStatus === "ACTIVE")
       );
+    })
+    .map(function (player) {
+      return decorateWithSquadLabels_(player, squadLabels);
     })
     .sort(function (a, b) {
       var squadOrder = { A: 1, B: 2, C: 3, RESERVE: 4, UNASSIGNED: 5 };
@@ -9067,9 +9237,11 @@ function officialRosterGroupName_(assignedSquad) {
 
 function decorateTournamentRoster_(roster) {
   if (!roster) return roster;
+  var squadLabels = tournamentSquadLabelsForPlanId_(roster.planId);
   var players = tournamentRosterPlayersForRoster_(roster.rosterId, true);
   var officialPlayers = officialRosterRowsForDraft_(roster.rosterId);
   return Object.assign({}, roster, {
+    squadLabels: squadLabels,
     players: players,
     playerCount: players.length,
     officialPlayers: officialPlayers,
@@ -9511,6 +9683,12 @@ function listMyTournamentSquadPlanningForPlayer(data) {
         }
         return normalizeAssignedSquad_(item.assignedSquad) !== "UNASSIGNED";
       })
+      .map(function (item) {
+        return decorateWithSquadLabels_(
+          item,
+          tournamentSquadLabelsForPlanId_(item.planId)
+        );
+      })
       .sort(function (a, b) {
         var aTime = Date.parse(a.updatedAt || a.assignedAt || a.createdAt || "") || 0;
         var bTime = Date.parse(b.updatedAt || b.assignedAt || b.createdAt || "") || 0;
@@ -9818,6 +9996,39 @@ function updateTournamentPlanStatus(data) {
     return {
       success: false,
       message: "Could not update tournament plan"
+    };
+  }
+}
+
+function updateTournamentSquadLabels(data) {
+  try {
+    var planContext = captainTournamentPlanByIdContext_(data || {});
+    if (!planContext.success) return planContext;
+
+    var persistResult = persistTournamentSquadLabelsForPlan_(
+      planContext.plan,
+      data && (data.squadLabels || data.squadDisplayNames || data.squadNames),
+      planContext.context.user
+    );
+    if (!persistResult.success) return persistResult;
+
+    var plan = tournamentTeamPlanFromRow_(
+      findTournamentTeamPlanRowById_(planContext.plan.planId)
+    );
+    var rosterPayload = tournamentRosterPayloadForPlan_(plan);
+    return {
+      success: true,
+      plan: decorateTournamentTeamPlan_(plan),
+      plans: tournamentPlanRowsForTeamProfile_(plan.teamProfileId),
+      roster: rosterPayload.roster || null,
+      players: rosterPayload.players || [],
+      squadLabels: persistResult.squadLabels,
+      message: "Squad names saved."
+    };
+  } catch (err) {
+    return {
+      success: false,
+      message: "Could not save squad names"
     };
   }
 }
@@ -10282,7 +10493,9 @@ function listMyRosterStatusForPlayer(data) {
       })
       .map(function (player) {
         var roster = rostersById[player.rosterId] || {};
+        var squadLabels = tournamentSquadLabelsForPlanId_(roster.planId);
         return Object.assign({}, roster, {
+          squadLabels: squadLabels,
           rosterPlayer: player,
           assignedSquad: player.assignedSquad,
           rosterRole: player.rosterRole
@@ -11110,6 +11323,22 @@ function playerHubSnapshotPlansById_(ctx) {
   return map;
 }
 
+function playerHubSnapshotTournamentsById_(ctx) {
+  if (ctx.maps.tournamentsById) return ctx.maps.tournamentsById;
+  var map = {};
+  playerHubSnapshotTournaments_(ctx).forEach(function (tournament) {
+    if (tournament && tournament.id) map[String(tournament.id)] = tournament;
+  });
+  ctx.maps.tournamentsById = map;
+  return map;
+}
+
+function playerHubSnapshotSquadLabelsForPlan_(ctx, plan) {
+  if (!plan || !plan.planId || !plan.tournamentId) return {};
+  var tournament = playerHubSnapshotTournamentsById_(ctx)[String(plan.tournamentId)] || {};
+  return tournamentSquadLabelsFromTournament_(tournament, plan.planId);
+}
+
 function playerHubSnapshotRostersById_(ctx) {
   if (ctx.maps.rostersById) return ctx.maps.rostersById;
   var map = {};
@@ -11294,18 +11523,22 @@ function playerHubSnapshotEnrichMembershipRequest_(ctx, request) {
 function playerHubSnapshotEnrichAvailability_(ctx, availability) {
   if (!availability) return availability;
   var plan = playerHubSnapshotPlansById_(ctx)[availability.planId] || {};
+  var squadLabels = playerHubSnapshotSquadLabelsForPlan_(ctx, plan);
   return Object.assign({}, availability, {
     squadLabel: plan.squadLabel || "",
     className: plan.className || "",
     deadlineAt: plan.deadlineAt || "",
-    planStatus: plan.planStatus || ""
+    planStatus: plan.planStatus || "",
+    squadLabels: squadLabels
   });
 }
 
 function playerHubSnapshotDecoratePlan_(ctx, plan) {
   if (!plan) return plan;
   var summaries = playerHubSnapshotResponseSummaryByPlan_(ctx);
+  var squadLabels = playerHubSnapshotSquadLabelsForPlan_(ctx, plan);
   return Object.assign({}, plan, {
+    squadLabels: squadLabels,
     responseSummary:
       summaries[plan.planId] || { yes: 0, maybe: 0, no: 0, pending: 0, total: 0 }
   });
@@ -11313,9 +11546,14 @@ function playerHubSnapshotDecoratePlan_(ctx, plan) {
 
 function playerHubSnapshotDecorateRoster_(ctx, roster) {
   if (!roster) return roster;
+  var plan = playerHubSnapshotPlansById_(ctx)[roster.planId] || {};
+  var squadLabels = playerHubSnapshotSquadLabelsForPlan_(ctx, plan);
   var players = (playerHubSnapshotRosterPlayersByRoster_(ctx)[roster.rosterId] || [])
     .filter(function (player) {
       return player && player.playerStatus === "ACTIVE";
+    })
+    .map(function (player) {
+      return decorateWithSquadLabels_(player, squadLabels);
     })
     .sort(function (a, b) {
       var squadOrder = { A: 1, B: 2, C: 3, RESERVE: 4, UNASSIGNED: 5 };
@@ -11340,6 +11578,7 @@ function playerHubSnapshotDecorateRoster_(ctx, roster) {
       return aName.localeCompare(bName);
     });
   return Object.assign({}, roster, {
+    squadLabels: squadLabels,
     players: players,
     playerCount: players.length,
     officialPlayers: officialPlayers,
@@ -11508,6 +11747,12 @@ function playerHubSnapshotPlannedTeamsForPlayer_(ctx, username) {
         return false;
       }
       return normalizeAssignedSquad_(item.assignedSquad) !== "UNASSIGNED";
+    }).map(function (item) {
+      var plan = playerHubSnapshotPlansById_(ctx)[item.planId] || {};
+      return decorateWithSquadLabels_(
+        item,
+        playerHubSnapshotSquadLabelsForPlan_(ctx, plan)
+      );
     })
   );
 }
@@ -11526,7 +11771,10 @@ function playerHubSnapshotRosterStatusForPlayer_(ctx, username) {
       })
       .map(function (player) {
         var roster = rostersById[player.rosterId] || {};
+        var plan = playerHubSnapshotPlansById_(ctx)[roster.planId] || {};
+        var squadLabels = playerHubSnapshotSquadLabelsForPlan_(ctx, plan);
         return Object.assign({}, roster, {
+          squadLabels: squadLabels,
           rosterPlayer: player,
           assignedSquad: player.assignedSquad,
           rosterRole: player.rosterRole
@@ -12118,6 +12366,7 @@ function playerHubBackendActionMap_() {
       supabaseListMyTournamentSquadPlanningForPlayer_,
     listTournamentAvailabilityForCaptain: supabaseListTournamentAvailabilityForCaptain_,
     updateTournamentPlanStatus: supabaseUpdateTournamentPlanStatus_,
+    updateTournamentSquadLabels: supabaseUpdateTournamentSquadLabels_,
     listTournamentSquadPlanningForCaptain:
       supabaseListTournamentSquadPlanningForCaptain_,
     syncSquadPlanningFromAvailability: supabaseListTournamentSquadPlanningForCaptain_,
@@ -12164,6 +12413,7 @@ function playerHubBackendWriteActions_() {
     cancelMyTeamMembershipRequest: true,
     createTournamentTeamPlan: true,
     updateTournamentPlanStatus: true,
+    updateTournamentSquadLabels: true,
     assignPlayerToSquad: true,
     removePlayerFromSquadPlanning: true,
     createOrUpdateRosterDraftFromSquadPlanning: true,
@@ -12225,6 +12475,7 @@ function playerHubKnownBackendActions_() {
     updateTournamentAvailabilityResponse: true,
     listTournamentAvailabilityForCaptain: true,
     updateTournamentPlanStatus: true,
+    updateTournamentSquadLabels: true,
     syncSquadPlanningFromAvailability: true,
     listTournamentSquadPlanningForCaptain: true,
     assignPlayerToSquad: true,
@@ -12622,15 +12873,13 @@ function supabaseRosterPayloadForPlan_(ctx, plan) {
   playerHubSnapshotRosters_(ctx).forEach(function (item) {
     if (!roster && item && item.planId === plan.planId) roster = item;
   });
+  var decoratedRoster = roster ? playerHubSnapshotDecorateRoster_(ctx, roster) : null;
   return {
     success: true,
     plan: playerHubSnapshotDecoratePlan_(ctx, plan),
-    roster: roster ? playerHubSnapshotDecorateRoster_(ctx, roster) : null,
-    players: roster
-      ? (playerHubSnapshotRosterPlayersByRoster_(ctx)[roster.rosterId] || [])
-          .filter(function (player) {
-            return player && player.playerStatus === "ACTIVE";
-          })
+    roster: decoratedRoster,
+    players: decoratedRoster
+      ? decoratedRoster.players || []
       : []
   };
 }
@@ -14591,6 +14840,114 @@ function supabaseUpdateTournamentPlanStatus_(data) {
   return { success: true, plan: rows[0] ? supabaseTournamentPlan_(rows[0]) : null, plans: captain.tournamentPlans || [], tournamentPlans: captain.tournamentPlans || [] };
 }
 
+function supabasePersistTournamentSquadLabelsForPlan_(env, plan, labels) {
+  if (!plan || !plan.planId || !plan.tournamentId) {
+    return {
+      success: false,
+      message: "Tournament plan not found."
+    };
+  }
+
+  var row = supabaseFindTournamentById_(env.config, plan.tournamentId);
+  var tournament = supabaseTournamentFromRow_(row);
+  if (!row || !tournament) {
+    return {
+      success: false,
+      message: "Tournament not found."
+    };
+  }
+
+  var normalizedLabels = normalizeCaptainSquadLabels_(labels);
+  var now = nowIso_();
+  var playerHub = tournament.playerHub &&
+    typeof tournament.playerHub === "object" &&
+    !Array.isArray(tournament.playerHub)
+    ? Object.assign({}, tournament.playerHub)
+    : {};
+  var squadPlanning = playerHub.squadPlanning &&
+    typeof playerHub.squadPlanning === "object" &&
+    !Array.isArray(playerHub.squadPlanning)
+    ? Object.assign({}, playerHub.squadPlanning)
+    : {};
+
+  if (Object.keys(normalizedLabels).length) {
+    squadPlanning[plan.planId] = Object.assign(
+      {},
+      squadPlanning[plan.planId] || {},
+      {
+        squadLabels: normalizedLabels,
+        updatedAt: now,
+        updatedBy: playerHubUsername_(env.context.user)
+      }
+    );
+  } else {
+    delete squadPlanning[plan.planId];
+  }
+
+  playerHub.squadPlanning = squadPlanning;
+  tournament.playerHub = playerHub;
+  tournament.updatedAt = now;
+
+  supabaseUpsertRows_(
+    env.config,
+    "tournaments",
+    [supabaseTournamentRowFromTournament_(tournament)],
+    "legacy_tournament_id"
+  );
+
+  return {
+    success: true,
+    squadLabels: normalizedLabels,
+    tournament: tournament
+  };
+}
+
+function supabaseUpdateTournamentSquadLabels_(data) {
+  var env = supabaseAuthContext_(data);
+  if (!env.success) return env;
+  var planCheck = supabasePlanForCaptain_(env, firstValue_(data.planId, data.id, ""));
+  if (!planCheck.success) return planCheck;
+
+  var persistResult = supabasePersistTournamentSquadLabelsForPlan_(
+    env,
+    planCheck.plan,
+    firstValue_(data.squadLabels, data.squadDisplayNames, data.squadNames, {})
+  );
+  if (!persistResult.success) return persistResult;
+
+  var fresh = supabaseReloadEnv_(env);
+  var captain = supabaseCaptainSnapshotForUser_(fresh.ctx, fresh.context.user);
+  var freshPlan = null;
+  (captain.tournamentPlans || []).some(function (plan) {
+    if (plan && plan.planId === planCheck.plan.planId) {
+      freshPlan = plan;
+      return true;
+    }
+    return false;
+  });
+  var rosterPayload = supabaseRosterPayloadForPlan_(
+    fresh.ctx,
+    freshPlan || planCheck.plan
+  );
+  supabaseAuditLog_(
+    env.config,
+    playerHubUsername_(env.context.user),
+    "updateTournamentSquadLabels",
+    "tournaments",
+    planCheck.plan.tournamentId,
+    { planId: planCheck.plan.planId, labels: Object.keys(persistResult.squadLabels || {}) }
+  );
+  return Object.assign(
+    {
+      message: "Squad names saved.",
+      plans: captain.tournamentPlans || [],
+      tournamentPlans: captain.tournamentPlans || [],
+      squadLabels: persistResult.squadLabels
+    },
+    rosterPayload
+  );
+}
+
 function supabaseAssignPlayerToSquad_(data) {
   var env = supabaseAuthContext_(data);
   if (!env.success) return env;
@@ -15384,6 +15741,9 @@ function supabaseOfficialRoster_(row) {
 }
 
 function supabaseTournament_(row) {
+  var tournament = supabaseTournamentFromRow_(row);
+  if (tournament) return tournament;
+
   return {
     id: supabaseText_(row.legacy_tournament_id),
     tournamentId: supabaseText_(row.legacy_tournament_id),

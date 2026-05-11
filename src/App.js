@@ -3263,6 +3263,23 @@ export default function App() {
     [callPlayerHubBackend]
   );
 
+  const updateTournamentSquadLabels = useCallback(
+    async (planId, squadLabels) => {
+      const data = await callPlayerHubBackend("updateTournamentSquadLabels", {
+        planId,
+        squadLabels,
+      });
+      return {
+        plan: data?.plan || null,
+        plans: Array.isArray(data?.plans) ? data.plans : [],
+        roster: data?.roster || null,
+        players: Array.isArray(data?.players) ? data.players : [],
+        squadLabels: data?.squadLabels || {},
+      };
+    },
+    [callPlayerHubBackend]
+  );
+
   const loadTournamentSquadPlanningForCaptain = useCallback(
     async (planId) => {
       const data = await callPlayerHubBackend(
@@ -17746,6 +17763,7 @@ const savedRound = readStorageWithTtl(
                 loadTournamentAvailabilityForCaptain
               }
               updateTournamentPlanStatus={updateTournamentPlanStatus}
+              updateTournamentSquadLabels={updateTournamentSquadLabels}
               loadTournamentSquadPlanningForCaptain={
                 loadTournamentSquadPlanningForCaptain
               }

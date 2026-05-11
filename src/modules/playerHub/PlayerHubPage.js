@@ -3041,6 +3041,7 @@ export default function PlayerHubPage({
   updateTournamentAvailabilityResponse,
   loadTournamentAvailabilityForCaptain,
   updateTournamentPlanStatus,
+  updateTournamentSquadLabels,
   loadTournamentSquadPlanningForCaptain,
   assignPlayerToSquad,
   createOrUpdateRosterDraftFromSquadPlanning,
@@ -3235,9 +3236,10 @@ export default function PlayerHubPage({
   const [squadPlanningUpdatingId, setSquadPlanningUpdatingId] = useState("");
   const [captainRosterDraftsByPlanId, setCaptainRosterDraftsByPlanId] =
     useState({});
-  const [squadDisplayNamesByPlanId, setSquadDisplayNamesByPlanId] = useState(
+  const [squadDisplayNameDraftsByPlanId, setSquadDisplayNameDraftsByPlanId] = useState(
     () => readStoredSquadDisplayNames(username)
   );
+  const [squadNamesSavingPlanId, setSquadNamesSavingPlanId] = useState("");
   const [rosterDraftUpdatingPlanId, setRosterDraftUpdatingPlanId] =
     useState("");
   const [rosterDraftMessage, setRosterDraftMessage] = useState("");
@@ -4334,12 +4336,12 @@ export default function PlayerHubPage({
   ]);
 
   useEffect(() => {
-    setSquadDisplayNamesByPlanId(readStoredSquadDisplayNames(username));
+    setSquadDisplayNameDraftsByPlanId(readStoredSquadDisplayNames(username));
   }, [username]);
 
   useEffect(() => {
-    writeStoredSquadDisplayNames(username, squadDisplayNamesByPlanId);
-  }, [squadDisplayNamesByPlanId, username]);
+    writeStoredSquadDisplayNames(username, squadDisplayNameDraftsByPlanId);
+  }, [squadDisplayNameDraftsByPlanId, username]);
 
   useEffect(() => {
     if (!canManageTeamProfile || snapshotInitialLoadComplete) return;
@@ -5108,10 +5110,12 @@ export default function PlayerHubPage({
 
   function squadNamesFromSource(source = {}) {
     return [
+      source?.squadLabels,
       source?.squadDisplayNames,
       source?.squadNames,
       source?.customSquadNames,
       source?.teamNames,
+      source?.roster?.squadLabels,
       source?.roster?.squadDisplayNames,
       source?.roster?.squadNames,
     ].reduce(
@@ -5127,8 +5131,39 @@ export default function PlayerHubPage({
     const planId = eventPlanId(source);
     return {
       ...squadNamesFromSource(source),
-      ...(planId ? squadDisplayNamesByPlanId[planId] || {} : {}),
+      ...(planId ? squadDisplayNameDraftsByPlanId[planId] || {} : {}),
     };
+  }
+
+  function squadNameEditorValues(plan = {}) {
+    const planId = eventPlanId(plan);
+    const persisted = squadNamesFromSource(plan);
+    const draft = planId ? squadDisplayNameDraftsByPlanId[planId] || {} : {};
+    return captainSquadNameSlots.reduce((values, squad) => {
+      values[squad] = Object.prototype.hasOwnProperty.call(draft, squad)
+        ? draft[squad]
+        : persisted[squad] || "";
+      return values;
+    }, {});
+  }
+
+  function squadLabelsSignature(labels) {
+    const normalized = normalizeSquadDisplayNames(labels);
+    return captainSquadNameSlots
+      .map((squad) => `${squad}:${normalized[squad] || ""}`)
+      .join("|");
+  }
+
+  function hasSquadNameDraft(plan = {}) {
+    const planId = eventPlanId(plan);
+    return Boolean(planId && squadDisplayNameDraftsByPlanId[planId]);
+  }
+
+  function squadNameEditorHasChanges(plan = {}) {
+    return (
+      squadLabelsSignature(squadNameEditorValues(plan)) !==
+      squadLabelsSignature(squadNamesFromSource(plan))
+    );
   }
 
   function squadDisplayName(assignedSquad, source = {}) {
@@ -5149,16 +5184,12 @@ export default function PlayerHubPage({
     const key = normalizeCaptainSquadNameKey(squad);
     if (!planId || !key) return;
     const text = String(value || "").trimStart();
-    setSquadDisplayNamesByPlanId((current) => {
+    setSquadDisplayNameDraftsByPlanId((current) => {
       const currentPlanNames = current[planId] || {};
-      const nextPlanNames = { ...currentPlanNames };
-      const finalText = text.trim();
-      if (finalText) nextPlanNames[key] = text;
-      else delete nextPlanNames[key];
+      const nextPlanNames = { ...currentPlanNames, [key]: text };
 
       const next = { ...current };
-      if (Object.keys(nextPlanNames).length) next[planId] = nextPlanNames;
-      else delete next[planId];
+      next[planId] = nextPlanNames;
       return next;
     });
   }
@@ -5166,11 +5197,65 @@ export default function PlayerHubPage({
   function resetSquadDisplayNames(plan) {
     const planId = eventPlanId(plan);
     if (!planId) return;
-    setSquadDisplayNamesByPlanId((current) => {
+    setSquadDisplayNameDraftsByPlanId((current) => {
       const next = { ...current };
       delete next[planId];
       return next;
     });
+  }
+
+  async function saveSquadDisplayNames(plan) {
+    const planId = eventPlanId(plan);
+    if (!updateTournamentSquadLabels || !planId) return;
+
+    setSquadNamesSavingPlanId(planId);
+    setTournamentPlanMessage("");
+
+    try {
+      const squadLabels = normalizeSquadDisplayNames(squadNameEditorValues(plan));
+      const data = await updateTournamentSquadLabels(planId, squadLabels);
+      if (Array.isArray(data?.plans) && data.plans.length) {
+        setTournamentPlans(data.plans);
+      } else if (data?.plan) {
+        setTournamentPlans((current) =>
+          current.map((item) =>
+            String(item.planId || "") === String(data.plan.planId || "")
+              ? data.plan
+              : item
+          )
+        );
+      }
+      if (data?.roster || Array.isArray(data?.players)) {
+        setCaptainRosterDraftsByPlanId((current) => ({
+          ...current,
+          [planId]: {
+            roster: data?.roster || current[planId]?.roster || null,
+            players: Array.isArray(data?.players)
+              ? data.players
+              : current[planId]?.players || [],
+          },
+        }));
+      }
+      resetSquadDisplayNames(plan);
+      setTournamentPlanStatus("ready");
+      setTournamentPlanMessage("Squad names saved.");
+      await loadTournamentPlans();
+      if (expandedSquadPlanId === planId) {
+        await loadSquadPlanningForPlan(planId);
+        await loadRosterDraftForPlan(planId);
+      }
+      await loadPlayerTournamentAvailability();
+      await loadPlayerTournamentSquadPlanning();
+      await loadPlayerRosterStatus();
+      await loadAdminRosterDrafts();
+    } catch (error) {
+      setTournamentPlanStatus("error");
+      setTournamentPlanMessage(
+        cleanPlayerHubError(error, "Could not save squad names.")
+      );
+    } finally {
+      setSquadNamesSavingPlanId("");
+    }
   }
 
   function eventIdentityKey(event) {
@@ -6766,7 +6851,10 @@ export default function PlayerHubPage({
       0
     );
     const pendingCount = pendingPlayers.length;
-    const planSquadNames = squadDisplayNamesForSource(plan);
+    const planSquadNames = squadNameEditorValues(plan);
+    const hasNameDraft = hasSquadNameDraft(plan);
+    const hasNameChanges = squadNameEditorHasChanges(plan);
+    const isSavingNames = squadNamesSavingPlanId === plan.planId;
 
     return (
       <section style={playerHubStyles.squadBoard} data-testid="plan-teams-board">
@@ -6810,19 +6898,34 @@ export default function PlayerHubPage({
             <div style={playerHubStyles.profileMeta}>
               <strong style={playerHubStyles.previewTitle}>Squad names</strong>
               <span style={playerHubStyles.previewSubtitle}>
-                Display labels only. Assignments still use A / B / C / Reserve.
+                Saved display labels. Assignments still use A / B / C / Reserve.
               </span>
             </div>
-            {Object.keys(planSquadNames).length ? (
+            <div style={playerHubStyles.profileActions}>
+              {hasNameDraft ? (
+                <button
+                  type="button"
+                  style={playerHubStyles.feedTinyAction}
+                  onClick={() => resetSquadDisplayNames(plan)}
+                  disabled={boardLocked || isSavingNames}
+                >
+                  Discard
+                </button>
+              ) : null}
               <button
                 type="button"
                 style={playerHubStyles.feedTinyAction}
-                onClick={() => resetSquadDisplayNames(plan)}
-                disabled={boardLocked}
+                onClick={() => saveSquadDisplayNames(plan)}
+                disabled={
+                  boardLocked ||
+                  isSavingNames ||
+                  !hasNameChanges ||
+                  !updateTournamentSquadLabels
+                }
               >
-                Reset
+                {isSavingNames ? "Saving..." : "Save names"}
               </button>
-            ) : null}
+            </div>
           </div>
           <div style={playerHubStyles.squadNamesGrid}>
             {captainSquadNameSlots.map((squad) => {
@@ -6839,7 +6942,7 @@ export default function PlayerHubPage({
                     value={planSquadNames[squad] || ""}
                     placeholder={suggestion}
                     maxLength={40}
-                    disabled={boardLocked}
+                    disabled={boardLocked || isSavingNames}
                     onChange={(event) =>
                       updateSquadDisplayName(plan, squad, event.target.value)
                     }
@@ -7933,6 +8036,7 @@ export default function PlayerHubPage({
             <button
               key={tab.id}
               type="button"
+              data-testid={`player-hub-tab-${tab.id}`}
               style={{
                 ...playerHubStyles.hubNavButton,
                 ...(active ? playerHubStyles.hubNavButtonActive : {}),
