@@ -65,8 +65,9 @@ const captainSquadNameSlotLabels = {
   A: "Team A",
   B: "Team B",
   C: "Team C",
-  RESERVE: "Team D",
+  RESERVE: "Reserve",
 };
+const captainSquadNameSuggestionSuffixes = ["White", "Black", "Gold", "Blue"];
 const squadNameStoragePrefix = "makeTeamsPro.playerHub.squadNames.v1";
 
 function passportText(...values) {
@@ -101,11 +102,15 @@ function fallbackSquadDisplayName(value) {
 function squadNameSuggestion(value, clubName) {
   const key = normalizeCaptainSquadNameKey(value);
   const base = passportText(clubName, "Team");
-  if (key === "A") return `${base} White`;
-  if (key === "B") return `${base} Black`;
-  if (key === "C") return `${base} Gold`;
-  if (key === "RESERVE") return `${base} Blue`;
+  if (key === "A") return squadNameSuggestionForSuffix(base, "White");
+  if (key === "B") return squadNameSuggestionForSuffix(base, "Black");
+  if (key === "C") return squadNameSuggestionForSuffix(base, "Gold");
+  if (key === "RESERVE") return squadNameSuggestionForSuffix(base, "Blue");
   return "";
+}
+
+function squadNameSuggestionForSuffix(clubName, suffix) {
+  return `${passportText(clubName, "Team")} ${suffix}`;
 }
 
 function normalizeSquadDisplayNames(value) {
@@ -356,12 +361,21 @@ function getRecentPlayerActivity(playerEvents, resolveSquadDisplayName) {
         planning.preferredSquad,
         base.preferredSquad
       );
+      const squadLabelSource = {
+        ...base,
+        ...availability,
+        ...planning,
+        ...roster,
+        availability,
+        planning,
+        roster,
+      };
       const assignedSquad = assignedSquadRaw
-        ? resolveSquadDisplayName?.(assignedSquadRaw, base) ||
+        ? resolveSquadDisplayName?.(assignedSquadRaw, squadLabelSource) ||
           normalizePassportAssignedSquad(assignedSquadRaw)
         : "";
       const preference = preferenceRaw
-        ? resolveSquadDisplayName?.(preferenceRaw, base) ||
+        ? resolveSquadDisplayName?.(preferenceRaw, squadLabelSource) ||
           normalizePassportAssignedSquad(preferenceRaw)
         : "";
       const sortTime = getPassportSortTime(
@@ -2950,33 +2964,80 @@ Object.assign(playerHubStyles, {
   squadNamesPanel: {
     ...hubGlassPanelSoft,
     display: "grid",
-    gap: "10px",
+    gap: "12px",
     padding: "12px",
-    borderRadius: "20px",
+    borderRadius: "18px",
     minWidth: 0,
   },
   squadNamesGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 170px), 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))",
     gap: "8px",
     minWidth: 0,
   },
   squadNameField: {
     display: "grid",
-    gap: "5px",
+    gap: "8px",
+    padding: "10px",
+    borderRadius: "14px",
+    border: "1px solid rgba(125,211,252,0.14)",
+    background: "rgba(15,23,42,0.42)",
     minWidth: 0,
   },
-  squadNameLabel: {
+  squadNameMapRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "8px",
+    alignItems: "center",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  squadNameMapText: {
+    display: "flex",
+    alignItems: "center",
+    gap: "7px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  squadNameInternal: {
     color: hubDarkPalette.muted,
     fontSize: "11px",
     fontWeight: "900",
-    textTransform: "uppercase",
-    letterSpacing: "0.02em",
+    whiteSpace: "nowrap",
+  },
+  squadNameArrow: {
+    color: hubDarkPalette.dim,
+    fontSize: "12px",
+    fontWeight: "900",
+    whiteSpace: "nowrap",
+  },
+  squadNameDisplay: {
+    color: hubDarkPalette.text,
+    fontSize: "13px",
+    fontWeight: "950",
+    lineHeight: 1.25,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+    minWidth: 0,
+  },
+  squadNameActions: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: "6px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  squadNameEditPanel: {
+    display: "grid",
+    gap: "7px",
+    minWidth: 0,
   },
   squadNameInput: {
     ...playerHubStyles.profileInput,
     minHeight: "38px",
     fontSize: "13px",
+    background: "rgba(248,250,252,0.98)",
   },
   squadNameHint: {
     color: hubDarkPalette.muted,
@@ -2984,6 +3045,24 @@ Object.assign(playerHubStyles, {
     lineHeight: 1.3,
     overflowWrap: "break-word",
     wordBreak: "normal",
+  },
+  squadNameSuggestionRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  squadNameSuggestionButton: {
+    border: "1px solid rgba(125,211,252,0.18)",
+    borderRadius: "999px",
+    padding: "5px 8px",
+    background: "rgba(2,6,23,0.34)",
+    color: hubDarkPalette.muted,
+    fontSize: "11px",
+    fontWeight: "900",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
   },
 });
 
@@ -3239,6 +3318,7 @@ export default function PlayerHubPage({
   const [squadDisplayNameDraftsByPlanId, setSquadDisplayNameDraftsByPlanId] = useState(
     () => readStoredSquadDisplayNames(username)
   );
+  const [squadNameEditingByPlanId, setSquadNameEditingByPlanId] = useState({});
   const [squadNamesSavingPlanId, setSquadNamesSavingPlanId] = useState("");
   const [rosterDraftUpdatingPlanId, setRosterDraftUpdatingPlanId] =
     useState("");
@@ -5179,6 +5259,21 @@ export default function PlayerHubPage({
     return `Preferred: ${squadDisplayName(key, source)}`;
   }
 
+  function squadNameEditingSlot(plan = {}) {
+    const planId = eventPlanId(plan);
+    return planId ? squadNameEditingByPlanId[planId] || "" : "";
+  }
+
+  function toggleSquadNameEdit(plan, squad) {
+    const planId = eventPlanId(plan);
+    const key = normalizeCaptainSquadNameKey(squad);
+    if (!planId || !key) return;
+    setSquadNameEditingByPlanId((current) => ({
+      ...current,
+      [planId]: current[planId] === key ? "" : key,
+    }));
+  }
+
   function updateSquadDisplayName(plan, squad, value) {
     const planId = eventPlanId(plan);
     const key = normalizeCaptainSquadNameKey(squad);
@@ -5194,10 +5289,37 @@ export default function PlayerHubPage({
     });
   }
 
+  function resetSquadDisplayName(plan, squad) {
+    updateSquadDisplayName(plan, squad, "");
+  }
+
+  function applySquadNameSuggestion(plan, squad, suffix) {
+    const planId = eventPlanId(plan);
+    const key = normalizeCaptainSquadNameKey(squad);
+    if (!planId || !key) return;
+    updateSquadDisplayName(
+      plan,
+      key,
+      squadNameSuggestionForSuffix(
+        plan.clubTeamName || teamProfile?.clubTeamName || selectedProfileTeamName,
+        suffix
+      )
+    );
+    setSquadNameEditingByPlanId((current) => ({
+      ...current,
+      [planId]: key,
+    }));
+  }
+
   function resetSquadDisplayNames(plan) {
     const planId = eventPlanId(plan);
     if (!planId) return;
     setSquadDisplayNameDraftsByPlanId((current) => {
+      const next = { ...current };
+      delete next[planId];
+      return next;
+    });
+    setSquadNameEditingByPlanId((current) => {
       const next = { ...current };
       delete next[planId];
       return next;
@@ -6855,6 +6977,9 @@ export default function PlayerHubPage({
     const hasNameDraft = hasSquadNameDraft(plan);
     const hasNameChanges = squadNameEditorHasChanges(plan);
     const isSavingNames = squadNamesSavingPlanId === plan.planId;
+    const editingSquadName = squadNameEditingSlot(plan);
+    const squadSuggestionBase =
+      plan.clubTeamName || teamProfile?.clubTeamName || selectedProfileTeamName;
 
     return (
       <section style={playerHubStyles.squadBoard} data-testid="plan-teams-board">
@@ -6898,7 +7023,7 @@ export default function PlayerHubPage({
             <div style={playerHubStyles.profileMeta}>
               <strong style={playerHubStyles.previewTitle}>Squad names</strong>
               <span style={playerHubStyles.previewSubtitle}>
-                Saved display labels. Assignments still use A / B / C / Reserve.
+                Names shown to players. Internal slots stay A/B/C.
               </span>
             </div>
             <div style={playerHubStyles.profileActions}>
@@ -6932,25 +7057,79 @@ export default function PlayerHubPage({
               const fallback = squadNameEditorSlotLabel(squad);
               const suggestion = squadNameSuggestion(
                 squad,
-                plan.clubTeamName || teamProfile?.clubTeamName || selectedProfileTeamName
+                squadSuggestionBase
               );
+              const displayName = passportText(planSquadNames[squad], fallback);
+              const hasCustomName = Boolean(passportText(planSquadNames[squad]));
+              const isEditingName = editingSquadName === squad;
               return (
-                <label key={squad} style={playerHubStyles.squadNameField}>
-                  <span style={playerHubStyles.squadNameLabel}>{fallback}</span>
-                  <input
-                    style={playerHubStyles.squadNameInput}
-                    value={planSquadNames[squad] || ""}
-                    placeholder={suggestion}
-                    maxLength={40}
-                    disabled={boardLocked || isSavingNames}
-                    onChange={(event) =>
-                      updateSquadDisplayName(plan, squad, event.target.value)
-                    }
-                  />
-                  <span style={playerHubStyles.squadNameHint}>
-                    Default: {suggestion}
-                  </span>
-                </label>
+                <section key={squad} style={playerHubStyles.squadNameField}>
+                  <div style={playerHubStyles.squadNameMapRow}>
+                    <div style={playerHubStyles.squadNameMapText}>
+                      <span style={playerHubStyles.squadNameInternal}>
+                        {fallback}
+                      </span>
+                      <span style={playerHubStyles.squadNameArrow}>{"->"}</span>
+                      <strong style={playerHubStyles.squadNameDisplay}>
+                        {displayName}
+                      </strong>
+                    </div>
+                    <div style={playerHubStyles.squadNameActions}>
+                      <button
+                        type="button"
+                        style={playerHubStyles.feedTinyAction}
+                        onClick={() => toggleSquadNameEdit(plan, squad)}
+                        disabled={boardLocked || isSavingNames}
+                      >
+                        {isEditingName ? "Done" : "Rename"}
+                      </button>
+                      <button
+                        type="button"
+                        style={playerHubStyles.feedTinyAction}
+                        onClick={() => resetSquadDisplayName(plan, squad)}
+                        disabled={boardLocked || isSavingNames || !hasCustomName}
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  </div>
+                  {isEditingName ? (
+                    <div style={playerHubStyles.squadNameEditPanel}>
+                      <input
+                        style={playerHubStyles.squadNameInput}
+                        value={planSquadNames[squad] || ""}
+                        placeholder={suggestion}
+                        maxLength={40}
+                        aria-label={`Display name for ${fallback}`}
+                        disabled={boardLocked || isSavingNames}
+                        onChange={(event) =>
+                          updateSquadDisplayName(plan, squad, event.target.value)
+                        }
+                      />
+                      <div style={playerHubStyles.squadNameSuggestionRow}>
+                        {captainSquadNameSuggestionSuffixes.map((suffix) => (
+                          <button
+                            key={suffix}
+                            type="button"
+                            style={playerHubStyles.squadNameSuggestionButton}
+                            disabled={boardLocked || isSavingNames}
+                            onClick={() =>
+                              applySquadNameSuggestion(plan, squad, suffix)
+                            }
+                          >
+                            {suffix}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <span style={playerHubStyles.squadNameHint}>
+                      {hasCustomName
+                        ? "Display label only. Planning stays on the internal slot."
+                        : `Fallback label. Suggested: ${suggestion}`}
+                    </span>
+                  )}
+                </section>
               );
             })}
           </div>
