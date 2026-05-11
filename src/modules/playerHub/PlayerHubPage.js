@@ -60,12 +60,106 @@ function passportArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+const captainSquadNameSlots = ["A", "B", "C", "RESERVE"];
+const captainSquadNameSlotLabels = {
+  A: "Team A",
+  B: "Team B",
+  C: "Team C",
+  RESERVE: "Team D",
+};
+const squadNameStoragePrefix = "makeTeamsPro.playerHub.squadNames.v1";
+
 function passportText(...values) {
   for (const value of values) {
     const text = String(value || "").trim();
     if (text) return text;
   }
   return "";
+}
+
+function normalizeCaptainSquadNameKey(value) {
+  const text = passportText(value).toUpperCase().replace(/\s+/g, " ");
+  const teamMatch = text.match(/^TEAM ([ABCD])$/);
+  if (teamMatch) return teamMatch[1] === "D" ? "RESERVE" : teamMatch[1];
+  if (text === "A" || text === "B" || text === "C") return text;
+  if (text === "RESERVE" || text === "RES" || text === "D") return "RESERVE";
+  return "";
+}
+
+function squadNameEditorSlotLabel(value) {
+  const key = normalizeCaptainSquadNameKey(value);
+  return captainSquadNameSlotLabels[key] || fallbackSquadDisplayName(value);
+}
+
+function fallbackSquadDisplayName(value) {
+  const key = normalizeCaptainSquadNameKey(value);
+  if (key === "A" || key === "B" || key === "C") return `Team ${key}`;
+  if (key === "RESERVE") return "Reserve";
+  return "Unassigned";
+}
+
+function squadNameSuggestion(value, clubName) {
+  const key = normalizeCaptainSquadNameKey(value);
+  const base = passportText(clubName, "Team");
+  if (key === "A") return `${base} White`;
+  if (key === "B") return `${base} Black`;
+  if (key === "C") return `${base} Gold`;
+  if (key === "RESERVE") return `${base} Blue`;
+  return "";
+}
+
+function normalizeSquadDisplayNames(value) {
+  let source = value;
+  if (typeof source === "string") {
+    try {
+      source = JSON.parse(source);
+    } catch (error) {
+      return {};
+    }
+  }
+  if (!source || typeof source !== "object" || Array.isArray(source)) return {};
+
+  return Object.entries(source).reduce((names, [key, label]) => {
+    const normalizedKey = normalizeCaptainSquadNameKey(key);
+    const text = passportText(label);
+    if (normalizedKey && text) names[normalizedKey] = text;
+    return names;
+  }, {});
+}
+
+function readStoredSquadDisplayNames(username) {
+  if (typeof window === "undefined" || !window.localStorage) return {};
+  const key = `${squadNameStoragePrefix}:${passportText(username, "guest")}`;
+  try {
+    return normalizeStoredSquadDisplayNames(JSON.parse(window.localStorage.getItem(key) || "{}"));
+  } catch (error) {
+    return {};
+  }
+}
+
+function writeStoredSquadDisplayNames(username, value) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  const key = `${squadNameStoragePrefix}:${passportText(username, "guest")}`;
+  try {
+    window.localStorage.setItem(
+      key,
+      JSON.stringify(normalizeStoredSquadDisplayNames(value))
+    );
+  } catch (error) {
+    // Local persistence is a convenience only; ignore storage failures.
+  }
+}
+
+function normalizeStoredSquadDisplayNames(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.entries(value).reduce((plans, [planId, names]) => {
+    const safePlanId = passportText(planId);
+    const normalizedNames = normalizeSquadDisplayNames(names);
+    if (safePlanId && Object.keys(normalizedNames).length) {
+      plans[safePlanId] = normalizedNames;
+    }
+    return plans;
+  }, {});
 }
 
 function normalizePassportAvailabilityStatus(...values) {
@@ -231,7 +325,7 @@ function buildPlayerAchievements({
   ];
 }
 
-function getRecentPlayerActivity(playerEvents) {
+function getRecentPlayerActivity(playerEvents, resolveSquadDisplayName) {
   return passportArray(playerEvents)
     .map((bundle) => {
       const base =
@@ -252,16 +346,24 @@ function getRecentPlayerActivity(playerEvents) {
               planning.availabilityStatus ||
               base.responseStatus
           );
-      const assignedSquad = normalizePassportAssignedSquad(
+      const assignedSquadRaw = passportText(
         planning.assignedSquad,
         roster.assignedSquad,
         base.assignedSquad
       );
-      const preference = normalizePassportAssignedSquad(
+      const preferenceRaw = passportText(
         availability.preferredSquad,
         planning.preferredSquad,
         base.preferredSquad
       );
+      const assignedSquad = assignedSquadRaw
+        ? resolveSquadDisplayName?.(assignedSquadRaw, base) ||
+          normalizePassportAssignedSquad(assignedSquadRaw)
+        : "";
+      const preference = preferenceRaw
+        ? resolveSquadDisplayName?.(preferenceRaw, base) ||
+          normalizePassportAssignedSquad(preferenceRaw)
+        : "";
       const sortTime = getPassportSortTime(
         base.updatedAt,
         base.respondedAt,
@@ -295,7 +397,7 @@ function getRecentPlayerActivity(playerEvents) {
         status,
         note: passportText(
           assignedSquad ? assignedSquad : "",
-          preference ? `Preferred ${preference.replace("Team ", "")}` : "",
+          preference ? `Preferred ${preference}` : "",
           availability.responseNote,
           availability.note,
           planning.note,
@@ -2845,6 +2947,44 @@ Object.assign(playerHubStyles, {
     minHeight: "auto",
     padding: "16px",
   },
+  squadNamesPanel: {
+    ...hubGlassPanelSoft,
+    display: "grid",
+    gap: "10px",
+    padding: "12px",
+    borderRadius: "20px",
+    minWidth: 0,
+  },
+  squadNamesGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 170px), 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+  squadNameField: {
+    display: "grid",
+    gap: "5px",
+    minWidth: 0,
+  },
+  squadNameLabel: {
+    color: hubDarkPalette.muted,
+    fontSize: "11px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: "0.02em",
+  },
+  squadNameInput: {
+    ...playerHubStyles.profileInput,
+    minHeight: "38px",
+    fontSize: "13px",
+  },
+  squadNameHint: {
+    color: hubDarkPalette.muted,
+    fontSize: "11px",
+    lineHeight: 1.3,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
 });
 
 export default function PlayerHubPage({
@@ -3095,6 +3235,9 @@ export default function PlayerHubPage({
   const [squadPlanningUpdatingId, setSquadPlanningUpdatingId] = useState("");
   const [captainRosterDraftsByPlanId, setCaptainRosterDraftsByPlanId] =
     useState({});
+  const [squadDisplayNamesByPlanId, setSquadDisplayNamesByPlanId] = useState(
+    () => readStoredSquadDisplayNames(username)
+  );
   const [rosterDraftUpdatingPlanId, setRosterDraftUpdatingPlanId] =
     useState("");
   const [rosterDraftMessage, setRosterDraftMessage] = useState("");
@@ -4191,6 +4334,14 @@ export default function PlayerHubPage({
   ]);
 
   useEffect(() => {
+    setSquadDisplayNamesByPlanId(readStoredSquadDisplayNames(username));
+  }, [username]);
+
+  useEffect(() => {
+    writeStoredSquadDisplayNames(username, squadDisplayNamesByPlanId);
+  }, [squadDisplayNamesByPlanId, username]);
+
+  useEffect(() => {
     if (!canManageTeamProfile || snapshotInitialLoadComplete) return;
 
     const startedAt = startPlayerHubTimer();
@@ -4809,11 +4960,10 @@ export default function PlayerHubPage({
     return text.split("T")[0].split(" ")[0];
   }
 
-  function formatPreferredSquad(value) {
-    const text = String(value || "").trim().toUpperCase();
-    if (!text || text === "NO_PREFERENCE") return "";
-    if (text === "RESERVE") return "Preferred: Reserve";
-    return `Preferred: ${text}`;
+  function formatPreferredSquadForEvent(value, source) {
+    const key = normalizeCaptainSquadNameKey(value);
+    if (!key) return "";
+    return squadPreferenceLabel(key, source);
   }
 
   function shortAccountName(value) {
@@ -4852,13 +5002,6 @@ export default function PlayerHubPage({
       parts.push(`label ${plan.squadLabel}`);
     }
     return parts.join(" / ");
-  }
-
-  function plannedTeamLabel(assignedSquad) {
-    const squad = normalizeAssignedSquad(assignedSquad);
-    if (squad === "RESERVE") return "Reserve";
-    if (squad === "UNASSIGNED") return "Unassigned";
-    return squad;
   }
 
   function normalizeRosterStatus(status) {
@@ -4961,6 +5104,73 @@ export default function PlayerHubPage({
 
   function eventPlanId(event) {
     return String(event?.planId || event?.sourcePlanId || event?.eventId || "");
+  }
+
+  function squadNamesFromSource(source = {}) {
+    return [
+      source?.squadDisplayNames,
+      source?.squadNames,
+      source?.customSquadNames,
+      source?.teamNames,
+      source?.roster?.squadDisplayNames,
+      source?.roster?.squadNames,
+    ].reduce(
+      (names, value) => ({
+        ...names,
+        ...normalizeSquadDisplayNames(value),
+      }),
+      {}
+    );
+  }
+
+  function squadDisplayNamesForSource(source = {}) {
+    const planId = eventPlanId(source);
+    return {
+      ...squadNamesFromSource(source),
+      ...(planId ? squadDisplayNamesByPlanId[planId] || {} : {}),
+    };
+  }
+
+  function squadDisplayName(assignedSquad, source = {}) {
+    const key = normalizeCaptainSquadNameKey(assignedSquad);
+    if (!key) return fallbackSquadDisplayName(assignedSquad);
+    const names = squadDisplayNamesForSource(source);
+    return passportText(names[key], fallbackSquadDisplayName(key));
+  }
+
+  function squadPreferenceLabel(assignedSquad, source = {}) {
+    const key = normalizeCaptainSquadNameKey(assignedSquad);
+    if (!key) return "";
+    return `Preferred: ${squadDisplayName(key, source)}`;
+  }
+
+  function updateSquadDisplayName(plan, squad, value) {
+    const planId = eventPlanId(plan);
+    const key = normalizeCaptainSquadNameKey(squad);
+    if (!planId || !key) return;
+    const text = String(value || "").trimStart();
+    setSquadDisplayNamesByPlanId((current) => {
+      const currentPlanNames = current[planId] || {};
+      const nextPlanNames = { ...currentPlanNames };
+      const finalText = text.trim();
+      if (finalText) nextPlanNames[key] = text;
+      else delete nextPlanNames[key];
+
+      const next = { ...current };
+      if (Object.keys(nextPlanNames).length) next[planId] = nextPlanNames;
+      else delete next[planId];
+      return next;
+    });
+  }
+
+  function resetSquadDisplayNames(plan) {
+    const planId = eventPlanId(plan);
+    if (!planId) return;
+    setSquadDisplayNamesByPlanId((current) => {
+      const next = { ...current };
+      delete next[planId];
+      return next;
+    });
   }
 
   function eventIdentityKey(event) {
@@ -5327,9 +5537,7 @@ export default function PlayerHubPage({
     const plannedLabel =
       assignedSquad === "UNASSIGNED"
         ? ""
-        : assignedSquad === "RESERVE"
-          ? "Reserve"
-          : `Team ${plannedTeamLabel(assignedSquad)}`;
+        : squadDisplayName(assignedSquad, event);
     const rosterStatus = bundle?.roster
       ? normalizeRosterStatus(bundle.roster.rosterStatus)
       : "";
@@ -5346,8 +5554,9 @@ export default function PlayerHubPage({
       : availability
         ? tournamentAvailabilityStatusStyle(availabilityStatus)
         : playerHubStyles.accessStatusPending;
-    const preferredSquad = formatPreferredSquad(
-      availability?.preferredSquad || bundle?.planning?.preferredSquad
+    const preferredSquad = formatPreferredSquadForEvent(
+      availability?.preferredSquad || bundle?.planning?.preferredSquad,
+      event
     );
     const stats = tournamentPlanStats(event, []);
     const hasStats =
@@ -5435,10 +5644,11 @@ export default function PlayerHubPage({
                   }
                 >
                   <option value="NO_PREFERENCE">No preference</option>
-                  <option value="A">A</option>
-                  <option value="B">B</option>
-                  <option value="C">C</option>
-                  <option value="RESERVE">Reserve</option>
+                  {captainSquadNameSlots.map((squad) => (
+                    <option key={squad} value={squad}>
+                      {squadDisplayName(squad, event)}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label style={playerHubStyles.profileField}>
@@ -5631,7 +5841,10 @@ export default function PlayerHubPage({
                         <span style={playerHubStyles.previewSubtitle}>
                           {[
                             item.playerCountry || "No country",
-                            formatPreferredSquad(item.preferredSquad),
+                            formatPreferredSquadForEvent(
+                              item.preferredSquad,
+                              plan
+                            ),
                           ]
                             .filter(Boolean)
                             .join(" / ")}
@@ -6433,7 +6646,7 @@ export default function PlayerHubPage({
           <div style={playerHubStyles.squadBadgeRow}>
             {preferredSquad && preferredSquad !== "NO_PREFERENCE" ? (
               <span style={playerHubStyles.squadTinyBadge}>
-                Pref {preferredSquad}
+                Pref {squadDisplayName(preferredSquad, plan)}
               </span>
             ) : null}
             {isCurrentUser ? (
@@ -6458,6 +6671,8 @@ export default function PlayerHubPage({
                       : {}),
                   }}
                   disabled={squadPlanningUpdatingId === `${updatePrefix}:${squad}`}
+                  aria-label={`Move to ${squadDisplayName(squad, plan)}`}
+                  title={squadDisplayName(squad, plan)}
                   onClick={() => handleAssignTournamentSquad(plan, item, squad)}
                 >
                   {squad === "RESERVE" ? "Res" : squad}
@@ -6523,10 +6738,10 @@ export default function PlayerHubPage({
       (item) => normalizeTournamentAvailabilityStatus(item.responseStatus) === "PENDING"
     );
     const assignedGroups = [
-      ["A", "Team A"],
-      ["B", "Team B"],
-      ["C", "Team C"],
-      ["RESERVE", "Reserve"],
+      ["A", squadDisplayName("A", plan)],
+      ["B", squadDisplayName("B", plan)],
+      ["C", squadDisplayName("C", plan)],
+      ["RESERVE", squadDisplayName("RESERVE", plan)],
     ].map(([squad, label]) => ({
       squad,
       label,
@@ -6551,6 +6766,7 @@ export default function PlayerHubPage({
       0
     );
     const pendingCount = pendingPlayers.length;
+    const planSquadNames = squadDisplayNamesForSource(plan);
 
     return (
       <section style={playerHubStyles.squadBoard} data-testid="plan-teams-board">
@@ -6588,6 +6804,54 @@ export default function PlayerHubPage({
             ) : null}
           </div>
         </div>
+
+        <section style={playerHubStyles.squadNamesPanel}>
+          <div style={playerHubStyles.homeCardHeader}>
+            <div style={playerHubStyles.profileMeta}>
+              <strong style={playerHubStyles.previewTitle}>Squad names</strong>
+              <span style={playerHubStyles.previewSubtitle}>
+                Display labels only. Assignments still use A / B / C / Reserve.
+              </span>
+            </div>
+            {Object.keys(planSquadNames).length ? (
+              <button
+                type="button"
+                style={playerHubStyles.feedTinyAction}
+                onClick={() => resetSquadDisplayNames(plan)}
+                disabled={boardLocked}
+              >
+                Reset
+              </button>
+            ) : null}
+          </div>
+          <div style={playerHubStyles.squadNamesGrid}>
+            {captainSquadNameSlots.map((squad) => {
+              const fallback = squadNameEditorSlotLabel(squad);
+              const suggestion = squadNameSuggestion(
+                squad,
+                plan.clubTeamName || teamProfile?.clubTeamName || selectedProfileTeamName
+              );
+              return (
+                <label key={squad} style={playerHubStyles.squadNameField}>
+                  <span style={playerHubStyles.squadNameLabel}>{fallback}</span>
+                  <input
+                    style={playerHubStyles.squadNameInput}
+                    value={planSquadNames[squad] || ""}
+                    placeholder={suggestion}
+                    maxLength={40}
+                    disabled={boardLocked}
+                    onChange={(event) =>
+                      updateSquadDisplayName(plan, squad, event.target.value)
+                    }
+                  />
+                  <span style={playerHubStyles.squadNameHint}>
+                    Default: {suggestion}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </section>
 
         <div style={playerHubStyles.squadBuilderLayout}>
           <section style={playerHubStyles.squadColumn} data-testid="plan-available">
@@ -6730,10 +6994,10 @@ export default function PlayerHubPage({
     const isUpdating = rosterDraftUpdatingPlanId === plan.planId;
     const submitConfirmOpen = submitRosterConfirmPlanId === plan.planId;
     const groups = [
-      ["A", "Team A"],
-      ["B", "Team B"],
-      ["C", "Team C"],
-      ["RESERVE", "Reserve"],
+      ["A", squadDisplayName("A", plan)],
+      ["B", squadDisplayName("B", plan)],
+      ["C", squadDisplayName("C", plan)],
+      ["RESERVE", squadDisplayName("RESERVE", plan)],
     ].map(([squad, label]) => ({
       squad,
       label,
@@ -6816,12 +7080,7 @@ export default function PlayerHubPage({
                         <span style={playerHubStyles.squadPlayerMeta}>
                           {[
                             player.playerCountry || "No country",
-                            normalizeAssignedSquad(player.assignedSquad) ===
-                            "RESERVE"
-                              ? "Reserve"
-                              : `Team ${normalizeAssignedSquad(
-                                  player.assignedSquad
-                                )}`,
+                            squadDisplayName(player.assignedSquad, plan),
                           ].join(" · ")}
                         </span>
                       </div>
@@ -7441,7 +7700,10 @@ export default function PlayerHubPage({
     hasCaptainRole: canManageTeamProfile,
     squadActivityCount: passportSquadActivityCount,
   });
-  const passportActivityItems = getRecentPlayerActivity(playerDashboardEvents);
+  const passportActivityItems = getRecentPlayerActivity(
+    playerDashboardEvents,
+    squadDisplayName
+  );
   const passportStatCards = [
     ["Teams", passportStats.teamMembershipCount],
     ["Invites", passportStats.eventInvitationsCount],
@@ -11043,12 +11305,10 @@ export default function PlayerHubPage({
                                   <span style={playerHubStyles.squadPlayerMeta}>
                                     {[
                                       player.playerCountry || "No country",
-                                      normalizeAssignedSquad(player.assignedSquad) ===
-                                      "RESERVE"
-                                        ? "Reserve"
-                                        : `Team ${normalizeAssignedSquad(
-                                            player.assignedSquad
-                                          )}`,
+                                      squadDisplayName(
+                                        player.assignedSquad,
+                                        roster
+                                      ),
                                     ].join(" / ")}
                                   </span>
                                 </div>
