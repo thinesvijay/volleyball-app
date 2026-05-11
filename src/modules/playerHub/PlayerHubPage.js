@@ -167,6 +167,136 @@ function normalizeStoredSquadDisplayNames(value) {
   }, {});
 }
 
+function normalizeRosterLockConfig(value) {
+  const source =
+    value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const rawApplies =
+    source.appliesToSeries &&
+    typeof source.appliesToSeries === "object" &&
+    !Array.isArray(source.appliesToSeries)
+      ? source.appliesToSeries
+      : {};
+  const appliesToSeries = Object.entries(rawApplies).reduce(
+    (items, [key, deadline]) => {
+      const safeKey = passportText(key);
+      const safeDeadline = passportText(deadline);
+      if (safeKey && safeDeadline) items[safeKey] = safeDeadline;
+      return items;
+    },
+    {}
+  );
+  const deadlineIso = passportText(
+    source.deadlineIso,
+    source.deadline,
+    source.lockAt
+  );
+  const deadlineTime = deadlineIso ? Date.parse(deadlineIso) : 0;
+  const afterDeadline = Boolean(
+    source.afterDeadline ||
+      (source.enabled &&
+        deadlineIso &&
+        !Number.isNaN(deadlineTime) &&
+        Date.now() > deadlineTime)
+  );
+
+  return {
+    enabled: Boolean(source.enabled),
+    deadlineIso,
+    globalDeadlineIso: passportText(source.globalDeadlineIso),
+    seriesDeadlineIso: passportText(source.seriesDeadlineIso),
+    appliesToSeries,
+    afterDeadline,
+    updatedAt: passportText(source.updatedAt),
+    updatedBy: passportText(source.updatedBy),
+  };
+}
+
+function rosterLockKey(value) {
+  return passportText(value).toLowerCase().replace(/\s+/g, "-").replace(/_/g, "-");
+}
+
+function rosterLockSeriesAliases(source = {}, tournament = {}) {
+  const aliases = new Set();
+  const addAlias = (value) => {
+    const key = rosterLockKey(value);
+    if (key) aliases.add(key);
+  };
+
+  addAlias(source.seriesId);
+  addAlias(source.seriesName);
+  addAlias(source.className);
+
+  const classKey = rosterLockKey(source.className);
+  const seriesItems = Array.isArray(tournament.series) ? tournament.series : [];
+  seriesItems.forEach((series) => {
+    if (!series) return;
+    const seriesKeys = [
+      series.id,
+      series.name,
+      series.seriesName,
+      Number(series.playersPerTeam || series.teamSize || 0) === 4 ? "4-side" : "",
+      Number(series.playersPerTeam || series.teamSize || 0) === 5 ? "5-side" : "",
+    ];
+    const matches =
+      (!classKey && seriesItems.length === 1) ||
+      seriesKeys.some((key) => classKey && rosterLockKey(key) === classKey);
+    if (matches) seriesKeys.forEach(addAlias);
+  });
+
+  return aliases;
+}
+
+function resolveRosterLockForSource(source = {}, tournament = {}) {
+  const direct = normalizeRosterLockConfig(
+    source.rosterLock ||
+      source.playerHub?.rosterLock ||
+      source.roster?.rosterLock ||
+      source.plan?.rosterLock ||
+      {}
+  );
+  if (direct.enabled || direct.deadlineIso || direct.afterDeadline) return direct;
+
+  const tournamentLock = normalizeRosterLockConfig(
+    tournament.rosterLock || tournament.playerHub?.rosterLock || {}
+  );
+  if (!tournamentLock.enabled && !tournamentLock.deadlineIso) return tournamentLock;
+
+  const aliases = rosterLockSeriesAliases(source, tournament);
+  const seriesDeadlineIso =
+    Object.entries(tournamentLock.appliesToSeries || {}).find(([key]) =>
+      aliases.has(rosterLockKey(key))
+    )?.[1] || "";
+  return normalizeRosterLockConfig({
+    ...tournamentLock,
+    globalDeadlineIso: tournamentLock.deadlineIso,
+    seriesDeadlineIso,
+    deadlineIso: seriesDeadlineIso || tournamentLock.deadlineIso,
+  });
+}
+
+function rosterLockLabel(lock) {
+  const safeLock = normalizeRosterLockConfig(lock);
+  if (!safeLock.enabled || !safeLock.deadlineIso) return "";
+  const date = new Date(safeLock.deadlineIso);
+  if (Number.isNaN(date.getTime())) return "";
+  return `Roster locks at ${date.toLocaleString()}`;
+}
+
+function rosterChangedAfterDeadline(roster = {}, lock = {}) {
+  const safeLock = normalizeRosterLockConfig(lock);
+  if (roster.changedAfterDeadline) return true;
+  if (!safeLock.deadlineIso) return false;
+  const deadlineTime = Date.parse(safeLock.deadlineIso);
+  const changedTime = Date.parse(
+    roster.updatedAt || roster.reviewedAt || roster.lockedAt || roster.submittedAt || ""
+  );
+  return (
+    !Number.isNaN(deadlineTime) &&
+    !Number.isNaN(changedTime) &&
+    changedTime > deadlineTime
+  );
+}
+
 function normalizePassportAvailabilityStatus(...values) {
   const value = passportText(...values).toUpperCase();
   if (value === "YES" || value === "GOING") return "YES";
@@ -5336,6 +5466,27 @@ export default function PlayerHubPage({
     return passportText(names[key], fallbackSquadDisplayName(key));
   }
 
+  function tournamentOptionForSource(source = {}) {
+    const tournamentId = String(source?.tournamentId || source?.id || "").trim();
+    if (!tournamentId) return null;
+    return (
+      (Array.isArray(tournamentOptions) ? tournamentOptions : []).find(
+        (option) => String(option?.id || option?.tournamentId || "") === tournamentId
+      ) || null
+    );
+  }
+
+  function rosterLockForSource(source = {}) {
+    return resolveRosterLockForSource(source, tournamentOptionForSource(source) || {});
+  }
+
+  function rosterLockChipText(source = {}) {
+    const lock = rosterLockForSource(source);
+    if (!lock.enabled || !lock.deadlineIso) return "";
+    if (lock.afterDeadline) return "After deadline";
+    return rosterLockLabel(lock);
+  }
+
   function squadPreferenceLabel(assignedSquad, source = {}) {
     const key = normalizeCaptainSquadNameKey(assignedSquad);
     if (!key) return "";
@@ -5848,6 +5999,7 @@ export default function PlayerHubPage({
       availability?.preferredSquad || bundle?.planning?.preferredSquad,
       event
     );
+    const eventRosterLockText = rosterLockChipText(event);
     const stats = tournamentPlanStats(event, []);
     const hasStats =
       Number(stats.total || 0) > 1 ||
@@ -5910,6 +6062,9 @@ export default function PlayerHubPage({
           ) : null}
           {preferredSquad ? (
             <span style={playerHubStyles.chip}>{preferredSquad}</span>
+          ) : null}
+          {eventRosterLockText ? (
+            <span style={playerHubStyles.chip}>{eventRosterLockText}</span>
           ) : null}
         </div>
 
@@ -6018,6 +6173,7 @@ export default function PlayerHubPage({
     const stats = tournamentPlanStats(plan, availability);
     const planMeta = compactPlanMeta(plan);
     const contextLabel = eventContextLabel(plan);
+    const rosterLockText = rosterLockChipText(plan);
     const visibleAvailability =
       expandedTournamentPlanId === plan.planId ? availability : [];
     const groups = ["YES", "MAYBE", "PENDING", "NO"].map((status) => ({
@@ -6052,11 +6208,15 @@ export default function PlayerHubPage({
 
         {renderEventStats(stats)}
 
-        {planMeta ? (
-          <div style={playerHubStyles.chipRow}>
+        <div style={playerHubStyles.chipRow}>
+          <span style={playerHubStyles.chip}>Availability asked</span>
+          {planMeta ? (
             <span style={playerHubStyles.chip}>{planMeta}</span>
-          </div>
-        ) : null}
+          ) : null}
+          {rosterLockText ? (
+            <span style={playerHubStyles.chip}>{rosterLockText}</span>
+          ) : null}
+        </div>
 
         <div style={playerHubStyles.eventActionBar}>
           <button
@@ -6256,8 +6416,14 @@ export default function PlayerHubPage({
     const roster = draftData.roster || null;
     const rosterStatus = roster ? normalizeRosterStatus(roster.rosterStatus) : "";
     const rosterActive = Boolean(roster && rosterStatus !== "CANCELLED");
+    const rosterLock = rosterLockForSource({ ...(plan || {}), ...(roster || {}) });
+    const lateChangeRequested = rosterStatus === "CHANGE_REQUESTED";
     const rosterCanSubmit =
-      rosterActive && (rosterStatus === "DRAFT" || rosterStatus === "REJECTED");
+      rosterActive &&
+      (rosterStatus === "DRAFT" ||
+        rosterStatus === "REJECTED" ||
+        lateChangeRequested) &&
+      (!rosterLock.afterDeadline || lateChangeRequested);
     const answeredCount = stats.yes + stats.maybe + stats.no;
     const assignedCount =
       assignedSquadPlayerCount(planning) ||
@@ -6285,6 +6451,8 @@ export default function PlayerHubPage({
       labelCount,
       roster,
       rosterStatus,
+      rosterLock,
+      lateChangeRequested,
       rosterActive,
       rosterCanSubmit,
       hasTournamentOptions: tournamentOptions.length > 0,
@@ -6383,6 +6551,8 @@ export default function PlayerHubPage({
         label: "Submit roster",
         status: submittedRoster
           ? "done"
+          : flow.rosterLock?.afterDeadline && !flow.lateChangeRequested
+            ? "blocked"
           : flow.rosterCanSubmit
             ? "next"
             : flow.assignedCount
@@ -6390,6 +6560,8 @@ export default function PlayerHubPage({
               : "blocked",
         detail: submittedRoster
           ? formatRosterStatus(flow.rosterStatus)
+          : flow.rosterLock?.afterDeadline && !flow.lateChangeRequested
+            ? "Contact organizer/admin for late changes."
           : flow.rosterCanSubmit
             ? "Ready to submit."
             : flow.assignedCount
@@ -7377,7 +7549,15 @@ export default function PlayerHubPage({
     const boardRosterStatus = normalizeRosterStatus(
       draftData?.roster?.rosterStatus
     );
-    const boardLocked = boardRosterStatus === "LOCKED";
+    const boardRosterLock = rosterLockForSource({
+      ...plan,
+      roster: draftData?.roster || null,
+    });
+    const boardLateChangeAllowed = boardRosterStatus === "CHANGE_REQUESTED";
+    const boardDeadlineLocked = Boolean(
+      boardRosterLock.afterDeadline && !boardLateChangeAllowed
+    );
+    const boardLocked = boardRosterStatus === "LOCKED" || boardDeadlineLocked;
     const activePlanning = planning.filter(
       (item) => item.planningStatus !== "REMOVED"
     );
@@ -7475,13 +7655,29 @@ export default function PlayerHubPage({
               Pending: {pendingCount}
             </span>
             <span style={playerHubStyles.chip}>
-              {boardLocked ? "Locked" : "Not official roster"}
+              {boardRosterStatus === "LOCKED"
+                ? "Locked"
+                : boardDeadlineLocked
+                  ? "After deadline"
+                  : "Not official roster"}
             </span>
+            {rosterLockLabel(boardRosterLock) ? (
+              <span style={playerHubStyles.chip}>
+                {rosterLockLabel(boardRosterLock)}
+              </span>
+            ) : null}
             {squadPlanningUpdatingId === `load:${plan.planId}` ? (
               <span style={playerHubStyles.chip}>Loading...</span>
             ) : null}
           </div>
         </div>
+
+        {boardDeadlineLocked ? (
+          <div style={playerHubStyles.profileMessage}>
+            Changes after this time require organizer/admin approval. Contact
+            organizer/admin for late roster changes.
+          </div>
+        ) : null}
 
         <section style={playerHubStyles.squadNamesPanel}>
           <div style={playerHubStyles.homeCardHeader}>
@@ -7709,10 +7905,22 @@ export default function PlayerHubPage({
     const rosterIsApproved = rosterIsActive && rosterStatus === "APPROVED";
     const rosterIsRejected = rosterIsActive && rosterStatus === "REJECTED";
     const rosterIsLocked = rosterIsActive && rosterStatus === "LOCKED";
+    const rosterIsLateChangeRequested =
+      rosterIsActive && rosterStatus === "CHANGE_REQUESTED";
+    const rosterLock = rosterLockForSource({ ...plan, ...(roster || {}) });
+    const rosterAfterDeadline = Boolean(rosterLock.afterDeadline);
+    const rosterLockText = rosterLockLabel(rosterLock);
+    const changedAfterDeadline = rosterChangedAfterDeadline(roster || {}, rosterLock);
     const rosterCanEdit =
-      !rosterIsActive || rosterStatus === "DRAFT" || rosterIsRejected;
+      (!rosterIsActive ||
+        rosterStatus === "DRAFT" ||
+        rosterIsRejected ||
+        rosterIsLateChangeRequested) &&
+      (!rosterAfterDeadline || rosterIsLateChangeRequested);
     const rosterCanSubmit =
-      rosterIsActive && (rosterStatus === "DRAFT" || rosterIsRejected);
+      rosterIsActive &&
+      (rosterStatus === "DRAFT" || rosterIsRejected || rosterIsLateChangeRequested) &&
+      (!rosterAfterDeadline || rosterIsLateChangeRequested);
     const rosterPlayers = rosterIsActive && Array.isArray(draftData?.players)
       ? draftData.players.filter((player) => player.playerStatus !== "REMOVED")
       : [];
@@ -7781,12 +7989,56 @@ export default function PlayerHubPage({
             {rosterIsLocked ? (
               <span style={playerHubStyles.chip}>Official roster</span>
             ) : null}
+            {rosterIsLateChangeRequested ? (
+              <span style={playerHubStyles.chip}>Late change requested</span>
+            ) : null}
             {!rosterIsActive ? (
               <span style={playerHubStyles.chip}>Not saved</span>
+            ) : null}
+            {rosterAfterDeadline ? (
+              <span style={playerHubStyles.chip}>After deadline</span>
+            ) : null}
+            {changedAfterDeadline ? (
+              <span style={playerHubStyles.chip}>Late change</span>
+            ) : null}
+            {rosterLockText ? (
+              <span style={playerHubStyles.chip}>{rosterLockText}</span>
             ) : null}
             <span style={playerHubStyles.chip}>{players.length} players</span>
           </div>
         </div>
+
+        {rosterAfterDeadline && !rosterIsLocked ? (
+          <div style={playerHubStyles.profileMessage}>
+            Changes after this time require organizer/admin approval. Contact
+            organizer/admin for late changes.
+          </div>
+        ) : null}
+
+        {rosterIsActive ? (
+          <div style={playerHubStyles.chipRow}>
+            {roster.submittedAt ? (
+              <span style={playerHubStyles.chip}>
+                Submitted: {new Date(roster.submittedAt).toLocaleString()}
+              </span>
+            ) : null}
+            {roster.reviewedAt ? (
+              <span style={playerHubStyles.chip}>
+                Reviewed: {new Date(roster.reviewedAt).toLocaleString()}
+              </span>
+            ) : null}
+            {roster.lockedAt ? (
+              <span style={playerHubStyles.chip}>
+                Locked: {new Date(roster.lockedAt).toLocaleString()}
+              </span>
+            ) : null}
+            {roster.lockedBy || roster.reviewedBy || roster.submittedBy ? (
+              <span style={playerHubStyles.chip}>
+                By: {roster.lockedBy || roster.reviewedBy || roster.submittedBy}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
 
         {planningChanged ? (
           <div style={playerHubStyles.profileMessage}>
@@ -7946,9 +8198,11 @@ export default function PlayerHubPage({
                 type="button"
                 style={{
                   ...playerHubStyles.saveButton,
-                  ...(isUpdating ? playerHubStyles.saveButtonDisabled : {}),
+                  ...(isUpdating || rosterAfterDeadline
+                    ? playerHubStyles.saveButtonDisabled
+                    : {}),
                 }}
-                disabled={isUpdating}
+                disabled={isUpdating || rosterAfterDeadline}
                 onClick={() => handleSubmitRosterDraft(plan)}
               >
                 {isUpdating ? "Submitting..." : "Submit"}
@@ -7965,6 +8219,92 @@ export default function PlayerHubPage({
           </div>
         ) : null}
       </section>
+    );
+  }
+
+  function rosterSeriesReviewKey(roster = {}) {
+    return [
+      String(roster.tournamentId || "").trim() || "tournament",
+      rosterLockKey(
+        roster.className ||
+          roster.seriesName ||
+          roster.squadLabel ||
+          "default-series"
+      ),
+    ].join(":");
+  }
+
+  function buildAdminRosterDuplicateWarnings(rosters = []) {
+    const warningsByRosterId = {};
+    const playersBySeries = {};
+    const reviewStatuses = {
+      SUBMITTED: true,
+      APPROVED: true,
+      LOCKED: true,
+    };
+
+    (Array.isArray(rosters) ? rosters : []).forEach((roster) => {
+      const rosterId = String(roster?.rosterId || "");
+      if (!rosterId || !reviewStatuses[normalizeRosterStatus(roster?.rosterStatus)]) {
+        return;
+      }
+      const seriesKey = rosterSeriesReviewKey(roster);
+      const seenInRoster = {};
+      (Array.isArray(roster.players) ? roster.players : []).forEach((player) => {
+        if (!player || player.playerStatus === "REMOVED") return;
+        const playerKey = String(player.playerUsername || "")
+          .trim()
+          .toLowerCase();
+        if (!playerKey) return;
+        const playerName =
+          player.playerDisplayName || player.playerUsername || "Player";
+        if (seenInRoster[playerKey]) {
+          if (!warningsByRosterId[rosterId]) warningsByRosterId[rosterId] = [];
+          warningsByRosterId[rosterId].push(
+            `${playerName} appears twice on this roster.`
+          );
+        }
+        seenInRoster[playerKey] = true;
+        if (!playersBySeries[seriesKey]) playersBySeries[seriesKey] = {};
+        if (!playersBySeries[seriesKey][playerKey]) {
+          playersBySeries[seriesKey][playerKey] = [];
+        }
+        playersBySeries[seriesKey][playerKey].push({
+          rosterId,
+          teamName: roster.clubTeamName || "Team",
+          playerName,
+          status: normalizeRosterStatus(roster.rosterStatus),
+          className: roster.className || roster.squadLabel || "series",
+        });
+      });
+    });
+
+    Object.values(playersBySeries).forEach((players) => {
+      Object.values(players).forEach((entries) => {
+        const rosterIds = Array.from(new Set(entries.map((entry) => entry.rosterId)));
+        if (rosterIds.length < 2) return;
+        entries.forEach((entry) => {
+          const otherTeams = entries
+            .filter((other) => other.rosterId !== entry.rosterId)
+            .map((other) => other.teamName)
+            .filter(Boolean);
+          if (!warningsByRosterId[entry.rosterId]) {
+            warningsByRosterId[entry.rosterId] = [];
+          }
+          warningsByRosterId[entry.rosterId].push(
+            `${entry.playerName} also appears on ${Array.from(
+              new Set(otherTeams)
+            ).join(", ")} in ${entry.className}.`
+          );
+        });
+      });
+    });
+
+    return Object.fromEntries(
+      Object.entries(warningsByRosterId).map(([rosterId, warnings]) => [
+        rosterId,
+        Array.from(new Set(warnings)),
+      ])
     );
   }
 
@@ -8644,6 +8984,8 @@ export default function PlayerHubPage({
   const showCaptainChecklist =
     canManageTeamProfile && (showHubEvents || showHubTeam);
   const showPlayerAdsArea = showHubHome || showHubPlayers;
+  const adminRosterDuplicateWarningsByRosterId =
+    buildAdminRosterDuplicateWarnings(adminTournamentRosterDrafts);
 
   useEffect(() => {
     if (activeHubTab === "admin" && !canOpenAdminHubTab) {
@@ -11995,6 +12337,13 @@ export default function PlayerHubPage({
                   const isReviewUpdating = adminRosterReviewUpdatingId.startsWith(
                     `${roster.rosterId}:`
                   );
+                  const rosterLock = rosterLockForSource(roster);
+                  const duplicateWarnings =
+                    adminRosterDuplicateWarningsByRosterId[roster.rosterId] || [];
+                  const changedAfterDeadline = rosterChangedAfterDeadline(
+                    roster,
+                    rosterLock
+                  );
                   return (
                     <article
                       key={roster.rosterId}
@@ -12006,6 +12355,7 @@ export default function PlayerHubPage({
                         </strong>
                         <span style={playerHubStyles.previewSubtitle}>
                           {roster.clubTeamName || "Team"}
+                          {roster.className ? ` / ${roster.className}` : ""}
                           {!isNeutralPlanLabel(roster.squadLabel)
                             ? ` / Squad ${roster.squadLabel}`
                             : ""}
@@ -12026,6 +12376,9 @@ export default function PlayerHubPage({
                             Note: {roster.adminNote}
                           </span>
                         ) : null}
+                        <span style={playerHubStyles.previewSubtitle}>
+                          Public cannot see player names.
+                        </span>
                       </div>
                       <div style={playerHubStyles.chipRow}>
                         <span
@@ -12036,7 +12389,56 @@ export default function PlayerHubPage({
                         >
                           {formatRosterStatus(status)}
                         </span>
+                        {rosterLock.afterDeadline ? (
+                          <span style={playerHubStyles.chip}>After deadline</span>
+                        ) : null}
+                        {changedAfterDeadline ? (
+                          <span style={playerHubStyles.chip}>Late change</span>
+                        ) : null}
+                        {duplicateWarnings.length ? (
+                          <span style={playerHubStyles.chip}>
+                            Duplicate warning
+                          </span>
+                        ) : null}
+                        {rosterLockLabel(rosterLock) ? (
+                          <span style={playerHubStyles.chip}>
+                            {rosterLockLabel(rosterLock)}
+                          </span>
+                        ) : null}
                       </div>
+                      <div style={playerHubStyles.chipRow}>
+                        {roster.submittedAt ? (
+                          <span style={playerHubStyles.chip}>
+                            Submitted: {new Date(roster.submittedAt).toLocaleString()}
+                          </span>
+                        ) : null}
+                        {roster.reviewedAt ? (
+                          <span style={playerHubStyles.chip}>
+                            Reviewed: {new Date(roster.reviewedAt).toLocaleString()}
+                          </span>
+                        ) : null}
+                        {roster.lockedAt ? (
+                          <span style={playerHubStyles.chip}>
+                            Locked: {new Date(roster.lockedAt).toLocaleString()}
+                          </span>
+                        ) : null}
+                        {roster.lockedBy || roster.reviewedBy || roster.submittedBy ? (
+                          <span style={playerHubStyles.chip}>
+                            Changed by:{" "}
+                            {roster.lockedBy || roster.reviewedBy || roster.submittedBy}
+                          </span>
+                        ) : null}
+                        {roster.lockReason ? (
+                          <span style={playerHubStyles.chip}>
+                            Reason: {roster.lockReason}
+                          </span>
+                        ) : null}
+                      </div>
+                      {duplicateWarnings.length ? (
+                        <div style={playerHubStyles.profileMessage}>
+                          {duplicateWarnings.join(" ")}
+                        </div>
+                      ) : null}
                       <details>
                         <summary style={playerHubStyles.adminActionButton}>
                           View
@@ -12073,7 +12475,7 @@ export default function PlayerHubPage({
                           )}
                         </div>
                       </details>
-                      {status === "SUBMITTED" ? (
+                      {status === "SUBMITTED" || status === "CHANGE_REQUESTED" ? (
                         <div style={playerHubStyles.profileMeta}>
                           <textarea
                             value={noteValue}

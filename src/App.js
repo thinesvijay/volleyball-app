@@ -535,6 +535,13 @@ function getDefaultTournamentConfig() {
     publicLiveTextColor: "",
     publicLiveCardColor: "",
     publicLivePageBackground: "",
+    playerHub: {
+      rosterLock: {
+        enabled: false,
+        deadlineIso: "",
+        appliesToSeries: {},
+      },
+    },
     themeColor: "#0f766e",
     accentColor: "#22c55e",
     maxTeams: "",
@@ -579,6 +586,58 @@ function getTournamentIdentity(tournament) {
   ).trim();
 }
 
+function normalizeTournamentRosterLock(value = {}) {
+  const source =
+    value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const rawApplies =
+    source.appliesToSeries &&
+    typeof source.appliesToSeries === "object" &&
+    !Array.isArray(source.appliesToSeries)
+      ? source.appliesToSeries
+      : {};
+  const appliesToSeries = Object.entries(rawApplies).reduce(
+    (items, [key, deadline]) => {
+      const safeKey = String(key || "").trim();
+      const safeDeadline = String(deadline || "").trim();
+      if (safeKey && safeDeadline) items[safeKey] = safeDeadline;
+      return items;
+    },
+    {}
+  );
+
+  return {
+    enabled: Boolean(source.enabled),
+    deadlineIso: String(
+      source.deadlineIso || source.deadline || source.lockAt || ""
+    ).trim(),
+    appliesToSeries,
+    updatedAt: String(source.updatedAt || "").trim(),
+    updatedBy: String(source.updatedBy || "").trim(),
+  };
+}
+
+function getTournamentRosterLock(tournament) {
+  return normalizeTournamentRosterLock(
+    tournament?.playerHub?.rosterLock || tournament?.rosterLock || {}
+  );
+}
+
+function rosterLockIsoToInputValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) return "";
+  const offsetMs = date.getTimezoneOffset() * 60000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
+function rosterLockInputValueToIso(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
 function applyTournamentDefaults(tournament) {
   const defaults = getDefaultTournamentConfig();
   if (!tournament) return defaults;
@@ -600,6 +659,11 @@ function applyTournamentDefaults(tournament) {
       ...(tournament.publicTheme || {}),
     }),
     publicLiveTheme: getTournamentPublicLiveTheme(tournament),
+    playerHub: {
+      ...defaults.playerHub,
+      ...(tournament.playerHub || {}),
+      rosterLock: getTournamentRosterLock(tournament),
+    },
     courtBlocks: Array.isArray(tournament.courtBlocks)
       ? tournament.courtBlocks
       : [],
@@ -1864,7 +1928,18 @@ export default function App() {
     registrationUrlLabel: "Påmeldingslenke",
     contactLabel: "Kontakt",
     locationLabel: "Sted",
-    bothSeriesLabel: "4-side og 5-side"
+    bothSeriesLabel: "4-side og 5-side",
+    teamReadinessTitle: "Laginteresse og klarhet",
+    teamReadinessSubtitle:
+      "Spond viser spilleroppmote. Make Teams Pro viser hvilke lag som er interesserte, klare og last for turneringen.",
+    publicCountsPrivacyNote:
+      "Offentlig visning viser bare lagstatus, aldri spillerlister.",
+    interestedTeamsLabel: "Interessert",
+    availabilityActiveLabel: "Tilgjengelighet aktiv",
+    rosterSubmittedLabel: "Roster sendt",
+    confirmedTeamsLabel: "Bekreftet",
+    lockedTeamsLabel: "Last",
+    rosterLocksAtLabel: "Roster lases"
   } : {
     tabTitle: "Tournaments",
     loginRequired: "Sign in to manage tournaments",
@@ -2252,7 +2327,18 @@ export default function App() {
     registrationUrlLabel: "Registration URL",
     contactLabel: "Contact",
     locationLabel: "Location",
-    bothSeriesLabel: "4-side and 5-side"
+    bothSeriesLabel: "4-side and 5-side",
+    teamReadinessTitle: "Team interest and readiness",
+    teamReadinessSubtitle:
+      "Spond shows player attendance. Make Teams Pro shows which teams are interested, ready and locked for tournaments.",
+    publicCountsPrivacyNote:
+      "Public pages show team status only, never player name lists.",
+    interestedTeamsLabel: "Interested",
+    availabilityActiveLabel: "Availability active",
+    rosterSubmittedLabel: "Roster submitted",
+    confirmedTeamsLabel: "Confirmed",
+    lockedTeamsLabel: "Locked",
+    rosterLocksAtLabel: "Roster locks"
   };
 
   const [newPlayerClubOption, setNewPlayerClubOption] = useState("");
@@ -2375,20 +2461,29 @@ export default function App() {
     const optionsById = new Map();
     const addTournamentOption = (tournament) => {
       if (!tournament) return;
-      const id = String(tournament.id || tournament.tournamentId || "").trim();
+      const safeTournament = applyTournamentDefaults(tournament);
+      const id = String(
+        safeTournament.id || safeTournament.tournamentId || ""
+      ).trim();
       if (!id || optionsById.has(id)) return;
       optionsById.set(id, {
         id,
         name:
-          tournament.publicTitle ||
-          tournament.name ||
-          tournament.title ||
+          safeTournament.publicTitle ||
+          safeTournament.name ||
+          safeTournament.title ||
           "Tournament",
-        startDate: tournament.startDate || tournament.eventDate || "",
-        location: [tournament.city, tournament.country]
+        startDate: safeTournament.startDate || safeTournament.eventDate || "",
+        registrationDeadline: safeTournament.registrationDeadline || "",
+        location: [safeTournament.city, safeTournament.country]
           .map((part) => String(part || "").trim())
           .filter(Boolean)
           .join(", "),
+        series: Array.isArray(safeTournament.series)
+          ? safeTournament.series
+          : [],
+        playerHub: safeTournament.playerHub || {},
+        rosterLock: getTournamentRosterLock(safeTournament),
       });
     };
 
@@ -4962,6 +5057,38 @@ export default function App() {
     }
 
     updateTournamentSeries(seriesId, { publicStatus: safeStatus });
+  }
+
+  function updateActiveTournamentRosterLock(patch) {
+    if (!activeTournament) return;
+    const currentLock = getTournamentRosterLock(activeTournament);
+    updateActiveTournament({
+      playerHub: {
+        ...(activeTournament.playerHub || {}),
+        rosterLock: {
+          ...currentLock,
+          ...patch,
+          updatedAt: new Date().toISOString(),
+          updatedBy: auth.username || "",
+        },
+      },
+    });
+  }
+
+  function updateRosterLockSeriesDeadline(seriesId, deadlineIso) {
+    if (!activeTournament || !seriesId) return;
+    const currentLock = getTournamentRosterLock(activeTournament);
+    const nextAppliesToSeries = {
+      ...(currentLock.appliesToSeries || {}),
+    };
+    if (deadlineIso) {
+      nextAppliesToSeries[seriesId] = deadlineIso;
+    } else {
+      delete nextAppliesToSeries[seriesId];
+    }
+    updateActiveTournamentRosterLock({
+      appliesToSeries: nextAppliesToSeries,
+    });
   }
 
   function getTournamentStageOrder(stage) {
@@ -10000,6 +10127,108 @@ const savedRound = readStorageWithTtl(
     return startTime ? `${formatted} ${startTime}` : formatted;
   }
 
+  function formatPublicDateTimeValue(value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+
+    const date = new Date(text);
+    if (Number.isNaN(date.getTime())) return text;
+
+    return date.toLocaleString(
+      language === "no" ? "nb-NO" : language === "dk" ? "da-DK" : "en-US",
+      {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }
+    );
+  }
+
+  function getPublicTournamentRosterLockDeadline(tournament) {
+    const lock = getTournamentRosterLock(tournament);
+    if (!lock.enabled) return "";
+
+    const deadlines = [
+      lock.deadlineIso,
+      ...Object.values(lock.appliesToSeries || {}),
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => {
+        const aTime = Date.parse(a) || Number.MAX_SAFE_INTEGER;
+        const bTime = Date.parse(b) || Number.MAX_SAFE_INTEGER;
+        return aTime - bTime;
+      });
+
+    return deadlines[0] || "";
+  }
+
+  function getPublicTournamentTeamInterestCounts(tournament) {
+    const source =
+      tournament?.teamInterestCounts ||
+      tournament?.publicTeamInterestCounts ||
+      tournament?.publicReadiness ||
+      tournament?.readinessCounts ||
+      {};
+    const safeNumber = (...values) => {
+      const value = values.find((item) => item !== undefined && item !== null);
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    };
+
+    return {
+      interested: safeNumber(
+        source.interested,
+        source.interestedTeams,
+        source.teamInterest
+      ),
+      availabilityActive: safeNumber(
+        source.availabilityActive,
+        source.availabilityActiveTeams,
+        source.availabilityAsked
+      ),
+      rosterSubmitted: safeNumber(
+        source.rosterSubmitted,
+        source.rosterSubmittedTeams,
+        source.submitted
+      ),
+      confirmed: safeNumber(
+        source.confirmed,
+        source.confirmedTeams,
+        source.approved
+      ),
+      locked: safeNumber(source.locked, source.lockedTeams),
+    };
+  }
+
+  function getPublicTournamentReadinessMetrics(tournament) {
+    const counts = getPublicTournamentTeamInterestCounts(tournament);
+    return [
+      {
+        label: tournamentText.interestedTeamsLabel,
+        value: counts.interested,
+      },
+      {
+        label: tournamentText.availabilityActiveLabel,
+        value: counts.availabilityActive,
+      },
+      {
+        label: tournamentText.rosterSubmittedLabel,
+        value: counts.rosterSubmitted,
+      },
+      {
+        label: tournamentText.confirmedTeamsLabel,
+        value: counts.confirmed,
+      },
+      {
+        label: tournamentText.lockedTeamsLabel,
+        value: counts.locked,
+      },
+    ];
+  }
+
   function renderPublicUpcomingTournaments() {
     const isLoadingPublicTournaments = publicTournamentsStatus === "loading";
     const isPublicTournamentError = publicTournamentsStatus === "error";
@@ -10342,12 +10571,19 @@ const savedRound = readStorageWithTtl(
       .join(" / ");
     const publicTheme = getTournamentPublicCardTheme(tournament);
     const publicTitle = getTournamentPublicTitle(tournament);
-    const actionLabel = getPublicTournamentCardActionLabel(tournament);
     const cardImageUrl = getTournamentPublicCardImageUrl(tournament);
     const publicLogoUrl = getTournamentPublicLogoUrl(tournament);
     const organizer = getTournamentPublicOrganizerName(tournament);
+    const readinessMetrics = getPublicTournamentReadinessMetrics(tournament);
+    const rosterLockDeadline = getPublicTournamentRosterLockDeadline(tournament);
+    const rosterLockText = rosterLockDeadline
+      ? formatPublicDateTimeValue(rosterLockDeadline)
+      : "";
     const metaItems = [
       location ? { label: tournamentText.locationLabel, value: location } : null,
+      rosterLockText
+        ? { label: tournamentText.rosterLocksAtLabel, value: rosterLockText }
+        : null,
       organizer
         ? { label: tournamentText.organizerLabel, value: organizer }
         : null,
@@ -10452,6 +10688,40 @@ const savedRound = readStorageWithTtl(
             </div>
           )}
 
+          <div style={styles.landingTournamentReadinessGrid}>
+            {readinessMetrics.map((metric) => (
+              <div
+                key={metric.label}
+                style={{
+                  ...styles.landingTournamentReadinessItem,
+                  background: hexToRgba(publicTheme.surface, 0.78),
+                  borderColor: hexToRgba(publicTheme.border, 0.58),
+                }}
+              >
+                <strong
+                  style={{
+                    color: publicTheme.text,
+                    fontSize: "18px",
+                    lineHeight: 1,
+                    fontWeight: "950",
+                  }}
+                >
+                  {metric.value}
+                </strong>
+                <span
+                  style={{
+                    color: publicTheme.mutedText,
+                    fontSize: "10px",
+                    lineHeight: 1.15,
+                    fontWeight: "900",
+                  }}
+                >
+                  {metric.label}
+                </span>
+              </div>
+            ))}
+          </div>
+
           {metaItems.length > 0 && (
             <div style={styles.landingTournamentMetaList}>
               {metaItems.slice(0, 4).map((item) => (
@@ -10470,20 +10740,39 @@ const savedRound = readStorageWithTtl(
             </div>
           )}
 
-          <button
-            type="button"
-            style={{
-              ...styles.landingTournamentOpenButton,
-              background: publicTheme.primary,
-              color: publicTheme.background,
-            }}
-            onClick={(event) => {
-              event.stopPropagation();
-              if (!isPreview) openPublicTournamentFromCard(tournament);
-            }}
-          >
-            {actionLabel}
-          </button>
+          <div style={styles.landingTournamentActionRow}>
+            <button
+              type="button"
+              style={{
+                ...styles.landingTournamentOpenButton,
+                background: publicTheme.primary,
+                color: publicTheme.background,
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (!isPreview) openPublicTournamentFromCard(tournament);
+              }}
+            >
+              {tournamentText.followLive}
+            </button>
+            {tournament?.publicCode ? (
+              <button
+                type="button"
+                style={{
+                  ...styles.landingTournamentSecondaryButton,
+                  borderColor: hexToRgba(publicTheme.border, 0.72),
+                  color: publicTheme.text,
+                  background: hexToRgba(publicTheme.surface, 0.70),
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (!isPreview) openPublicTournamentFromCard(tournament);
+                }}
+              >
+                {tournamentText.viewTournamentDetails}
+              </button>
+            ) : null}
+          </div>
         </div>
       </article>
     );
@@ -10497,7 +10786,16 @@ const savedRound = readStorageWithTtl(
       <section style={styles.landingUpcomingSection}>
         <div style={styles.landingSectionHeader}>
           <div>
+            <span style={styles.landingEyebrow}>
+              {tournamentText.teamReadinessTitle}
+            </span>
             <h2 style={styles.landingSectionTitle}>{t.landingUpcomingTitle}</h2>
+            <p style={styles.landingSectionSubtitle}>
+              {tournamentText.teamReadinessSubtitle}
+            </p>
+            <p style={styles.landingPrivacyNote}>
+              {tournamentText.publicCountsPrivacyNote}
+            </p>
           </div>
           <div style={styles.landingFilterRow}>
             <select
@@ -11224,12 +11522,12 @@ const savedRound = readStorageWithTtl(
           </aside>
 
           <main style={styles.landingHeroGrid}>
-            <div style={styles.landingShowcaseGridItem}>
-              {renderLandingProductShowcase()}
-            </div>
-
             <div style={styles.landingUpcomingGridItem}>
               {renderLandingPublicTournamentShowcase()}
+            </div>
+
+            <div style={styles.landingShowcaseGridItem}>
+              {renderLandingProductShowcase()}
             </div>
           </main>
         </div>
@@ -13522,6 +13820,7 @@ const savedRound = readStorageWithTtl(
       getTournamentPublicLiveLogoUrl(activeTournament);
     const activePublicLiveBackgroundUrl =
       getTournamentPublicLiveBackgroundUrl(activeTournament);
+    const activeRosterLock = getTournamentRosterLock(activeTournament);
     const tournamentSeriesClasses = activeTournament
       ? getTournamentSeriesClasses(activeTournament, language)
       : [];
@@ -14548,6 +14847,95 @@ const savedRound = readStorageWithTtl(
                           </button>
                         )}
                     </div>
+                  </div>
+
+                  <div style={styles.tournamentSetupBlock}>
+                    <div style={styles.tournamentSectionHeader}>
+                      <div>
+                        <div style={styles.tournamentMiniTitle}>
+                          Roster lock
+                        </div>
+                        <div style={styles.tournamentSidebarNote}>
+                          Changes after this time require organizer/admin approval.
+                        </div>
+                      </div>
+                      <span style={styles.tournamentStatusPill}>
+                        {activeRosterLock.enabled ? "Enabled" : "Optional"}
+                      </span>
+                    </div>
+
+                    <label style={styles.checkboxRow}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(activeRosterLock.enabled)}
+                        onChange={(event) =>
+                          updateActiveTournamentRosterLock({
+                            enabled: event.target.checked,
+                          })
+                        }
+                      />
+                      <span>Enable roster lock deadline</span>
+                    </label>
+
+                    <div
+                      style={{
+                        ...styles.tournamentFieldGrid,
+                        ...(isMobile ? styles.tournamentFieldGridMobile : {}),
+                      }}
+                    >
+                      <div>
+                        <div style={styles.settingsLabel}>
+                          Default lock deadline
+                        </div>
+                        <input
+                          style={styles.input}
+                          type="datetime-local"
+                          value={rosterLockIsoToInputValue(
+                            activeRosterLock.deadlineIso
+                          )}
+                          onChange={(event) =>
+                            updateActiveTournamentRosterLock({
+                              deadlineIso: rosterLockInputValueToIso(
+                                event.target.value
+                              ),
+                            })
+                          }
+                        />
+                      </div>
+                      <div style={styles.tournamentMutedPanel}>
+                        Public cannot see player names. Captains and admins use
+                        Player Hub rosters for approved/locked lists.
+                      </div>
+                    </div>
+
+                    {tournamentSeriesClasses.length > 1 ? (
+                      <div style={styles.tournamentClassVisibilityList}>
+                        {tournamentSeriesClasses.map((series) => (
+                          <div
+                            key={`roster-lock-${series.id}`}
+                            style={styles.tournamentClassVisibilityRow}
+                          >
+                            <strong>{getSeriesDisplayName(series)}</strong>
+                            <input
+                              style={styles.input}
+                              type="datetime-local"
+                              value={rosterLockIsoToInputValue(
+                                activeRosterLock.appliesToSeries?.[series.id]
+                              )}
+                              onChange={(event) =>
+                                updateRosterLockSeriesDeadline(
+                                  series.id,
+                                  rosterLockInputValueToIso(event.target.value)
+                                )
+                              }
+                              aria-label={`Roster lock for ${getSeriesDisplayName(
+                                series
+                              )}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div style={styles.tournamentSetupBlock}>
@@ -20387,6 +20775,29 @@ const styles = {
     fontWeight: "950",
   },
 
+  landingSectionSubtitle: {
+    margin: "8px 0 0",
+    maxWidth: "620px",
+    color: "#475569",
+    fontSize: "13px",
+    lineHeight: 1.45,
+    fontWeight: "800",
+  },
+
+  landingPrivacyNote: {
+    margin: "7px 0 0",
+    width: "fit-content",
+    maxWidth: "100%",
+    borderRadius: "999px",
+    padding: "7px 10px",
+    background: "rgba(219,234,254,0.74)",
+    border: "1px solid rgba(37,99,235,0.14)",
+    color: "#1d4ed8",
+    fontSize: "11px",
+    lineHeight: 1.25,
+    fontWeight: "900",
+  },
+
   landingFilterRow: {
     display: "flex",
     gap: "7px",
@@ -20550,6 +20961,22 @@ const styles = {
     gap: "8px",
   },
 
+  landingTournamentReadinessGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 92px), 1fr))",
+    gap: "7px",
+    minWidth: 0,
+  },
+
+  landingTournamentReadinessItem: {
+    display: "grid",
+    gap: "3px",
+    padding: "8px",
+    borderRadius: "14px",
+    border: "1px solid rgba(37,99,235,0.12)",
+    minWidth: 0,
+  },
+
   landingTournamentMetaItem: {
     display: "grid",
     gap: "3px",
@@ -20568,6 +20995,24 @@ const styles = {
     fontSize: "13px",
     fontWeight: "950",
     cursor: "pointer",
+    minWidth: 0,
+  },
+
+  landingTournamentActionRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 130px), 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+
+  landingTournamentSecondaryButton: {
+    border: "1px solid rgba(37,99,235,0.16)",
+    borderRadius: "15px",
+    padding: "12px 14px",
+    fontSize: "13px",
+    fontWeight: "950",
+    cursor: "pointer",
+    minWidth: 0,
   },
 
   app: {
@@ -21282,6 +21727,20 @@ const styles = {
     color: "#475569",
     fontWeight: "800",
     textAlign: "center",
+  },
+
+  checkboxRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "9px 10px",
+    borderRadius: "12px",
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    color: "#334155",
+    fontSize: "12px",
+    fontWeight: "800",
+    minWidth: 0,
   },
 
   settingsToggleRow: {
@@ -24733,6 +25192,20 @@ const styles = {
     textAlign: "center",
     minWidth: 0,
     boxSizing: "border-box",
+  },
+
+  tournamentStatusPill: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "999px",
+    padding: "6px 9px",
+    background: "#eff6ff",
+    border: "1px solid #bfdbfe",
+    color: "#1d4ed8",
+    fontSize: "11px",
+    fontWeight: "900",
+    whiteSpace: "nowrap",
   },
 
   tournamentEmptyState: {
