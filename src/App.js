@@ -1935,11 +1935,10 @@ export default function App() {
     publicCountsPrivacyNote:
       "Offentlig visning viser bare lagstatus, aldri spillerlister.",
     interestedTeamsLabel: "Interessert",
-    availabilityActiveLabel: "Tilgjengelighet aktiv",
-    rosterSubmittedLabel: "Roster sendt",
+    availabilityActiveLabel: "Spor",
+    rosterSubmittedLabel: "Sendt",
     confirmedTeamsLabel: "Bekreftet",
     lockedTeamsLabel: "Last",
-    rosterLocksAtLabel: "Roster lases"
   } : {
     tabTitle: "Tournaments",
     loginRequired: "Sign in to manage tournaments",
@@ -2334,11 +2333,10 @@ export default function App() {
     publicCountsPrivacyNote:
       "Public pages show team status only, never player name lists.",
     interestedTeamsLabel: "Interested",
-    availabilityActiveLabel: "Availability active",
-    rosterSubmittedLabel: "Roster submitted",
+    availabilityActiveLabel: "Asking",
+    rosterSubmittedLabel: "Submitted",
     confirmedTeamsLabel: "Confirmed",
     lockedTeamsLabel: "Locked",
-    rosterLocksAtLabel: "Roster locks"
   };
 
   const [newPlayerClubOption, setNewPlayerClubOption] = useState("");
@@ -10127,44 +10125,6 @@ const savedRound = readStorageWithTtl(
     return startTime ? `${formatted} ${startTime}` : formatted;
   }
 
-  function formatPublicDateTimeValue(value) {
-    const text = String(value || "").trim();
-    if (!text) return "";
-
-    const date = new Date(text);
-    if (Number.isNaN(date.getTime())) return text;
-
-    return date.toLocaleString(
-      language === "no" ? "nb-NO" : language === "dk" ? "da-DK" : "en-US",
-      {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }
-    );
-  }
-
-  function getPublicTournamentRosterLockDeadline(tournament) {
-    const lock = getTournamentRosterLock(tournament);
-    if (!lock.enabled) return "";
-
-    const deadlines = [
-      lock.deadlineIso,
-      ...Object.values(lock.appliesToSeries || {}),
-    ]
-      .map((value) => String(value || "").trim())
-      .filter(Boolean)
-      .sort((a, b) => {
-        const aTime = Date.parse(a) || Number.MAX_SAFE_INTEGER;
-        const bTime = Date.parse(b) || Number.MAX_SAFE_INTEGER;
-        return aTime - bTime;
-      });
-
-    return deadlines[0] || "";
-  }
-
   function getPublicTournamentTeamInterestCounts(tournament) {
     const source =
       tournament?.teamInterestCounts ||
@@ -10208,25 +10168,30 @@ const savedRound = readStorageWithTtl(
     return [
       {
         label: tournamentText.interestedTeamsLabel,
+        icon: "I",
         value: counts.interested,
       },
       {
         label: tournamentText.availabilityActiveLabel,
+        icon: "?",
         value: counts.availabilityActive,
       },
       {
         label: tournamentText.rosterSubmittedLabel,
+        icon: "S",
         value: counts.rosterSubmitted,
       },
       {
         label: tournamentText.confirmedTeamsLabel,
+        icon: "OK",
         value: counts.confirmed,
       },
       {
         label: tournamentText.lockedTeamsLabel,
+        icon: "L",
         value: counts.locked,
       },
-    ];
+    ].filter((metric) => Number(metric.value || 0) > 0);
   }
 
   function renderPublicUpcomingTournaments() {
@@ -10561,40 +10526,11 @@ const savedRound = readStorageWithTtl(
       .map((part) => String(part || "").trim())
       .filter(Boolean)
       .join(", ");
-    const contact = [
-      tournament.contactName,
-      tournament.contactPhone,
-      tournament.contactEmail,
-    ]
-      .map((part) => String(part || "").trim())
-      .filter(Boolean)
-      .join(" / ");
     const publicTheme = getTournamentPublicCardTheme(tournament);
     const publicTitle = getTournamentPublicTitle(tournament);
     const cardImageUrl = getTournamentPublicCardImageUrl(tournament);
     const publicLogoUrl = getTournamentPublicLogoUrl(tournament);
-    const organizer = getTournamentPublicOrganizerName(tournament);
     const readinessMetrics = getPublicTournamentReadinessMetrics(tournament);
-    const rosterLockDeadline = getPublicTournamentRosterLockDeadline(tournament);
-    const rosterLockText = rosterLockDeadline
-      ? formatPublicDateTimeValue(rosterLockDeadline)
-      : "";
-    const metaItems = [
-      location ? { label: tournamentText.locationLabel, value: location } : null,
-      rosterLockText
-        ? { label: tournamentText.rosterLocksAtLabel, value: rosterLockText }
-        : null,
-      organizer
-        ? { label: tournamentText.organizerLabel, value: organizer }
-        : null,
-      tournament.prizeText
-        ? { label: tournamentText.prizeLabel, value: tournament.prizeText }
-        : null,
-      tournament.feeText
-        ? { label: tournamentText.feeLabel, value: tournament.feeText }
-        : null,
-      contact ? { label: tournamentText.contactLabel, value: contact } : null,
-    ].filter(Boolean);
     const isLiveStatus = isTournamentLiveForFilter(tournament);
 
     return (
@@ -10670,6 +10606,28 @@ const savedRound = readStorageWithTtl(
             {publicTitle}
           </h3>
 
+          {location ? (
+            <div
+              style={{
+                ...styles.landingTournamentLocationLine,
+                color: publicTheme.mutedText,
+              }}
+            >
+              <span>{tournamentText.locationLabel}</span>
+              <strong
+                style={{
+                  color: publicTheme.text,
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {location}
+              </strong>
+            </div>
+          ) : null}
+
           {seriesLabels.length > 0 && (
             <div style={styles.landingTournamentSeriesRow}>
               {Array.from(new Set(seriesLabels)).map((label) => (
@@ -10688,57 +10646,50 @@ const savedRound = readStorageWithTtl(
             </div>
           )}
 
-          <div style={styles.landingTournamentReadinessGrid}>
-            {readinessMetrics.map((metric) => (
-              <div
-                key={metric.label}
-                style={{
-                  ...styles.landingTournamentReadinessItem,
-                  background: hexToRgba(publicTheme.surface, 0.78),
-                  borderColor: hexToRgba(publicTheme.border, 0.58),
-                }}
-              >
-                <strong
-                  style={{
-                    color: publicTheme.text,
-                    fontSize: "18px",
-                    lineHeight: 1,
-                    fontWeight: "950",
-                  }}
-                >
-                  {metric.value}
-                </strong>
+          {readinessMetrics.length > 0 ? (
+            <div style={styles.landingTournamentReadinessGrid}>
+              {readinessMetrics.map((metric) => (
                 <span
+                  key={metric.label}
                   style={{
-                    color: publicTheme.mutedText,
-                    fontSize: "10px",
-                    lineHeight: 1.15,
-                    fontWeight: "900",
+                    ...styles.landingTournamentReadinessItem,
+                    background: hexToRgba(publicTheme.surface, 0.78),
+                    borderColor: hexToRgba(publicTheme.border, 0.58),
                   }}
                 >
-                  {metric.label}
+                  <span
+                    style={{
+                      ...styles.landingTournamentReadinessIcon,
+                      background: hexToRgba(publicTheme.primary, 0.16),
+                      color: publicTheme.text,
+                    }}
+                  >
+                    {metric.icon}
+                  </span>
+                  <strong
+                    style={{
+                      color: publicTheme.text,
+                      fontSize: "11px",
+                      lineHeight: 1,
+                      fontWeight: "950",
+                    }}
+                  >
+                    {metric.value}
+                  </strong>
+                  <span
+                    style={{
+                      color: publicTheme.mutedText,
+                      fontSize: "10px",
+                      lineHeight: 1,
+                      fontWeight: "900",
+                    }}
+                  >
+                    {metric.label}
+                  </span>
                 </span>
-              </div>
-            ))}
-          </div>
-
-          {metaItems.length > 0 && (
-            <div style={styles.landingTournamentMetaList}>
-              {metaItems.slice(0, 4).map((item) => (
-                <div
-                  key={`${item.label}-${item.value}`}
-                  style={{
-                    ...styles.landingTournamentMetaItem,
-                    background: hexToRgba(publicTheme.surface, 0.72),
-                    borderColor: hexToRgba(publicTheme.border, 0.52),
-                  }}
-                >
-                  <span style={{ color: publicTheme.mutedText }}>{item.label}</span>
-                  <strong style={{ color: publicTheme.text }}>{item.value}</strong>
-                </div>
               ))}
             </div>
-          )}
+          ) : null}
 
           <div style={styles.landingTournamentActionRow}>
             <button
@@ -10842,7 +10793,14 @@ const savedRound = readStorageWithTtl(
             <span>{t.landingPublishedAppear}</span>
           </div>
         ) : (
-          <div style={styles.landingTournamentGrid}>
+          <div
+            style={{
+              ...styles.landingTournamentGrid,
+              gridTemplateColumns: isMobile
+                ? "minmax(0, 1fr)"
+                : "repeat(2, minmax(0, 1fr))",
+            }}
+          >
             {filteredPublicTournaments.map(renderLandingPublicTournamentCard)}
           </div>
         )}
@@ -18019,6 +17977,8 @@ const savedRound = readStorageWithTtl(
           >
             {hasTeamBuilderAccess && (
               <button
+                type="button"
+                data-testid="module-tab-team-builder"
                 style={{
                   ...styles.tabButton,
                   ...(activeMainModule === "team-builder"
@@ -18033,6 +17993,8 @@ const savedRound = readStorageWithTtl(
 
             {hasTournamentAccess && (
               <button
+                type="button"
+                data-testid="module-tab-tournaments"
                 style={{
                   ...styles.tabButton,
                   ...(activeMainModule === "tournament"
@@ -18064,6 +18026,8 @@ const savedRound = readStorageWithTtl(
 
             {hasPlayerHubAccess && (
               <button
+                type="button"
+                data-testid="module-tab-player-hub"
                 style={{
                   ...styles.tabButton,
                   ...(activeMainModule === "player-hub"
@@ -20839,15 +20803,15 @@ const styles = {
   landingTournamentCard: {
     position: "relative",
     overflow: "hidden",
-    borderRadius: "24px",
+    borderRadius: "20px",
     border: "1px solid rgba(37,99,235,0.18)",
     minHeight: "0",
     display: "grid",
     alignContent: "start",
-    gap: "12px",
-    padding: "14px",
+    gap: "9px",
+    padding: "12px",
     cursor: "pointer",
-    boxShadow: "0 24px 52px rgba(37,99,235,0.12)",
+    boxShadow: "0 16px 34px rgba(37,99,235,0.10)",
     isolation: "isolate",
   },
 
@@ -20877,7 +20841,7 @@ const styles = {
     zIndex: 1,
     display: "flex",
     justifyContent: "space-between",
-    gap: "8px",
+    gap: "6px",
     alignItems: "center",
     flexWrap: "wrap",
   },
@@ -20890,9 +20854,9 @@ const styles = {
   },
 
   landingTournamentLogoBadge: {
-    width: "34px",
-    height: "34px",
-    borderRadius: "12px",
+    width: "28px",
+    height: "28px",
+    borderRadius: "10px",
     border: "1px solid rgba(255,255,255,0.24)",
     display: "inline-flex",
     alignItems: "center",
@@ -20911,17 +20875,17 @@ const styles = {
 
   landingTournamentStatusPill: {
     borderRadius: "999px",
-    padding: "6px 9px",
-    fontSize: "11px",
+    padding: "5px 8px",
+    fontSize: "10px",
     fontWeight: "950",
     backdropFilter: "blur(8px)",
   },
 
   landingTournamentDatePill: {
     borderRadius: "999px",
-    padding: "6px 9px",
+    padding: "5px 8px",
     border: "1px solid rgba(37,99,235,0.16)",
-    fontSize: "11px",
+    fontSize: "10px",
     fontWeight: "900",
   },
 
@@ -20929,30 +20893,40 @@ const styles = {
     position: "relative",
     zIndex: 1,
     display: "grid",
-    gap: "10px",
+    gap: "8px",
     minWidth: 0,
   },
 
   landingTournamentCardTitle: {
     margin: 0,
-    fontSize: "21px",
-    lineHeight: 1.12,
+    fontSize: "18px",
+    lineHeight: 1.15,
     fontWeight: "950",
     overflowWrap: "anywhere",
   },
 
   landingTournamentSeriesRow: {
     display: "flex",
-    gap: "6px",
+    gap: "5px",
     flexWrap: "wrap",
   },
 
   landingTournamentSeriesBadge: {
     borderRadius: "999px",
-    padding: "6px 9px",
+    padding: "5px 8px",
     border: "1px solid rgba(37,99,235,0.16)",
     fontSize: "10px",
     fontWeight: "950",
+  },
+
+  landingTournamentLocationLine: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    minWidth: 0,
+    fontSize: "11px",
+    lineHeight: 1.25,
+    fontWeight: "850",
   },
 
   landingTournamentMetaList: {
@@ -20962,19 +20936,34 @@ const styles = {
   },
 
   landingTournamentReadinessGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 92px), 1fr))",
-    gap: "7px",
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
     minWidth: 0,
   },
 
   landingTournamentReadinessItem: {
-    display: "grid",
-    gap: "3px",
-    padding: "8px",
-    borderRadius: "14px",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
+    padding: "5px 7px",
+    borderRadius: "999px",
     border: "1px solid rgba(37,99,235,0.12)",
     minWidth: 0,
+    maxWidth: "100%",
+  },
+
+  landingTournamentReadinessIcon: {
+    width: "17px",
+    height: "17px",
+    borderRadius: "999px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "8px",
+    lineHeight: 1,
+    fontWeight: "950",
+    flexShrink: 0,
   },
 
   landingTournamentMetaItem: {
@@ -20990,9 +20979,9 @@ const styles = {
 
   landingTournamentOpenButton: {
     border: "none",
-    borderRadius: "15px",
-    padding: "12px 14px",
-    fontSize: "13px",
+    borderRadius: "13px",
+    padding: "10px 12px",
+    fontSize: "12px",
     fontWeight: "950",
     cursor: "pointer",
     minWidth: 0,
@@ -21000,16 +20989,17 @@ const styles = {
 
   landingTournamentActionRow: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 130px), 1fr))",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
     gap: "8px",
     minWidth: 0,
+    alignItems: "center",
   },
 
   landingTournamentSecondaryButton: {
     border: "1px solid rgba(37,99,235,0.16)",
-    borderRadius: "15px",
-    padding: "12px 14px",
-    fontSize: "13px",
+    borderRadius: "13px",
+    padding: "10px 12px",
+    fontSize: "12px",
     fontWeight: "950",
     cursor: "pointer",
     minWidth: 0,
@@ -26422,12 +26412,12 @@ Object.assign(styles, {
   landingTournamentGrid: {
     ...styles.landingTournamentGrid,
     gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 310px), 1fr))",
-    gap: "16px",
+    gap: "12px",
   },
   landingTournamentCard: {
     ...styles.landingTournamentCard,
-    borderRadius: "26px",
-    boxShadow: "0 22px 56px rgba(2,6,23,0.26)",
+    borderRadius: "20px",
+    boxShadow: "0 16px 34px rgba(2,6,23,0.18)",
   },
   landingTournamentMetaItem: {
     ...styles.landingTournamentMetaItem,

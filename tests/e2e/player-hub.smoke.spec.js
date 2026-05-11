@@ -96,13 +96,13 @@ async function login(page, credentials) {
   });
   await loginForm.locator('button[type="submit"]').click();
 
-  await expect(page.getByRole("button", { name: "Player & Team Hub" })).toBeVisible({
+  await expect(page.getByTestId("module-tab-player-hub")).toBeVisible({
     timeout: 20_000,
   });
 }
 
 async function openPlayerHub(page) {
-  const tab = page.getByRole("button", { name: "Player & Team Hub" });
+  const tab = page.getByTestId("module-tab-player-hub");
   if (await tab.isVisible()) await tab.click();
   await expect(page.getByTestId("player-hub-root")).toBeVisible({
     timeout: 20_000,
