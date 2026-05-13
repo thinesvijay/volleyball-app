@@ -56,6 +56,504 @@ function isUsablePlayerHubSnapshot(snapshot) {
   );
 }
 
+function passportArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+const captainSquadNameSlots = ["A", "B", "C", "RESERVE"];
+const captainSquadNameSlotLabels = {
+  A: "Team A",
+  B: "Team B",
+  C: "Team C",
+  RESERVE: "Reserve",
+};
+const captainSquadNameSuggestionSuffixes = ["White", "Black", "Gold", "Blue"];
+const squadNameStoragePrefix = "makeTeamsPro.playerHub.squadNames.v1";
+
+function passportText(...values) {
+  for (const value of values) {
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
+}
+
+function normalizeCaptainSquadNameKey(value) {
+  const text = passportText(value).toUpperCase().replace(/\s+/g, " ");
+  const teamMatch = text.match(/^TEAM ([ABCD])$/);
+  if (teamMatch) return teamMatch[1] === "D" ? "RESERVE" : teamMatch[1];
+  if (text === "A" || text === "B" || text === "C") return text;
+  if (text === "RESERVE" || text === "RES" || text === "D") return "RESERVE";
+  return "";
+}
+
+function squadNameEditorSlotLabel(value) {
+  const key = normalizeCaptainSquadNameKey(value);
+  return captainSquadNameSlotLabels[key] || fallbackSquadDisplayName(value);
+}
+
+function fallbackSquadDisplayName(value) {
+  const key = normalizeCaptainSquadNameKey(value);
+  if (key === "A" || key === "B" || key === "C") return `Team ${key}`;
+  if (key === "RESERVE") return "Reserve";
+  return "Unassigned";
+}
+
+function squadNameSuggestion(value, clubName) {
+  const key = normalizeCaptainSquadNameKey(value);
+  const base = passportText(clubName, "Team");
+  if (key === "A") return squadNameSuggestionForSuffix(base, "White");
+  if (key === "B") return squadNameSuggestionForSuffix(base, "Black");
+  if (key === "C") return squadNameSuggestionForSuffix(base, "Gold");
+  if (key === "RESERVE") return squadNameSuggestionForSuffix(base, "Blue");
+  return "";
+}
+
+function squadNameSuggestionForSuffix(clubName, suffix) {
+  return `${passportText(clubName, "Team")} ${suffix}`;
+}
+
+function normalizeSquadDisplayNames(value) {
+  let source = value;
+  if (typeof source === "string") {
+    try {
+      source = JSON.parse(source);
+    } catch (error) {
+      return {};
+    }
+  }
+  if (!source || typeof source !== "object" || Array.isArray(source)) return {};
+
+  return Object.entries(source).reduce((names, [key, label]) => {
+    const normalizedKey = normalizeCaptainSquadNameKey(key);
+    const text = passportText(label);
+    if (normalizedKey && text) names[normalizedKey] = text;
+    return names;
+  }, {});
+}
+
+function readStoredSquadDisplayNames(username) {
+  if (typeof window === "undefined" || !window.localStorage) return {};
+  const key = `${squadNameStoragePrefix}:${passportText(username, "guest")}`;
+  try {
+    return normalizeStoredSquadDisplayNames(JSON.parse(window.localStorage.getItem(key) || "{}"));
+  } catch (error) {
+    return {};
+  }
+}
+
+function writeStoredSquadDisplayNames(username, value) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  const key = `${squadNameStoragePrefix}:${passportText(username, "guest")}`;
+  try {
+    window.localStorage.setItem(
+      key,
+      JSON.stringify(normalizeStoredSquadDisplayNames(value))
+    );
+  } catch (error) {
+    // Local persistence is a convenience only; ignore storage failures.
+  }
+}
+
+function normalizeStoredSquadDisplayNames(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.entries(value).reduce((plans, [planId, names]) => {
+    const safePlanId = passportText(planId);
+    const normalizedNames = normalizeSquadDisplayNames(names);
+    if (safePlanId && Object.keys(normalizedNames).length) {
+      plans[safePlanId] = normalizedNames;
+    }
+    return plans;
+  }, {});
+}
+
+function normalizeRosterLockConfig(value) {
+  const source =
+    value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const rawApplies =
+    source.appliesToSeries &&
+    typeof source.appliesToSeries === "object" &&
+    !Array.isArray(source.appliesToSeries)
+      ? source.appliesToSeries
+      : {};
+  const appliesToSeries = Object.entries(rawApplies).reduce(
+    (items, [key, deadline]) => {
+      const safeKey = passportText(key);
+      const safeDeadline = passportText(deadline);
+      if (safeKey && safeDeadline) items[safeKey] = safeDeadline;
+      return items;
+    },
+    {}
+  );
+  const deadlineIso = passportText(
+    source.deadlineIso,
+    source.deadline,
+    source.lockAt
+  );
+  const deadlineTime = deadlineIso ? Date.parse(deadlineIso) : 0;
+  const afterDeadline = Boolean(
+    source.afterDeadline ||
+      (source.enabled &&
+        deadlineIso &&
+        !Number.isNaN(deadlineTime) &&
+        Date.now() > deadlineTime)
+  );
+
+  return {
+    enabled: Boolean(source.enabled),
+    deadlineIso,
+    globalDeadlineIso: passportText(source.globalDeadlineIso),
+    seriesDeadlineIso: passportText(source.seriesDeadlineIso),
+    appliesToSeries,
+    afterDeadline,
+    updatedAt: passportText(source.updatedAt),
+    updatedBy: passportText(source.updatedBy),
+  };
+}
+
+function rosterLockKey(value) {
+  return passportText(value).toLowerCase().replace(/\s+/g, "-").replace(/_/g, "-");
+}
+
+function rosterLockSeriesAliases(source = {}, tournament = {}) {
+  const aliases = new Set();
+  const addAlias = (value) => {
+    const key = rosterLockKey(value);
+    if (key) aliases.add(key);
+  };
+
+  addAlias(source.seriesId);
+  addAlias(source.seriesName);
+  addAlias(source.className);
+
+  const classKey = rosterLockKey(source.className);
+  const seriesItems = Array.isArray(tournament.series) ? tournament.series : [];
+  seriesItems.forEach((series) => {
+    if (!series) return;
+    const seriesKeys = [
+      series.id,
+      series.name,
+      series.seriesName,
+      Number(series.playersPerTeam || series.teamSize || 0) === 4 ? "4-side" : "",
+      Number(series.playersPerTeam || series.teamSize || 0) === 5 ? "5-side" : "",
+    ];
+    const matches =
+      (!classKey && seriesItems.length === 1) ||
+      seriesKeys.some((key) => classKey && rosterLockKey(key) === classKey);
+    if (matches) seriesKeys.forEach(addAlias);
+  });
+
+  return aliases;
+}
+
+function resolveRosterLockForSource(source = {}, tournament = {}) {
+  const direct = normalizeRosterLockConfig(
+    source.rosterLock ||
+      source.playerHub?.rosterLock ||
+      source.roster?.rosterLock ||
+      source.plan?.rosterLock ||
+      {}
+  );
+  if (direct.enabled || direct.deadlineIso || direct.afterDeadline) return direct;
+
+  const tournamentLock = normalizeRosterLockConfig(
+    tournament.rosterLock || tournament.playerHub?.rosterLock || {}
+  );
+  if (!tournamentLock.enabled && !tournamentLock.deadlineIso) return tournamentLock;
+
+  const aliases = rosterLockSeriesAliases(source, tournament);
+  const seriesDeadlineIso =
+    Object.entries(tournamentLock.appliesToSeries || {}).find(([key]) =>
+      aliases.has(rosterLockKey(key))
+    )?.[1] || "";
+  return normalizeRosterLockConfig({
+    ...tournamentLock,
+    globalDeadlineIso: tournamentLock.deadlineIso,
+    seriesDeadlineIso,
+    deadlineIso: seriesDeadlineIso || tournamentLock.deadlineIso,
+  });
+}
+
+function rosterLockLabel(lock) {
+  const safeLock = normalizeRosterLockConfig(lock);
+  if (!safeLock.enabled || !safeLock.deadlineIso) return "";
+  const date = new Date(safeLock.deadlineIso);
+  if (Number.isNaN(date.getTime())) return "";
+  return `Roster locks at ${date.toLocaleString()}`;
+}
+
+function rosterChangedAfterDeadline(roster = {}, lock = {}) {
+  const safeLock = normalizeRosterLockConfig(lock);
+  if (roster.changedAfterDeadline) return true;
+  if (!safeLock.deadlineIso) return false;
+  const deadlineTime = Date.parse(safeLock.deadlineIso);
+  const changedTime = Date.parse(
+    roster.updatedAt || roster.reviewedAt || roster.lockedAt || roster.submittedAt || ""
+  );
+  return (
+    !Number.isNaN(deadlineTime) &&
+    !Number.isNaN(changedTime) &&
+    changedTime > deadlineTime
+  );
+}
+
+function normalizePassportAvailabilityStatus(...values) {
+  const value = passportText(...values).toUpperCase();
+  if (value === "YES" || value === "GOING") return "YES";
+  if (value === "MAYBE") return "MAYBE";
+  if (value === "NO" || value === "NOT_GOING" || value === "NOT GOING") {
+    return "NO";
+  }
+  return "PENDING";
+}
+
+function passportAvailabilityLabel(status) {
+  const value = normalizePassportAvailabilityStatus(status);
+  if (value === "YES") return "Going";
+  if (value === "MAYBE") return "Maybe";
+  if (value === "NO") return "No";
+  return "Pending";
+}
+
+function normalizePassportRosterStatus(...values) {
+  const value = passportText(...values).toUpperCase();
+  if (
+    value === "SUBMITTED" ||
+    value === "APPROVED" ||
+    value === "REJECTED" ||
+    value === "LOCKED" ||
+    value === "CANCELLED"
+  ) {
+    return value;
+  }
+  return "DRAFT";
+}
+
+function passportRosterLabel(status) {
+  const value = normalizePassportRosterStatus(status);
+  if (value === "SUBMITTED") return "Submitted";
+  if (value === "APPROVED") return "Approved";
+  if (value === "REJECTED") return "Rejected";
+  if (value === "LOCKED") return "Locked";
+  if (value === "CANCELLED") return "Cancelled";
+  return "Draft";
+}
+
+function normalizePassportAssignedSquad(...values) {
+  const value = passportText(...values).toUpperCase();
+  if (value === "A" || value === "B" || value === "C") return `Team ${value}`;
+  if (value === "RESERVE") return "Reserve";
+  return "";
+}
+
+function getPassportSortTime(...values) {
+  for (const value of values) {
+    const text = passportText(value);
+    if (!text) continue;
+    const time = Date.parse(text);
+    if (!Number.isNaN(time)) return time;
+  }
+  return 0;
+}
+
+function calculatePlayerPassportStats({
+  confirmedTeams,
+  playerTournamentAvailability,
+  playerTournamentRosterStatus,
+  myTeamNeedInterests,
+}) {
+  const stats = {
+    teamMembershipCount: passportArray(confirmedTeams).length,
+    eventInvitationsCount: passportArray(playerTournamentAvailability).length,
+    goingResponsesCount: 0,
+    maybeResponsesCount: 0,
+    noResponsesCount: 0,
+    pendingResponsesCount: 0,
+    rosterApprovedCount: 0,
+    playerAdsInterestsCount: passportArray(myTeamNeedInterests).length,
+  };
+
+  passportArray(playerTournamentAvailability).forEach((item) => {
+    const status = normalizePassportAvailabilityStatus(
+      item?.responseStatus,
+      item?.availabilityStatus,
+      item?.status
+    );
+    if (status === "YES") stats.goingResponsesCount += 1;
+    else if (status === "MAYBE") stats.maybeResponsesCount += 1;
+    else if (status === "NO") stats.noResponsesCount += 1;
+    else stats.pendingResponsesCount += 1;
+  });
+
+  passportArray(playerTournamentRosterStatus).forEach((item) => {
+    const status = normalizePassportRosterStatus(item?.rosterStatus, item?.status);
+    if (status === "APPROVED" || status === "LOCKED") {
+      stats.rosterApprovedCount += 1;
+    }
+  });
+
+  return stats;
+}
+
+function buildPlayerAchievements({
+  profile,
+  stats,
+  hasCaptainRole,
+  squadActivityCount,
+}) {
+  const answeredCount =
+    (stats?.goingResponsesCount || 0) +
+    (stats?.maybeResponsesCount || 0) +
+    (stats?.noResponsesCount || 0);
+  const profileCompleted = Boolean(
+    passportText(profile?.displayName, profile?.profileId) &&
+      passportText(profile?.country, profile?.clubTeamName, profile?.clubOrTeam)
+  );
+
+  return [
+    {
+      id: "profile",
+      label: "First profile completed",
+      active: profileCompleted,
+      detail: profileCompleted ? "Identity ready" : "Complete profile",
+    },
+    {
+      id: "team",
+      label: "Team member",
+      active: (stats?.teamMembershipCount || 0) > 0,
+      detail: `${stats?.teamMembershipCount || 0} team${
+        (stats?.teamMembershipCount || 0) === 1 ? "" : "s"
+      }`,
+    },
+    {
+      id: "captain",
+      label: "Captain badge",
+      active: Boolean(hasCaptainRole),
+      detail: hasCaptainRole ? "Team control" : "Captain role",
+    },
+    {
+      id: "responder",
+      label: "Reliable responder",
+      active: answeredCount >= 2,
+      detail: `${answeredCount} response${answeredCount === 1 ? "" : "s"}`,
+    },
+    {
+      id: "ready",
+      label: "Tournament ready",
+      active: (stats?.goingResponsesCount || 0) > 0,
+      detail: `${stats?.goingResponsesCount || 0} Going`,
+    },
+    {
+      id: "squad",
+      label: "Squad player",
+      active: squadActivityCount > 0,
+      detail: squadActivityCount > 0 ? "Squad activity" : "No squad yet",
+    },
+    {
+      id: "helper",
+      label: "Community helper",
+      active: (stats?.playerAdsInterestsCount || 0) > 0,
+      detail: `${stats?.playerAdsInterestsCount || 0} interest${
+        (stats?.playerAdsInterestsCount || 0) === 1 ? "" : "s"
+      }`,
+    },
+  ];
+}
+
+function getRecentPlayerActivity(playerEvents, resolveSquadDisplayName) {
+  return passportArray(playerEvents)
+    .map((bundle) => {
+      const base =
+        bundle?.base ||
+        bundle?.availability ||
+        bundle?.planning ||
+        bundle?.roster ||
+        {};
+      const availability = bundle?.availability || {};
+      const planning = bundle?.planning || {};
+      const roster = bundle?.roster || {};
+      const hasRoster = Boolean(bundle?.roster);
+      const status = hasRoster
+        ? passportRosterLabel(roster.rosterStatus || roster.status)
+        : passportAvailabilityLabel(
+            availability.responseStatus ||
+              availability.availabilityStatus ||
+              planning.availabilityStatus ||
+              base.responseStatus
+          );
+      const assignedSquadRaw = passportText(
+        planning.assignedSquad,
+        roster.assignedSquad,
+        base.assignedSquad
+      );
+      const preferenceRaw = passportText(
+        availability.preferredSquad,
+        planning.preferredSquad,
+        base.preferredSquad
+      );
+      const squadLabelSource = {
+        ...base,
+        ...availability,
+        ...planning,
+        ...roster,
+        availability,
+        planning,
+        roster,
+      };
+      const assignedSquad = assignedSquadRaw
+        ? resolveSquadDisplayName?.(assignedSquadRaw, squadLabelSource) ||
+          normalizePassportAssignedSquad(assignedSquadRaw)
+        : "";
+      const preference = preferenceRaw
+        ? resolveSquadDisplayName?.(preferenceRaw, squadLabelSource) ||
+          normalizePassportAssignedSquad(preferenceRaw)
+        : "";
+      const sortTime = getPassportSortTime(
+        base.updatedAt,
+        base.respondedAt,
+        base.submittedAt,
+        base.lockedAt,
+        base.createdAt,
+        base.deadlineAt
+      );
+
+      return {
+        key:
+          bundle?.key ||
+          passportText(base.planId, base.tournamentId, base.tournamentName) ||
+          `activity-${sortTime}`,
+        tournamentName: passportText(
+          base.tournamentName,
+          availability.tournamentName,
+          planning.tournamentName,
+          roster.tournamentName,
+          "Tournament"
+        ),
+        teamName: passportText(
+          base.clubTeamName,
+          base.teamName,
+          availability.clubTeamName,
+          planning.clubTeamName,
+          roster.clubTeamName,
+          roster.teamName,
+          "Team"
+        ),
+        status,
+        note: passportText(
+          assignedSquad ? assignedSquad : "",
+          preference ? `Preferred ${preference}` : "",
+          availability.responseNote,
+          availability.note,
+          planning.note,
+          roster.adminNote
+        ),
+        sortTime,
+      };
+    })
+    .sort((left, right) => right.sortTime - left.sortTime)
+    .slice(0, 6);
+}
+
 const playerHubStyles = {
   shell: {
     display: "grid",
@@ -1995,6 +2493,89 @@ Object.assign(playerHubStyles, {
     ...playerHubStyles.teamControlWidePanel,
     ...hubGlassPanelSoft,
   },
+  captainChecklistCard: {
+    ...hubGlassPanelSoft,
+    display: "grid",
+    gap: "12px",
+    padding: "12px",
+    borderRadius: "18px",
+    minWidth: 0,
+  },
+  captainChecklistTop: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: "10px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  captainChecklistFocus: {
+    display: "grid",
+    gap: "3px",
+    minWidth: 0,
+  },
+  captainChecklistGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 210px), 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+  captainChecklistStep: {
+    display: "grid",
+    gap: "7px",
+    padding: "10px",
+    borderRadius: "14px",
+    background: "rgba(15,23,42,0.42)",
+    border: "1px solid rgba(125,211,252,0.14)",
+    minWidth: 0,
+  },
+  captainChecklistStepTop: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px",
+    minWidth: 0,
+  },
+  captainChecklistStepName: {
+    color: hubDarkPalette.text,
+    fontSize: "12px",
+    fontWeight: "950",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  captainChecklistStepDetail: {
+    color: hubDarkPalette.muted,
+    fontSize: "11px",
+    lineHeight: 1.35,
+    fontWeight: "750",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  captainChecklistActions: {
+    display: "flex",
+    gap: "7px",
+    flexWrap: "wrap",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  captainChecklistAction: {
+    ...playerHubStyles.adminActionButton,
+    borderColor: "rgba(125,211,252,0.24)",
+    background: "rgba(14,165,233,0.18)",
+    color: "#e0f2fe",
+  },
+  captainChecklistPrimaryAction: {
+    ...playerHubStyles.saveButton,
+    padding: "8px 11px",
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    borderColor: "rgba(125,211,252,0.34)",
+    color: "#04111f",
+  },
+  captainChecklistStatusNext: {
+    background: "rgba(14,165,233,0.18)",
+    borderColor: "rgba(125,211,252,0.28)",
+    color: "#bae6fd",
+  },
   teamControlRow: {
     ...playerHubStyles.teamControlRow,
     ...hubGlassRow,
@@ -2158,6 +2739,7 @@ Object.assign(playerHubStyles, {
   feedItem: {
     ...hubGlassRow,
     gridTemplateColumns: "auto minmax(0, 1fr) auto",
+    alignItems: "center",
     padding: "10px 12px",
     borderRadius: "16px",
   },
@@ -2196,7 +2778,7 @@ Object.assign(playerHubStyles, {
   },
   eventTopRow: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
     gap: "12px",
     alignItems: "start",
     minWidth: 0,
@@ -2206,13 +2788,15 @@ Object.assign(playerHubStyles, {
     fontSize: "17px",
     lineHeight: 1.1,
     fontWeight: "980",
-    overflowWrap: "anywhere",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
   },
   eventMeta: {
     color: hubDarkPalette.muted,
     fontSize: "12px",
     fontWeight: "800",
-    overflowWrap: "anywhere",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
   },
   eventStats: {
     display: "flex",
@@ -2263,6 +2847,7 @@ Object.assign(playerHubStyles, {
     gap: "7px",
     flexWrap: "wrap",
     alignItems: "center",
+    justifyContent: "flex-start",
     minWidth: 0,
   },
   eventCommentDrawer: {
@@ -2297,7 +2882,7 @@ Object.assign(playerHubStyles, {
   },
   commentComposer: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
     gap: "8px",
     alignItems: "center",
     minWidth: 0,
@@ -2310,6 +2895,385 @@ Object.assign(playerHubStyles, {
     color: hubDarkPalette.text,
     fontSize: "11px",
     fontWeight: "950",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  hubNav: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(92px, 1fr))",
+    gap: "7px",
+    padding: "7px",
+    borderRadius: "22px",
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(125,211,252,0.14)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+    minWidth: 0,
+  },
+  hubNavButton: {
+    border: "1px solid rgba(148,163,184,0.12)",
+    borderRadius: "16px",
+    padding: "10px 11px",
+    background: "rgba(15,23,42,0.54)",
+    color: hubDarkPalette.muted,
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+    minWidth: 0,
+    whiteSpace: "nowrap",
+  },
+  hubNavButtonActive: {
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    borderColor: "rgba(125,211,252,0.38)",
+    color: "#04111f",
+    boxShadow: "0 12px 28px rgba(14,165,233,0.22)",
+  },
+  previewTitle: {
+    ...playerHubStyles.previewTitle,
+    color: hubDarkPalette.text,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  compactRowTitle: {
+    ...playerHubStyles.compactRowTitle,
+    color: hubDarkPalette.text,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  compactRowMeta: {
+    ...playerHubStyles.compactRowMeta,
+    color: hubDarkPalette.muted,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+});
+
+Object.assign(playerHubStyles, {
+  teamSetupControls: {
+    ...playerHubStyles.teamSetupControls,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
+  },
+  heroActions: {
+    ...playerHubStyles.heroActions,
+    alignItems: "stretch",
+  },
+  teamControlActions: {
+    ...playerHubStyles.teamControlActions,
+    justifyContent: "flex-start",
+  },
+  teamControlActionsRow: {
+    ...playerHubStyles.teamControlActionsRow,
+    justifyContent: "flex-start",
+  },
+  adminActionButton: {
+    ...playerHubStyles.adminActionButton,
+    maxWidth: "100%",
+    whiteSpace: "normal",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+    textAlign: "center",
+  },
+  saveButton: {
+    ...playerHubStyles.saveButton,
+    maxWidth: "100%",
+    whiteSpace: "normal",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+    textAlign: "center",
+  },
+  feedTinyAction: {
+    ...playerHubStyles.feedTinyAction,
+    maxWidth: "100%",
+    whiteSpace: "normal",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+    textAlign: "center",
+  },
+  hubNav: {
+    ...playerHubStyles.hubNav,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 84px), 1fr))",
+  },
+  hubNavButton: {
+    ...playerHubStyles.hubNavButton,
+    minHeight: "40px",
+    padding: "9px 8px",
+  },
+});
+
+Object.assign(playerHubStyles, {
+  passportShell: {
+    ...hubGlassPanel,
+    display: "grid",
+    gap: "14px",
+    padding: "16px",
+    borderRadius: "26px",
+    background:
+      "linear-gradient(145deg, rgba(15,23,42,0.94), rgba(8,47,73,0.58) 52%, rgba(5,150,105,0.16))",
+    overflow: "hidden",
+    minWidth: 0,
+  },
+  passportHero: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+    gap: "14px",
+    alignItems: "stretch",
+    minWidth: 0,
+  },
+  passportSummaryCard: {
+    ...hubGlassPanelSoft,
+    display: "grid",
+    gridTemplateColumns: "auto minmax(0, 1fr)",
+    gap: "14px",
+    alignItems: "center",
+    padding: "16px",
+    borderRadius: "22px",
+    minWidth: 0,
+  },
+  passportAvatar: {
+    width: "72px",
+    height: "72px",
+    borderRadius: "24px",
+    display: "grid",
+    placeItems: "center",
+    color: hubDarkPalette.text,
+    fontWeight: "950",
+    fontSize: "30px",
+    background:
+      "linear-gradient(135deg, rgba(56,189,248,0.82), rgba(16,185,129,0.72))",
+    boxShadow: "0 18px 46px rgba(14,165,233,0.22)",
+    flex: "0 0 auto",
+  },
+  passportIdentity: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  passportName: {
+    color: hubDarkPalette.text,
+    fontSize: "24px",
+    lineHeight: 1.08,
+    fontWeight: "950",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  passportMeta: {
+    color: hubDarkPalette.muted,
+    fontSize: "13px",
+    lineHeight: 1.4,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  passportRoleRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    minWidth: 0,
+  },
+  passportRoleBadge: {
+    ...playerHubStyles.chip,
+    borderColor: "rgba(125,211,252,0.32)",
+    color: hubDarkPalette.text,
+    background: "rgba(14,165,233,0.14)",
+  },
+  passportStatsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+  passportStatCard: {
+    ...hubGlassRow,
+    display: "grid",
+    gap: "4px",
+    padding: "11px 12px",
+    borderRadius: "18px",
+    minWidth: 0,
+  },
+  passportStatValue: {
+    color: hubDarkPalette.text,
+    fontSize: "22px",
+    lineHeight: 1,
+    fontWeight: "950",
+  },
+  passportStatLabel: {
+    color: hubDarkPalette.muted,
+    fontSize: "11px",
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: "0.02em",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  passportGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 300px), 1fr))",
+    gap: "14px",
+    minWidth: 0,
+  },
+  passportPanel: {
+    ...hubGlassPanelSoft,
+    display: "grid",
+    gap: "10px",
+    padding: "14px",
+    borderRadius: "22px",
+    minWidth: 0,
+  },
+  passportActivityList: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  passportActivityRow: {
+    ...hubGlassRow,
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "center",
+    padding: "10px 12px",
+    borderRadius: "16px",
+    minWidth: 0,
+  },
+  passportAchievementGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+  passportAchievementBadge: {
+    ...hubGlassRow,
+    display: "grid",
+    gap: "5px",
+    padding: "11px 12px",
+    borderRadius: "16px",
+    border: "1px solid rgba(52,211,153,0.28)",
+    background:
+      "linear-gradient(135deg, rgba(16,185,129,0.16), rgba(14,165,233,0.10))",
+    minWidth: 0,
+  },
+  passportAchievementBadgeLocked: {
+    opacity: 0.58,
+    border: "1px solid rgba(148,163,184,0.16)",
+    background: "rgba(15,23,42,0.42)",
+  },
+  passportAchievementTitle: {
+    color: hubDarkPalette.text,
+    fontSize: "12px",
+    fontWeight: "900",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  passportAchievementDetail: {
+    color: hubDarkPalette.muted,
+    fontSize: "11px",
+    fontWeight: "750",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  passportEmpty: {
+    ...playerHubStyles.emptyPreview,
+    borderColor: "rgba(148,163,184,0.16)",
+    background: "rgba(15,23,42,0.28)",
+    color: hubDarkPalette.muted,
+    minHeight: "auto",
+    padding: "16px",
+  },
+  squadNamesPanel: {
+    ...hubGlassPanelSoft,
+    display: "grid",
+    gap: "12px",
+    padding: "12px",
+    borderRadius: "18px",
+    minWidth: 0,
+  },
+  squadNamesGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+  squadNameField: {
+    display: "grid",
+    gap: "8px",
+    padding: "10px",
+    borderRadius: "14px",
+    border: "1px solid rgba(125,211,252,0.14)",
+    background: "rgba(15,23,42,0.42)",
+    minWidth: 0,
+  },
+  squadNameMapRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "8px",
+    alignItems: "center",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  squadNameMapText: {
+    display: "flex",
+    alignItems: "center",
+    gap: "7px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  squadNameInternal: {
+    color: hubDarkPalette.muted,
+    fontSize: "11px",
+    fontWeight: "900",
+    whiteSpace: "nowrap",
+  },
+  squadNameArrow: {
+    color: hubDarkPalette.dim,
+    fontSize: "12px",
+    fontWeight: "900",
+    whiteSpace: "nowrap",
+  },
+  squadNameDisplay: {
+    color: hubDarkPalette.text,
+    fontSize: "13px",
+    fontWeight: "950",
+    lineHeight: 1.25,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+    minWidth: 0,
+  },
+  squadNameActions: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: "6px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  squadNameEditPanel: {
+    display: "grid",
+    gap: "7px",
+    minWidth: 0,
+  },
+  squadNameInput: {
+    ...playerHubStyles.profileInput,
+    minHeight: "38px",
+    fontSize: "13px",
+    background: "rgba(248,250,252,0.98)",
+  },
+  squadNameHint: {
+    color: hubDarkPalette.muted,
+    fontSize: "11px",
+    lineHeight: 1.3,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  squadNameSuggestionRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  squadNameSuggestionButton: {
+    border: "1px solid rgba(125,211,252,0.18)",
+    borderRadius: "999px",
+    padding: "5px 8px",
+    background: "rgba(2,6,23,0.34)",
+    color: hubDarkPalette.muted,
+    fontSize: "11px",
+    fontWeight: "900",
     cursor: "pointer",
     whiteSpace: "nowrap",
   },
@@ -2369,6 +3333,7 @@ export default function PlayerHubPage({
   updateTournamentAvailabilityResponse,
   loadTournamentAvailabilityForCaptain,
   updateTournamentPlanStatus,
+  updateTournamentSquadLabels,
   loadTournamentSquadPlanningForCaptain,
   assignPlayerToSquad,
   createOrUpdateRosterDraftFromSquadPlanning,
@@ -2563,6 +3528,11 @@ export default function PlayerHubPage({
   const [squadPlanningUpdatingId, setSquadPlanningUpdatingId] = useState("");
   const [captainRosterDraftsByPlanId, setCaptainRosterDraftsByPlanId] =
     useState({});
+  const [squadDisplayNameDraftsByPlanId, setSquadDisplayNameDraftsByPlanId] = useState(
+    () => readStoredSquadDisplayNames(username)
+  );
+  const [squadNameEditingByPlanId, setSquadNameEditingByPlanId] = useState({});
+  const [squadNamesSavingPlanId, setSquadNamesSavingPlanId] = useState("");
   const [rosterDraftUpdatingPlanId, setRosterDraftUpdatingPlanId] =
     useState("");
   const [rosterDraftMessage, setRosterDraftMessage] = useState("");
@@ -2579,6 +3549,9 @@ export default function PlayerHubPage({
     useState("");
   const [adminRosterReviewMessage, setAdminRosterReviewMessage] = useState("");
   const [openAdminPanel, setOpenAdminPanel] = useState("");
+  const [activeHubTab, setActiveHubTab] = useState(() =>
+    isAdmin ? "admin" : "home"
+  );
   const [adminCounts, setAdminCounts] = useState(null);
   const [snapshotInitialLoadComplete, setSnapshotInitialLoadComplete] =
     useState(false);
@@ -3656,6 +4629,14 @@ export default function PlayerHubPage({
   ]);
 
   useEffect(() => {
+    setSquadDisplayNameDraftsByPlanId(readStoredSquadDisplayNames(username));
+  }, [username]);
+
+  useEffect(() => {
+    writeStoredSquadDisplayNames(username, squadDisplayNameDraftsByPlanId);
+  }, [squadDisplayNameDraftsByPlanId, username]);
+
+  useEffect(() => {
     if (!canManageTeamProfile || snapshotInitialLoadComplete) return;
 
     const startedAt = startPlayerHubTimer();
@@ -4274,11 +5255,10 @@ export default function PlayerHubPage({
     return text.split("T")[0].split(" ")[0];
   }
 
-  function formatPreferredSquad(value) {
-    const text = String(value || "").trim().toUpperCase();
-    if (!text || text === "NO_PREFERENCE") return "";
-    if (text === "RESERVE") return "Preferred: Reserve";
-    return `Preferred: ${text}`;
+  function formatPreferredSquadForEvent(value, source) {
+    const key = normalizeCaptainSquadNameKey(value);
+    if (!key) return "";
+    return squadPreferenceLabel(key, source);
   }
 
   function shortAccountName(value) {
@@ -4317,13 +5297,6 @@ export default function PlayerHubPage({
       parts.push(`label ${plan.squadLabel}`);
     }
     return parts.join(" / ");
-  }
-
-  function plannedTeamLabel(assignedSquad) {
-    const squad = normalizeAssignedSquad(assignedSquad);
-    if (squad === "RESERVE") return "Reserve";
-    if (squad === "UNASSIGNED") return "Unassigned";
-    return squad;
   }
 
   function normalizeRosterStatus(status) {
@@ -4426,6 +5399,219 @@ export default function PlayerHubPage({
 
   function eventPlanId(event) {
     return String(event?.planId || event?.sourcePlanId || event?.eventId || "");
+  }
+
+  function squadNamesFromSource(source = {}) {
+    return [
+      source?.squadLabels,
+      source?.squadDisplayNames,
+      source?.squadNames,
+      source?.customSquadNames,
+      source?.teamNames,
+      source?.roster?.squadLabels,
+      source?.roster?.squadDisplayNames,
+      source?.roster?.squadNames,
+    ].reduce(
+      (names, value) => ({
+        ...names,
+        ...normalizeSquadDisplayNames(value),
+      }),
+      {}
+    );
+  }
+
+  function squadDisplayNamesForSource(source = {}) {
+    const planId = eventPlanId(source);
+    return {
+      ...squadNamesFromSource(source),
+      ...(planId ? squadDisplayNameDraftsByPlanId[planId] || {} : {}),
+    };
+  }
+
+  function squadNameEditorValues(plan = {}) {
+    const planId = eventPlanId(plan);
+    const persisted = squadNamesFromSource(plan);
+    const draft = planId ? squadDisplayNameDraftsByPlanId[planId] || {} : {};
+    return captainSquadNameSlots.reduce((values, squad) => {
+      values[squad] = Object.prototype.hasOwnProperty.call(draft, squad)
+        ? draft[squad]
+        : persisted[squad] || "";
+      return values;
+    }, {});
+  }
+
+  function squadLabelsSignature(labels) {
+    const normalized = normalizeSquadDisplayNames(labels);
+    return captainSquadNameSlots
+      .map((squad) => `${squad}:${normalized[squad] || ""}`)
+      .join("|");
+  }
+
+  function hasSquadNameDraft(plan = {}) {
+    const planId = eventPlanId(plan);
+    return Boolean(planId && squadDisplayNameDraftsByPlanId[planId]);
+  }
+
+  function squadNameEditorHasChanges(plan = {}) {
+    return (
+      squadLabelsSignature(squadNameEditorValues(plan)) !==
+      squadLabelsSignature(squadNamesFromSource(plan))
+    );
+  }
+
+  function squadDisplayName(assignedSquad, source = {}) {
+    const key = normalizeCaptainSquadNameKey(assignedSquad);
+    if (!key) return fallbackSquadDisplayName(assignedSquad);
+    const names = squadDisplayNamesForSource(source);
+    return passportText(names[key], fallbackSquadDisplayName(key));
+  }
+
+  function tournamentOptionForSource(source = {}) {
+    const tournamentId = String(source?.tournamentId || source?.id || "").trim();
+    if (!tournamentId) return null;
+    return (
+      (Array.isArray(tournamentOptions) ? tournamentOptions : []).find(
+        (option) => String(option?.id || option?.tournamentId || "") === tournamentId
+      ) || null
+    );
+  }
+
+  function rosterLockForSource(source = {}) {
+    return resolveRosterLockForSource(source, tournamentOptionForSource(source) || {});
+  }
+
+  function rosterLockChipText(source = {}) {
+    const lock = rosterLockForSource(source);
+    if (!lock.enabled || !lock.deadlineIso) return "";
+    if (lock.afterDeadline) return "After deadline";
+    return rosterLockLabel(lock);
+  }
+
+  function squadPreferenceLabel(assignedSquad, source = {}) {
+    const key = normalizeCaptainSquadNameKey(assignedSquad);
+    if (!key) return "";
+    return `Preferred: ${squadDisplayName(key, source)}`;
+  }
+
+  function squadNameEditingSlot(plan = {}) {
+    const planId = eventPlanId(plan);
+    return planId ? squadNameEditingByPlanId[planId] || "" : "";
+  }
+
+  function toggleSquadNameEdit(plan, squad) {
+    const planId = eventPlanId(plan);
+    const key = normalizeCaptainSquadNameKey(squad);
+    if (!planId || !key) return;
+    setSquadNameEditingByPlanId((current) => ({
+      ...current,
+      [planId]: current[planId] === key ? "" : key,
+    }));
+  }
+
+  function updateSquadDisplayName(plan, squad, value) {
+    const planId = eventPlanId(plan);
+    const key = normalizeCaptainSquadNameKey(squad);
+    if (!planId || !key) return;
+    const text = String(value || "").trimStart();
+    setSquadDisplayNameDraftsByPlanId((current) => {
+      const currentPlanNames = current[planId] || {};
+      const nextPlanNames = { ...currentPlanNames, [key]: text };
+
+      const next = { ...current };
+      next[planId] = nextPlanNames;
+      return next;
+    });
+  }
+
+  function resetSquadDisplayName(plan, squad) {
+    updateSquadDisplayName(plan, squad, "");
+  }
+
+  function applySquadNameSuggestion(plan, squad, suffix) {
+    const planId = eventPlanId(plan);
+    const key = normalizeCaptainSquadNameKey(squad);
+    if (!planId || !key) return;
+    updateSquadDisplayName(
+      plan,
+      key,
+      squadNameSuggestionForSuffix(
+        plan.clubTeamName || teamProfile?.clubTeamName || selectedProfileTeamName,
+        suffix
+      )
+    );
+    setSquadNameEditingByPlanId((current) => ({
+      ...current,
+      [planId]: key,
+    }));
+  }
+
+  function resetSquadDisplayNames(plan) {
+    const planId = eventPlanId(plan);
+    if (!planId) return;
+    setSquadDisplayNameDraftsByPlanId((current) => {
+      const next = { ...current };
+      delete next[planId];
+      return next;
+    });
+    setSquadNameEditingByPlanId((current) => {
+      const next = { ...current };
+      delete next[planId];
+      return next;
+    });
+  }
+
+  async function saveSquadDisplayNames(plan) {
+    const planId = eventPlanId(plan);
+    if (!updateTournamentSquadLabels || !planId) return;
+
+    setSquadNamesSavingPlanId(planId);
+    setTournamentPlanMessage("");
+
+    try {
+      const squadLabels = normalizeSquadDisplayNames(squadNameEditorValues(plan));
+      const data = await updateTournamentSquadLabels(planId, squadLabels);
+      if (Array.isArray(data?.plans) && data.plans.length) {
+        setTournamentPlans(data.plans);
+      } else if (data?.plan) {
+        setTournamentPlans((current) =>
+          current.map((item) =>
+            String(item.planId || "") === String(data.plan.planId || "")
+              ? data.plan
+              : item
+          )
+        );
+      }
+      if (data?.roster || Array.isArray(data?.players)) {
+        setCaptainRosterDraftsByPlanId((current) => ({
+          ...current,
+          [planId]: {
+            roster: data?.roster || current[planId]?.roster || null,
+            players: Array.isArray(data?.players)
+              ? data.players
+              : current[planId]?.players || [],
+          },
+        }));
+      }
+      resetSquadDisplayNames(plan);
+      setTournamentPlanStatus("ready");
+      setTournamentPlanMessage("Squad names saved.");
+      await loadTournamentPlans();
+      if (expandedSquadPlanId === planId) {
+        await loadSquadPlanningForPlan(planId);
+        await loadRosterDraftForPlan(planId);
+      }
+      await loadPlayerTournamentAvailability();
+      await loadPlayerTournamentSquadPlanning();
+      await loadPlayerRosterStatus();
+      await loadAdminRosterDrafts();
+    } catch (error) {
+      setTournamentPlanStatus("error");
+      setTournamentPlanMessage(
+        cleanPlayerHubError(error, "Could not save squad names.")
+      );
+    } finally {
+      setSquadNamesSavingPlanId("");
+    }
   }
 
   function eventIdentityKey(event) {
@@ -4792,9 +5978,7 @@ export default function PlayerHubPage({
     const plannedLabel =
       assignedSquad === "UNASSIGNED"
         ? ""
-        : assignedSquad === "RESERVE"
-          ? "Reserve"
-          : `Team ${plannedTeamLabel(assignedSquad)}`;
+        : squadDisplayName(assignedSquad, event);
     const rosterStatus = bundle?.roster
       ? normalizeRosterStatus(bundle.roster.rosterStatus)
       : "";
@@ -4811,9 +5995,11 @@ export default function PlayerHubPage({
       : availability
         ? tournamentAvailabilityStatusStyle(availabilityStatus)
         : playerHubStyles.accessStatusPending;
-    const preferredSquad = formatPreferredSquad(
-      availability?.preferredSquad || bundle?.planning?.preferredSquad
+    const preferredSquad = formatPreferredSquadForEvent(
+      availability?.preferredSquad || bundle?.planning?.preferredSquad,
+      event
     );
+    const eventRosterLockText = rosterLockChipText(event);
     const stats = tournamentPlanStats(event, []);
     const hasStats =
       Number(stats.total || 0) > 1 ||
@@ -4877,6 +6063,9 @@ export default function PlayerHubPage({
           {preferredSquad ? (
             <span style={playerHubStyles.chip}>{preferredSquad}</span>
           ) : null}
+          {eventRosterLockText ? (
+            <span style={playerHubStyles.chip}>{eventRosterLockText}</span>
+          ) : null}
         </div>
 
         {isPending ? (
@@ -4900,10 +6089,11 @@ export default function PlayerHubPage({
                   }
                 >
                   <option value="NO_PREFERENCE">No preference</option>
-                  <option value="A">A</option>
-                  <option value="B">B</option>
-                  <option value="C">C</option>
-                  <option value="RESERVE">Reserve</option>
+                  {captainSquadNameSlots.map((squad) => (
+                    <option key={squad} value={squad}>
+                      {squadDisplayName(squad, event)}
+                    </option>
+                  ))}
                 </select>
               </label>
               <label style={playerHubStyles.profileField}>
@@ -4983,6 +6173,7 @@ export default function PlayerHubPage({
     const stats = tournamentPlanStats(plan, availability);
     const planMeta = compactPlanMeta(plan);
     const contextLabel = eventContextLabel(plan);
+    const rosterLockText = rosterLockChipText(plan);
     const visibleAvailability =
       expandedTournamentPlanId === plan.planId ? availability : [];
     const groups = ["YES", "MAYBE", "PENDING", "NO"].map((status) => ({
@@ -5017,11 +6208,15 @@ export default function PlayerHubPage({
 
         {renderEventStats(stats)}
 
-        {planMeta ? (
-          <div style={playerHubStyles.chipRow}>
+        <div style={playerHubStyles.chipRow}>
+          <span style={playerHubStyles.chip}>Availability asked</span>
+          {planMeta ? (
             <span style={playerHubStyles.chip}>{planMeta}</span>
-          </div>
-        ) : null}
+          ) : null}
+          {rosterLockText ? (
+            <span style={playerHubStyles.chip}>{rosterLockText}</span>
+          ) : null}
+        </div>
 
         <div style={playerHubStyles.eventActionBar}>
           <button
@@ -5096,7 +6291,10 @@ export default function PlayerHubPage({
                         <span style={playerHubStyles.previewSubtitle}>
                           {[
                             item.playerCountry || "No country",
-                            formatPreferredSquad(item.preferredSquad),
+                            formatPreferredSquadForEvent(
+                              item.preferredSquad,
+                              plan
+                            ),
                           ]
                             .filter(Boolean)
                             .join(" / ")}
@@ -5127,6 +6325,400 @@ export default function PlayerHubPage({
 
         {renderEventCommentsDrawer(plan)}
       </article>
+    );
+  }
+
+  function captainChecklistStatusLabel(status) {
+    if (status === "done") return "Done";
+    if (status === "next") return "Next";
+    if (status === "pending") return "Pending";
+    if (status === "blocked") return "Blocked";
+    if (status === "coming-soon") return "Coming soon";
+    return "Not started";
+  }
+
+  function captainChecklistStatusStyle(status) {
+    if (status === "done") return playerHubStyles.accessStatusApproved;
+    if (status === "next") return playerHubStyles.captainChecklistStatusNext;
+    if (status === "pending") return playerHubStyles.accessStatusPending;
+    if (status === "blocked") return playerHubStyles.accessStatusRejected;
+    return playerHubStyles.accessStatusIdle;
+  }
+
+  function assignedSquadPlayerCount(items = []) {
+    return (Array.isArray(items) ? items : []).filter((item) => {
+      const assignedSquad = normalizeAssignedSquad(item?.assignedSquad);
+      return (
+        item?.planningStatus !== "REMOVED" &&
+        item?.playerStatus !== "REMOVED" &&
+        assignedSquad !== "UNASSIGNED"
+      );
+    }).length;
+  }
+
+  function captainFlowPlanScore(plan) {
+    const planId = String(plan?.planId || "");
+    const availability = captainAvailabilityByPlanId[planId] || [];
+    const planning = squadPlanningByPlanId[planId] || [];
+    const stats = tournamentPlanStats(plan, availability);
+    const roster = captainRosterDraftsByPlanId[planId]?.roster;
+    const rosterStatus = roster ? normalizeRosterStatus(roster.rosterStatus) : "";
+    const labels = squadNamesFromSource({
+      ...plan,
+      roster,
+      ...(captainRosterDraftsByPlanId[planId] || {}),
+    });
+    const answeredCount = stats.yes + stats.maybe + stats.no;
+    const assignedCount =
+      assignedSquadPlayerCount(planning) ||
+      assignedSquadPlayerCount(captainRosterDraftsByPlanId[planId]?.players);
+    const updatedTime = Date.parse(
+      plan?.updatedAt || plan?.createdAt || plan?.deadlineAt || ""
+    );
+
+    return (
+      (Number.isNaN(updatedTime) ? 0 : updatedTime / 100000000) +
+      (stats.total ? 10 : 0) +
+      (answeredCount ? 20 : 0) +
+      (assignedCount ? 30 : 0) +
+      (Object.keys(labels).length ? 40 : 0) +
+      (roster ? 50 : 0) +
+      (rosterStatus === "SUBMITTED" ? 70 : 0) +
+      (rosterStatus === "APPROVED" || rosterStatus === "LOCKED" ? 90 : 0)
+    );
+  }
+
+  function buildCaptainTournamentFlow() {
+    const plans = Array.isArray(dedupedTournamentPlans)
+      ? dedupedTournamentPlans
+      : [];
+    const expandedResponsePlan = plans.find(
+      (plan) => String(plan.planId || "") === String(expandedTournamentPlanId || "")
+    );
+    const plan =
+      expandedSquadPlan ||
+      expandedResponsePlan ||
+      plans.slice().sort((left, right) => {
+        return captainFlowPlanScore(right) - captainFlowPlanScore(left);
+      })[0] ||
+      null;
+    const planId = String(plan?.planId || "");
+    const availability = planId ? captainAvailabilityByPlanId[planId] || [] : [];
+    const planning = planId ? squadPlanningByPlanId[planId] || [] : [];
+    const draftData = planId ? captainRosterDraftsByPlanId[planId] || {} : {};
+    const stats = plan ? tournamentPlanStats(plan, availability) : {
+      yes: 0,
+      maybe: 0,
+      no: 0,
+      pending: 0,
+      total: 0,
+    };
+    const roster = draftData.roster || null;
+    const rosterStatus = roster ? normalizeRosterStatus(roster.rosterStatus) : "";
+    const rosterActive = Boolean(roster && rosterStatus !== "CANCELLED");
+    const rosterLock = rosterLockForSource({ ...(plan || {}), ...(roster || {}) });
+    const lateChangeRequested = rosterStatus === "CHANGE_REQUESTED";
+    const rosterCanSubmit =
+      rosterActive &&
+      (rosterStatus === "DRAFT" ||
+        rosterStatus === "REJECTED" ||
+        lateChangeRequested) &&
+      (!rosterLock.afterDeadline || lateChangeRequested);
+    const answeredCount = stats.yes + stats.maybe + stats.no;
+    const assignedCount =
+      assignedSquadPlayerCount(planning) ||
+      assignedSquadPlayerCount(draftData.players);
+    const labelCount = Object.keys(
+      squadNamesFromSource({
+        ...plan,
+        roster,
+        ...draftData,
+      })
+    ).length;
+    const draftTournament = tournamentOptions.find(
+      (option) =>
+        String(option.id || option.tournamentId || "") ===
+        String(tournamentPlanDraft.tournamentId || "")
+    );
+
+    return {
+      plan,
+      planId,
+      plans,
+      stats,
+      answeredCount,
+      assignedCount,
+      labelCount,
+      roster,
+      rosterStatus,
+      rosterLock,
+      lateChangeRequested,
+      rosterActive,
+      rosterCanSubmit,
+      hasTournamentOptions: tournamentOptions.length > 0,
+      draftTournament,
+      draftTournamentSelected: Boolean(tournamentPlanDraft.tournamentId),
+    };
+  }
+
+  function buildCaptainChecklistSteps(flow) {
+    const hasPlan = Boolean(flow.plan);
+    const hasPick = hasPlan || flow.draftTournamentSelected;
+    const approvedRoster =
+      flow.rosterActive &&
+      (flow.rosterStatus === "APPROVED" || flow.rosterStatus === "LOCKED");
+    const submittedRoster =
+      flow.rosterActive &&
+      (flow.rosterStatus === "SUBMITTED" ||
+        flow.rosterStatus === "APPROVED" ||
+        flow.rosterStatus === "LOCKED");
+
+    return [
+      {
+        id: "pick",
+        label: "Pick tournament",
+        status: hasPick
+          ? "done"
+          : flow.hasTournamentOptions
+            ? "next"
+            : "coming-soon",
+        detail: hasPlan
+          ? flow.plan.tournamentName || "Tournament selected"
+          : flow.draftTournament
+            ? tournamentOptionLabel(flow.draftTournament)
+            : flow.hasTournamentOptions
+              ? "Select a tournament in Ask availability."
+              : "No tournaments available yet.",
+      },
+      {
+        id: "ask",
+        label: "Ask availability",
+        status: hasPlan ? "done" : flow.hasTournamentOptions ? "next" : "blocked",
+        detail: hasPlan
+          ? `${flow.stats.total || 0} invited`
+          : flow.hasTournamentOptions
+            ? "Ask confirmed members."
+            : "Coming soon.",
+      },
+      {
+        id: "review",
+        label: "Review responses",
+        status: !hasPlan
+          ? "not-started"
+          : flow.answeredCount || flow.rosterActive
+            ? "done"
+            : flow.stats.total
+              ? "next"
+              : "pending",
+        detail: hasPlan
+          ? `${flow.answeredCount}/${flow.stats.total || 0} answered`
+          : "Not started.",
+      },
+      {
+        id: "plan",
+        label: "Plan squads",
+        status: !hasPlan
+          ? "blocked"
+          : flow.assignedCount
+            ? "done"
+            : flow.answeredCount
+              ? "next"
+              : "pending",
+        detail: flow.assignedCount
+          ? `${flow.assignedCount} assigned`
+          : hasPlan
+            ? "Waiting for responses or assignments."
+            : "Ask availability first.",
+      },
+      {
+        id: "names",
+        label: "Name squads",
+        status: !hasPlan
+          ? "blocked"
+          : flow.labelCount
+            ? "done"
+            : flow.assignedCount
+              ? "next"
+              : "pending",
+        detail: flow.labelCount
+          ? `${flow.labelCount} custom label${flow.labelCount === 1 ? "" : "s"}`
+          : flow.assignedCount
+            ? "Optional display names."
+            : "Plan squads first.",
+      },
+      {
+        id: "submit",
+        label: "Submit roster",
+        status: submittedRoster
+          ? "done"
+          : flow.rosterLock?.afterDeadline && !flow.lateChangeRequested
+            ? "blocked"
+          : flow.rosterCanSubmit
+            ? "next"
+            : flow.assignedCount
+              ? "pending"
+              : "blocked",
+        detail: submittedRoster
+          ? formatRosterStatus(flow.rosterStatus)
+          : flow.rosterLock?.afterDeadline && !flow.lateChangeRequested
+            ? "Contact organizer/admin for late changes."
+          : flow.rosterCanSubmit
+            ? "Ready to submit."
+            : flow.assignedCount
+              ? "Create roster draft below first."
+              : "No roster draft yet.",
+      },
+      {
+        id: "approval",
+        label: "Wait for approval",
+        status: approvedRoster
+          ? "done"
+          : flow.rosterStatus === "SUBMITTED"
+            ? "pending"
+            : flow.rosterStatus === "REJECTED"
+              ? "blocked"
+              : "not-started",
+        detail: approvedRoster
+          ? formatRosterStatus(flow.rosterStatus)
+          : flow.rosterStatus === "SUBMITTED"
+            ? "Organizer review."
+            : flow.rosterStatus === "REJECTED"
+              ? "Update and resubmit."
+              : "Not started.",
+      },
+    ];
+  }
+
+  async function openCaptainChecklistSubmit(plan) {
+    const planId = String(plan?.planId || "");
+    if (!planId) return;
+
+    if (String(expandedSquadPlanId || "") !== planId) {
+      await toggleTournamentSquadPlanning(plan);
+    } else {
+      await loadRosterDraftForPlan(planId).catch(() => {});
+    }
+    setSubmitRosterConfirmPlanId(planId);
+  }
+
+  function renderCaptainTournamentChecklist() {
+    const flow = buildCaptainTournamentFlow();
+    const steps = buildCaptainChecklistSteps(flow);
+    const currentStep = steps.find((step) => step.status === "next") ||
+      steps.find((step) => step.status === "pending") ||
+      steps.find((step) => step.status === "blocked") ||
+      steps[steps.length - 1];
+    const focusMeta = flow.plan
+      ? [
+          eventMetaText(flow.plan),
+          flow.stats.total
+            ? `${flow.answeredCount}/${flow.stats.total} responses`
+            : "",
+          flow.rosterActive ? formatRosterStatus(flow.rosterStatus) : "",
+        ]
+          .filter(Boolean)
+          .join(" / ")
+      : flow.hasTournamentOptions
+        ? "Choose a tournament and ask confirmed members."
+        : "Coming soon.";
+
+    const actions = [
+      {
+        label: "Ask availability",
+        primary: currentStep?.id === "pick" || currentStep?.id === "ask",
+        disabled: !flow.hasTournamentOptions,
+        onClick: () => toggleTeamActionPanel("plan"),
+      },
+      {
+        label: "Review responses",
+        primary: currentStep?.id === "review",
+        disabled: !flow.plan,
+        onClick: () => toggleTournamentPlanResponses(flow.plan),
+      },
+      {
+        label: "Plan squads",
+        primary:
+          currentStep?.id === "plan" ||
+          currentStep?.id === "names" ||
+          (currentStep?.id === "submit" && !flow.rosterCanSubmit),
+        disabled: !flow.plan,
+        onClick: () => toggleTournamentSquadPlanning(flow.plan),
+      },
+      {
+        label: "Submit roster",
+        primary: currentStep?.id === "submit" && flow.rosterCanSubmit,
+        disabled: !flow.rosterCanSubmit,
+        onClick: () => openCaptainChecklistSubmit(flow.plan),
+      },
+    ];
+
+    return (
+      <section
+        style={playerHubStyles.captainChecklistCard}
+        data-testid="captain-checklist"
+      >
+        <div style={playerHubStyles.captainChecklistTop}>
+          <div style={playerHubStyles.captainChecklistFocus}>
+            <div style={playerHubStyles.sectionTitle}>Captain checklist</div>
+            <span style={playerHubStyles.previewSubtitle}>
+              {flow.plan?.tournamentName || "Tournament flow"}
+            </span>
+            <span style={playerHubStyles.captainChecklistStepDetail}>
+              {focusMeta}
+            </span>
+          </div>
+          <span
+            style={{
+              ...playerHubStyles.accessStatusChip,
+              ...captainChecklistStatusStyle(currentStep?.status),
+            }}
+          >
+            Next: {currentStep?.label || "Not started"}
+          </span>
+        </div>
+
+        <div style={playerHubStyles.captainChecklistGrid}>
+          {steps.map((step) => (
+            <article key={step.id} style={playerHubStyles.captainChecklistStep}>
+              <div style={playerHubStyles.captainChecklistStepTop}>
+                <span style={playerHubStyles.captainChecklistStepName}>
+                  {step.label}
+                </span>
+                <span
+                  style={{
+                    ...playerHubStyles.accessStatusChip,
+                    ...captainChecklistStatusStyle(step.status),
+                  }}
+                >
+                  {captainChecklistStatusLabel(step.status)}
+                </span>
+              </div>
+              <span style={playerHubStyles.captainChecklistStepDetail}>
+                {step.detail}
+              </span>
+            </article>
+          ))}
+        </div>
+
+        <div style={playerHubStyles.captainChecklistActions}>
+          {actions.map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              style={{
+                ...(action.primary
+                  ? playerHubStyles.captainChecklistPrimaryAction
+                  : playerHubStyles.captainChecklistAction),
+                ...(action.disabled ? playerHubStyles.adminDisabledButton : {}),
+              }}
+              disabled={action.disabled}
+              onClick={action.onClick}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      </section>
     );
   }
 
@@ -5898,7 +7490,7 @@ export default function PlayerHubPage({
           <div style={playerHubStyles.squadBadgeRow}>
             {preferredSquad && preferredSquad !== "NO_PREFERENCE" ? (
               <span style={playerHubStyles.squadTinyBadge}>
-                Pref {preferredSquad}
+                Pref {squadDisplayName(preferredSquad, plan)}
               </span>
             ) : null}
             {isCurrentUser ? (
@@ -5923,6 +7515,8 @@ export default function PlayerHubPage({
                       : {}),
                   }}
                   disabled={squadPlanningUpdatingId === `${updatePrefix}:${squad}`}
+                  aria-label={`Move to ${squadDisplayName(squad, plan)}`}
+                  title={squadDisplayName(squad, plan)}
                   onClick={() => handleAssignTournamentSquad(plan, item, squad)}
                 >
                   {squad === "RESERVE" ? "Res" : squad}
@@ -5955,7 +7549,15 @@ export default function PlayerHubPage({
     const boardRosterStatus = normalizeRosterStatus(
       draftData?.roster?.rosterStatus
     );
-    const boardLocked = boardRosterStatus === "LOCKED";
+    const boardRosterLock = rosterLockForSource({
+      ...plan,
+      roster: draftData?.roster || null,
+    });
+    const boardLateChangeAllowed = boardRosterStatus === "CHANGE_REQUESTED";
+    const boardDeadlineLocked = Boolean(
+      boardRosterLock.afterDeadline && !boardLateChangeAllowed
+    );
+    const boardLocked = boardRosterStatus === "LOCKED" || boardDeadlineLocked;
     const activePlanning = planning.filter(
       (item) => item.planningStatus !== "REMOVED"
     );
@@ -5988,10 +7590,10 @@ export default function PlayerHubPage({
       (item) => normalizeTournamentAvailabilityStatus(item.responseStatus) === "PENDING"
     );
     const assignedGroups = [
-      ["A", "Team A"],
-      ["B", "Team B"],
-      ["C", "Team C"],
-      ["RESERVE", "Reserve"],
+      ["A", squadDisplayName("A", plan)],
+      ["B", squadDisplayName("B", plan)],
+      ["C", squadDisplayName("C", plan)],
+      ["RESERVE", squadDisplayName("RESERVE", plan)],
     ].map(([squad, label]) => ({
       squad,
       label,
@@ -6016,6 +7618,13 @@ export default function PlayerHubPage({
       0
     );
     const pendingCount = pendingPlayers.length;
+    const planSquadNames = squadNameEditorValues(plan);
+    const hasNameDraft = hasSquadNameDraft(plan);
+    const hasNameChanges = squadNameEditorHasChanges(plan);
+    const isSavingNames = squadNamesSavingPlanId === plan.planId;
+    const editingSquadName = squadNameEditingSlot(plan);
+    const squadSuggestionBase =
+      plan.clubTeamName || teamProfile?.clubTeamName || selectedProfileTeamName;
 
     return (
       <section style={playerHubStyles.squadBoard} data-testid="plan-teams-board">
@@ -6046,13 +7655,146 @@ export default function PlayerHubPage({
               Pending: {pendingCount}
             </span>
             <span style={playerHubStyles.chip}>
-              {boardLocked ? "Locked" : "Not official roster"}
+              {boardRosterStatus === "LOCKED"
+                ? "Locked"
+                : boardDeadlineLocked
+                  ? "After deadline"
+                  : "Not official roster"}
             </span>
+            {rosterLockLabel(boardRosterLock) ? (
+              <span style={playerHubStyles.chip}>
+                {rosterLockLabel(boardRosterLock)}
+              </span>
+            ) : null}
             {squadPlanningUpdatingId === `load:${plan.planId}` ? (
               <span style={playerHubStyles.chip}>Loading...</span>
             ) : null}
           </div>
         </div>
+
+        {boardDeadlineLocked ? (
+          <div style={playerHubStyles.profileMessage}>
+            Changes after this time require organizer/admin approval. Contact
+            organizer/admin for late roster changes.
+          </div>
+        ) : null}
+
+        <section style={playerHubStyles.squadNamesPanel}>
+          <div style={playerHubStyles.homeCardHeader}>
+            <div style={playerHubStyles.profileMeta}>
+              <strong style={playerHubStyles.previewTitle}>Squad names</strong>
+              <span style={playerHubStyles.previewSubtitle}>
+                Names shown to players. Internal slots stay A/B/C.
+              </span>
+            </div>
+            <div style={playerHubStyles.profileActions}>
+              {hasNameDraft ? (
+                <button
+                  type="button"
+                  style={playerHubStyles.feedTinyAction}
+                  onClick={() => resetSquadDisplayNames(plan)}
+                  disabled={boardLocked || isSavingNames}
+                >
+                  Discard
+                </button>
+              ) : null}
+              <button
+                type="button"
+                style={playerHubStyles.feedTinyAction}
+                onClick={() => saveSquadDisplayNames(plan)}
+                disabled={
+                  boardLocked ||
+                  isSavingNames ||
+                  !hasNameChanges ||
+                  !updateTournamentSquadLabels
+                }
+              >
+                {isSavingNames ? "Saving..." : "Save names"}
+              </button>
+            </div>
+          </div>
+          <div style={playerHubStyles.squadNamesGrid}>
+            {captainSquadNameSlots.map((squad) => {
+              const fallback = squadNameEditorSlotLabel(squad);
+              const suggestion = squadNameSuggestion(
+                squad,
+                squadSuggestionBase
+              );
+              const displayName = passportText(planSquadNames[squad], fallback);
+              const hasCustomName = Boolean(passportText(planSquadNames[squad]));
+              const isEditingName = editingSquadName === squad;
+              return (
+                <section key={squad} style={playerHubStyles.squadNameField}>
+                  <div style={playerHubStyles.squadNameMapRow}>
+                    <div style={playerHubStyles.squadNameMapText}>
+                      <span style={playerHubStyles.squadNameInternal}>
+                        {fallback}
+                      </span>
+                      <span style={playerHubStyles.squadNameArrow}>{"->"}</span>
+                      <strong style={playerHubStyles.squadNameDisplay}>
+                        {displayName}
+                      </strong>
+                    </div>
+                    <div style={playerHubStyles.squadNameActions}>
+                      <button
+                        type="button"
+                        style={playerHubStyles.feedTinyAction}
+                        onClick={() => toggleSquadNameEdit(plan, squad)}
+                        disabled={boardLocked || isSavingNames}
+                      >
+                        {isEditingName ? "Done" : "Rename"}
+                      </button>
+                      <button
+                        type="button"
+                        style={playerHubStyles.feedTinyAction}
+                        onClick={() => resetSquadDisplayName(plan, squad)}
+                        disabled={boardLocked || isSavingNames || !hasCustomName}
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  </div>
+                  {isEditingName ? (
+                    <div style={playerHubStyles.squadNameEditPanel}>
+                      <input
+                        style={playerHubStyles.squadNameInput}
+                        value={planSquadNames[squad] || ""}
+                        placeholder={suggestion}
+                        maxLength={40}
+                        aria-label={`Display name for ${fallback}`}
+                        disabled={boardLocked || isSavingNames}
+                        onChange={(event) =>
+                          updateSquadDisplayName(plan, squad, event.target.value)
+                        }
+                      />
+                      <div style={playerHubStyles.squadNameSuggestionRow}>
+                        {captainSquadNameSuggestionSuffixes.map((suffix) => (
+                          <button
+                            key={suffix}
+                            type="button"
+                            style={playerHubStyles.squadNameSuggestionButton}
+                            disabled={boardLocked || isSavingNames}
+                            onClick={() =>
+                              applySquadNameSuggestion(plan, squad, suffix)
+                            }
+                          >
+                            {suffix}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <span style={playerHubStyles.squadNameHint}>
+                      {hasCustomName
+                        ? "Display label only. Planning stays on the internal slot."
+                        : `Fallback label. Suggested: ${suggestion}`}
+                    </span>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        </section>
 
         <div style={playerHubStyles.squadBuilderLayout}>
           <section style={playerHubStyles.squadColumn} data-testid="plan-available">
@@ -6163,10 +7905,22 @@ export default function PlayerHubPage({
     const rosterIsApproved = rosterIsActive && rosterStatus === "APPROVED";
     const rosterIsRejected = rosterIsActive && rosterStatus === "REJECTED";
     const rosterIsLocked = rosterIsActive && rosterStatus === "LOCKED";
+    const rosterIsLateChangeRequested =
+      rosterIsActive && rosterStatus === "CHANGE_REQUESTED";
+    const rosterLock = rosterLockForSource({ ...plan, ...(roster || {}) });
+    const rosterAfterDeadline = Boolean(rosterLock.afterDeadline);
+    const rosterLockText = rosterLockLabel(rosterLock);
+    const changedAfterDeadline = rosterChangedAfterDeadline(roster || {}, rosterLock);
     const rosterCanEdit =
-      !rosterIsActive || rosterStatus === "DRAFT" || rosterIsRejected;
+      (!rosterIsActive ||
+        rosterStatus === "DRAFT" ||
+        rosterIsRejected ||
+        rosterIsLateChangeRequested) &&
+      (!rosterAfterDeadline || rosterIsLateChangeRequested);
     const rosterCanSubmit =
-      rosterIsActive && (rosterStatus === "DRAFT" || rosterIsRejected);
+      rosterIsActive &&
+      (rosterStatus === "DRAFT" || rosterIsRejected || rosterIsLateChangeRequested) &&
+      (!rosterAfterDeadline || rosterIsLateChangeRequested);
     const rosterPlayers = rosterIsActive && Array.isArray(draftData?.players)
       ? draftData.players.filter((player) => player.playerStatus !== "REMOVED")
       : [];
@@ -6195,10 +7949,10 @@ export default function PlayerHubPage({
     const isUpdating = rosterDraftUpdatingPlanId === plan.planId;
     const submitConfirmOpen = submitRosterConfirmPlanId === plan.planId;
     const groups = [
-      ["A", "Team A"],
-      ["B", "Team B"],
-      ["C", "Team C"],
-      ["RESERVE", "Reserve"],
+      ["A", squadDisplayName("A", plan)],
+      ["B", squadDisplayName("B", plan)],
+      ["C", squadDisplayName("C", plan)],
+      ["RESERVE", squadDisplayName("RESERVE", plan)],
     ].map(([squad, label]) => ({
       squad,
       label,
@@ -6235,12 +7989,56 @@ export default function PlayerHubPage({
             {rosterIsLocked ? (
               <span style={playerHubStyles.chip}>Official roster</span>
             ) : null}
+            {rosterIsLateChangeRequested ? (
+              <span style={playerHubStyles.chip}>Late change requested</span>
+            ) : null}
             {!rosterIsActive ? (
               <span style={playerHubStyles.chip}>Not saved</span>
+            ) : null}
+            {rosterAfterDeadline ? (
+              <span style={playerHubStyles.chip}>After deadline</span>
+            ) : null}
+            {changedAfterDeadline ? (
+              <span style={playerHubStyles.chip}>Late change</span>
+            ) : null}
+            {rosterLockText ? (
+              <span style={playerHubStyles.chip}>{rosterLockText}</span>
             ) : null}
             <span style={playerHubStyles.chip}>{players.length} players</span>
           </div>
         </div>
+
+        {rosterAfterDeadline && !rosterIsLocked ? (
+          <div style={playerHubStyles.profileMessage}>
+            Changes after this time require organizer/admin approval. Contact
+            organizer/admin for late changes.
+          </div>
+        ) : null}
+
+        {rosterIsActive ? (
+          <div style={playerHubStyles.chipRow}>
+            {roster.submittedAt ? (
+              <span style={playerHubStyles.chip}>
+                Submitted: {new Date(roster.submittedAt).toLocaleString()}
+              </span>
+            ) : null}
+            {roster.reviewedAt ? (
+              <span style={playerHubStyles.chip}>
+                Reviewed: {new Date(roster.reviewedAt).toLocaleString()}
+              </span>
+            ) : null}
+            {roster.lockedAt ? (
+              <span style={playerHubStyles.chip}>
+                Locked: {new Date(roster.lockedAt).toLocaleString()}
+              </span>
+            ) : null}
+            {roster.lockedBy || roster.reviewedBy || roster.submittedBy ? (
+              <span style={playerHubStyles.chip}>
+                By: {roster.lockedBy || roster.reviewedBy || roster.submittedBy}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
 
         {planningChanged ? (
           <div style={playerHubStyles.profileMessage}>
@@ -6281,12 +8079,7 @@ export default function PlayerHubPage({
                         <span style={playerHubStyles.squadPlayerMeta}>
                           {[
                             player.playerCountry || "No country",
-                            normalizeAssignedSquad(player.assignedSquad) ===
-                            "RESERVE"
-                              ? "Reserve"
-                              : `Team ${normalizeAssignedSquad(
-                                  player.assignedSquad
-                                )}`,
+                            squadDisplayName(player.assignedSquad, plan),
                           ].join(" · ")}
                         </span>
                       </div>
@@ -6405,9 +8198,11 @@ export default function PlayerHubPage({
                 type="button"
                 style={{
                   ...playerHubStyles.saveButton,
-                  ...(isUpdating ? playerHubStyles.saveButtonDisabled : {}),
+                  ...(isUpdating || rosterAfterDeadline
+                    ? playerHubStyles.saveButtonDisabled
+                    : {}),
                 }}
-                disabled={isUpdating}
+                disabled={isUpdating || rosterAfterDeadline}
                 onClick={() => handleSubmitRosterDraft(plan)}
               >
                 {isUpdating ? "Submitting..." : "Submit"}
@@ -6424,6 +8219,92 @@ export default function PlayerHubPage({
           </div>
         ) : null}
       </section>
+    );
+  }
+
+  function rosterSeriesReviewKey(roster = {}) {
+    return [
+      String(roster.tournamentId || "").trim() || "tournament",
+      rosterLockKey(
+        roster.className ||
+          roster.seriesName ||
+          roster.squadLabel ||
+          "default-series"
+      ),
+    ].join(":");
+  }
+
+  function buildAdminRosterDuplicateWarnings(rosters = []) {
+    const warningsByRosterId = {};
+    const playersBySeries = {};
+    const reviewStatuses = {
+      SUBMITTED: true,
+      APPROVED: true,
+      LOCKED: true,
+    };
+
+    (Array.isArray(rosters) ? rosters : []).forEach((roster) => {
+      const rosterId = String(roster?.rosterId || "");
+      if (!rosterId || !reviewStatuses[normalizeRosterStatus(roster?.rosterStatus)]) {
+        return;
+      }
+      const seriesKey = rosterSeriesReviewKey(roster);
+      const seenInRoster = {};
+      (Array.isArray(roster.players) ? roster.players : []).forEach((player) => {
+        if (!player || player.playerStatus === "REMOVED") return;
+        const playerKey = String(player.playerUsername || "")
+          .trim()
+          .toLowerCase();
+        if (!playerKey) return;
+        const playerName =
+          player.playerDisplayName || player.playerUsername || "Player";
+        if (seenInRoster[playerKey]) {
+          if (!warningsByRosterId[rosterId]) warningsByRosterId[rosterId] = [];
+          warningsByRosterId[rosterId].push(
+            `${playerName} appears twice on this roster.`
+          );
+        }
+        seenInRoster[playerKey] = true;
+        if (!playersBySeries[seriesKey]) playersBySeries[seriesKey] = {};
+        if (!playersBySeries[seriesKey][playerKey]) {
+          playersBySeries[seriesKey][playerKey] = [];
+        }
+        playersBySeries[seriesKey][playerKey].push({
+          rosterId,
+          teamName: roster.clubTeamName || "Team",
+          playerName,
+          status: normalizeRosterStatus(roster.rosterStatus),
+          className: roster.className || roster.squadLabel || "series",
+        });
+      });
+    });
+
+    Object.values(playersBySeries).forEach((players) => {
+      Object.values(players).forEach((entries) => {
+        const rosterIds = Array.from(new Set(entries.map((entry) => entry.rosterId)));
+        if (rosterIds.length < 2) return;
+        entries.forEach((entry) => {
+          const otherTeams = entries
+            .filter((other) => other.rosterId !== entry.rosterId)
+            .map((other) => other.teamName)
+            .filter(Boolean);
+          if (!warningsByRosterId[entry.rosterId]) {
+            warningsByRosterId[entry.rosterId] = [];
+          }
+          warningsByRosterId[entry.rosterId].push(
+            `${entry.playerName} also appears on ${Array.from(
+              new Set(otherTeams)
+            ).join(", ")} in ${entry.className}.`
+          );
+        });
+      });
+    });
+
+    return Object.fromEntries(
+      Object.entries(warningsByRosterId).map(([rosterId, warnings]) => [
+        rosterId,
+        Array.from(new Set(warnings)),
+      ])
     );
   }
 
@@ -6804,6 +8685,21 @@ export default function PlayerHubPage({
     return text || fallback;
   }
 
+  function passportStatusStyle(label) {
+    const value = String(label || "").toUpperCase();
+    if (
+      value === "GOING" ||
+      value === "APPROVED" ||
+      value === "LOCKED"
+    ) {
+      return playerHubStyles.accessStatusApproved;
+    }
+    if (value === "NO" || value === "REJECTED" || value === "CANCELLED") {
+      return playerHubStyles.accessStatusRejected;
+    }
+    return playerHubStyles.accessStatusPending;
+  }
+
   async function confirmDeactivatePlayerAccount() {
     if (!pendingDeactivateProfile) return;
     const profile = pendingDeactivateProfile;
@@ -6851,6 +8747,60 @@ export default function PlayerHubPage({
   );
   const primaryPlayerEvent = playerDashboardEvents[0] || null;
   const secondaryPlayerEvents = playerDashboardEvents.slice(1);
+  const passportStats = calculatePlayerPassportStats({
+    confirmedTeams,
+    playerTournamentAvailability,
+    playerTournamentRosterStatus,
+    myTeamNeedInterests,
+  });
+  const passportTrainerRole = Boolean(
+    savedProfilePreview.canUseTeamBuilder ||
+      savedProfilePreview.trainerApproved ||
+      accessRequests.some((request) => {
+        const type = String(request?.requestType || request?.type || "").toUpperCase();
+        const status = String(request?.status || "").toUpperCase();
+        return (
+          type === "TRAINER" &&
+          (status === "APPROVED" || status === "ACCEPTED")
+        );
+      })
+  );
+  const passportRoleBadges = [
+    "Player",
+    canManageTeamProfile ? "Captain" : "",
+    passportTrainerRole ? "Trainer" : "",
+    isAdmin ? "Admin" : "",
+  ].filter(Boolean);
+  const passportMemberSince = formatCompactDate(
+    primaryConfirmedTeam?.memberSince ||
+      primaryConfirmedTeam?.confirmedAt ||
+      primaryConfirmedTeam?.createdAt
+  );
+  const passportActiveRosterCount = playerTournamentRosterStatus.filter(
+    (item) => normalizeRosterStatus(item?.rosterStatus || item?.status) !== "CANCELLED"
+  ).length;
+  const passportSquadActivityCount =
+    plannedTeamItems.length + passportActiveRosterCount;
+  const passportAchievements = buildPlayerAchievements({
+    profile: savedProfilePreview,
+    stats: passportStats,
+    hasCaptainRole: canManageTeamProfile,
+    squadActivityCount: passportSquadActivityCount,
+  });
+  const passportActivityItems = getRecentPlayerActivity(
+    playerDashboardEvents,
+    squadDisplayName
+  );
+  const passportStatCards = [
+    ["Teams", passportStats.teamMembershipCount],
+    ["Invites", passportStats.eventInvitationsCount],
+    ["Going", passportStats.goingResponsesCount],
+    ["Maybe", passportStats.maybeResponsesCount],
+    ["No", passportStats.noResponsesCount],
+    ["Pending", passportStats.pendingResponsesCount],
+    ["Approved rosters", passportStats.rosterApprovedCount],
+    ["Player ads", passportStats.playerAdsInterestsCount],
+  ];
   const dedupedTournamentPlans = uniqueEventItems(tournamentPlans);
   const selectedTournamentAdOption = tournamentOptions.find(
     (option) =>
@@ -7013,6 +8963,36 @@ export default function PlayerHubPage({
       : null,
   ].filter(Boolean);
 
+  const canOpenAdminHubTab = adminDashboardCards.length > 0;
+  const hubTabs = [
+    { id: "home", label: "Home" },
+    { id: "events", label: "Events" },
+    { id: "team", label: "Team" },
+    { id: "players", label: "Players" },
+    canOpenAdminHubTab ? { id: "admin", label: "Admin" } : null,
+  ].filter(Boolean);
+  const showHubHome = activeHubTab === "home";
+  const showHubEvents = activeHubTab === "events";
+  const showHubTeam = activeHubTab === "team";
+  const showHubPlayers = activeHubTab === "players";
+  const showHubAdmin = activeHubTab === "admin" && canOpenAdminHubTab;
+  const showPlayerEventArea = showHubHome || showHubEvents;
+  const showTeamOverviewArea = showHubHome || showHubTeam;
+  const showTeamControlArea =
+    canManageTeamProfile &&
+    (showHubHome || showHubEvents || showHubTeam || showHubPlayers);
+  const showCaptainChecklist =
+    canManageTeamProfile && (showHubEvents || showHubTeam);
+  const showPlayerAdsArea = showHubHome || showHubPlayers;
+  const adminRosterDuplicateWarningsByRosterId =
+    buildAdminRosterDuplicateWarnings(adminTournamentRosterDrafts);
+
+  useEffect(() => {
+    if (activeHubTab === "admin" && !canOpenAdminHubTab) {
+      setActiveHubTab("home");
+    }
+  }, [activeHubTab, canOpenAdminHubTab]);
+
   function openAdminDashboardPanel(card) {
     const isClosing = openAdminPanel === card.id;
     setOpenAdminPanel(isClosing ? "" : card.id);
@@ -7037,7 +9017,27 @@ export default function PlayerHubPage({
         </div>
       </section>
 
-      {needsClubTeamSetup ? (
+      <nav style={playerHubStyles.hubNav} aria-label="Player Hub views">
+        {hubTabs.map((tab) => {
+          const active = activeHubTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              data-testid={`player-hub-tab-${tab.id}`}
+              style={{
+                ...playerHubStyles.hubNavButton,
+                ...(active ? playerHubStyles.hubNavButtonActive : {}),
+              }}
+              onClick={() => setActiveHubTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </nav>
+
+      {showTeamOverviewArea && needsClubTeamSetup ? (
         <form
           onSubmit={handleSaveTeamSetup}
           style={playerHubStyles.teamSetupCard}
@@ -7616,10 +9616,12 @@ export default function PlayerHubPage({
           </details>
         </section>
 
-        {primaryPlayerEvent ? renderPlayerEventCard(primaryPlayerEvent, true) : null}
+        {showPlayerEventArea && primaryPlayerEvent
+          ? renderPlayerEventCard(primaryPlayerEvent, true)
+          : null}
       </section>
 
-      {secondaryPlayerEvents.length ? (
+      {showPlayerEventArea && secondaryPlayerEvents.length ? (
         <section style={playerHubStyles.feedPanel}>
           <div style={playerHubStyles.feedHeader}>
             <div style={playerHubStyles.profileMeta}>
@@ -7635,6 +9637,7 @@ export default function PlayerHubPage({
         </section>
       ) : null}
 
+      {showTeamOverviewArea ? (
       <section style={playerHubStyles.compactHomeGrid}>
         {homeTeamCard ? (
           <section style={playerHubStyles.homeCard}>
@@ -7693,7 +9696,8 @@ export default function PlayerHubPage({
         ) : null}
 
       </section>
-      {canManageTeamProfile ? (
+      ) : null}
+      {showTeamControlArea ? (
       <section style={playerHubStyles.profileCard} data-testid="team-control">
         <div style={playerHubStyles.profileHeader}>
           <div style={playerHubStyles.profileMeta}>
@@ -7782,6 +9786,8 @@ export default function PlayerHubPage({
               </button>
             </div>
           </article>
+
+          {showCaptainChecklist ? renderCaptainTournamentChecklist() : null}
 
           {pendingCaptainMembershipRequests.length || teamMembershipMessage ? (
           <section style={playerHubStyles.teamControlWidePanel}>
@@ -8712,9 +10718,149 @@ export default function PlayerHubPage({
       </section>
       ) : null}
 
-      {visibleTeamNeeds.length ||
+      {showHubPlayers ? (
+        <section style={playerHubStyles.passportShell} data-testid="player-passport">
+          <div style={playerHubStyles.feedHeader}>
+            <div style={playerHubStyles.profileMeta}>
+              <div style={playerHubStyles.sectionTitle}>Player Passport</div>
+              <div style={playerHubStyles.cardText}>
+                Identity, responses, squads and roster activity.
+              </div>
+            </div>
+            <span style={playerHubStyles.chip}>V1</span>
+          </div>
+
+          <div style={playerHubStyles.passportHero}>
+            <article style={playerHubStyles.passportSummaryCard}>
+              <div style={playerHubStyles.passportAvatar}>{previewInitial}</div>
+              <div style={playerHubStyles.passportIdentity}>
+                <strong style={playerHubStyles.passportName}>
+                  {previewDisplayName}
+                </strong>
+                <span style={playerHubStyles.passportMeta}>
+                  {savedProfilePreview.country || "No country"} /{" "}
+                  {savedProfilePreview.profileType || "Player"}
+                </span>
+                <span style={playerHubStyles.passportMeta}>
+                  {profileTeamLabel || "No confirmed team"}
+                </span>
+                {passportMemberSince ? (
+                  <span style={playerHubStyles.passportMeta}>
+                    Member since {passportMemberSince}
+                  </span>
+                ) : null}
+                <div style={playerHubStyles.passportRoleRow}>
+                  {passportRoleBadges.map((badge) => (
+                    <span key={badge} style={playerHubStyles.passportRoleBadge}>
+                      {badge}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </article>
+
+            <div style={playerHubStyles.passportStatsGrid}>
+              {passportStatCards.map(([label, value]) => (
+                <article key={label} style={playerHubStyles.passportStatCard}>
+                  <strong style={playerHubStyles.passportStatValue}>
+                    {value}
+                  </strong>
+                  <span style={playerHubStyles.passportStatLabel}>{label}</span>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <div style={playerHubStyles.passportGrid}>
+            <article style={playerHubStyles.passportPanel}>
+              <div style={playerHubStyles.homeCardHeader}>
+                <div style={playerHubStyles.profileMeta}>
+                  <div style={playerHubStyles.sectionTitle}>
+                    Availability history
+                  </div>
+                  <div style={playerHubStyles.cardText}>
+                    Recent tournament responses and roster status.
+                  </div>
+                </div>
+                <span style={playerHubStyles.chip}>
+                  {passportActivityItems.length}
+                </span>
+              </div>
+              {passportActivityItems.length ? (
+                <div style={playerHubStyles.passportActivityList}>
+                  {passportActivityItems.map((activity) => (
+                    <div
+                      key={activity.key}
+                      style={playerHubStyles.passportActivityRow}
+                    >
+                      <div style={playerHubStyles.profileMeta}>
+                        <strong style={playerHubStyles.previewTitle}>
+                          {activity.tournamentName}
+                        </strong>
+                        <span style={playerHubStyles.previewSubtitle}>
+                          {[activity.teamName, activity.note]
+                            .filter(Boolean)
+                            .join(" / ")}
+                        </span>
+                      </div>
+                      <span
+                        style={{
+                          ...playerHubStyles.accessStatusChip,
+                          ...passportStatusStyle(activity.status),
+                        }}
+                      >
+                        {activity.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={playerHubStyles.passportEmpty}>
+                  History appears after tournament responses and roster activity.
+                </div>
+              )}
+            </article>
+
+            <article style={playerHubStyles.passportPanel}>
+              <div style={playerHubStyles.homeCardHeader}>
+                <div style={playerHubStyles.profileMeta}>
+                  <div style={playerHubStyles.sectionTitle}>Achievements</div>
+                  <div style={playerHubStyles.cardText}>
+                    Badges from your current activity.
+                  </div>
+                </div>
+                <span style={playerHubStyles.chip}>
+                  {passportAchievements.filter((badge) => badge.active).length}
+                </span>
+              </div>
+              <div style={playerHubStyles.passportAchievementGrid}>
+                {passportAchievements.map((badge) => (
+                  <div
+                    key={badge.id}
+                    style={{
+                      ...playerHubStyles.passportAchievementBadge,
+                      ...(badge.active
+                        ? {}
+                        : playerHubStyles.passportAchievementBadgeLocked),
+                    }}
+                  >
+                    <span style={playerHubStyles.passportAchievementTitle}>
+                      {badge.label}
+                    </span>
+                    <span style={playerHubStyles.passportAchievementDetail}>
+                      {badge.detail}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </article>
+          </div>
+        </section>
+      ) : null}
+
+      {showPlayerAdsArea && (visibleTeamNeeds.length ||
       visibleTeamNeedsStatus === "loading" ||
-      teamInterestMessage ? (
+      teamInterestMessage) ? (
       <section style={playerHubStyles.profileCard}>
         <div style={playerHubStyles.profileHeader}>
           <div style={playerHubStyles.profileMeta}>
@@ -8922,7 +11068,7 @@ export default function PlayerHubPage({
       </section>
       ) : null}
 
-      {adminDashboardCards.length ? (
+      {showHubAdmin && adminDashboardCards.length ? (
         <section style={playerHubStyles.adminReviewCard}>
           <div style={playerHubStyles.adminReviewTop}>
             <div style={playerHubStyles.profileMeta}>
@@ -8990,7 +11136,7 @@ export default function PlayerHubPage({
         </section>
       ) : null}
 
-      {isAdmin && openAdminPanel === "players" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "players" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Player profile review</span>
@@ -9223,7 +11369,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "access" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "access" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Access request review</span>
@@ -9406,7 +11552,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "clubs" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "clubs" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Official clubs/teams</span>
@@ -9609,7 +11755,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "identity" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "identity" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Team identity requests</span>
@@ -9772,7 +11918,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "profiles" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "profiles" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Team profile review</span>
@@ -9891,7 +12037,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "needs" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "needs" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Team need interest review</span>
@@ -9961,7 +12107,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "members" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "members" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Team members review</span>
@@ -10056,7 +12202,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {isAdmin && openAdminPanel === "membership" ? (
+      {showHubAdmin && isAdmin && openAdminPanel === "membership" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Team membership requests</span>
@@ -10147,7 +12293,7 @@ export default function PlayerHubPage({
         </details>
       ) : null}
 
-      {canReviewRosterDrafts && openAdminPanel === "rosters" ? (
+      {showHubAdmin && canReviewRosterDrafts && openAdminPanel === "rosters" ? (
         <details open style={playerHubStyles.adminAccordion}>
           <summary style={playerHubStyles.adminAccordionSummary}>
             <span>Roster review</span>
@@ -10191,6 +12337,13 @@ export default function PlayerHubPage({
                   const isReviewUpdating = adminRosterReviewUpdatingId.startsWith(
                     `${roster.rosterId}:`
                   );
+                  const rosterLock = rosterLockForSource(roster);
+                  const duplicateWarnings =
+                    adminRosterDuplicateWarningsByRosterId[roster.rosterId] || [];
+                  const changedAfterDeadline = rosterChangedAfterDeadline(
+                    roster,
+                    rosterLock
+                  );
                   return (
                     <article
                       key={roster.rosterId}
@@ -10202,6 +12355,7 @@ export default function PlayerHubPage({
                         </strong>
                         <span style={playerHubStyles.previewSubtitle}>
                           {roster.clubTeamName || "Team"}
+                          {roster.className ? ` / ${roster.className}` : ""}
                           {!isNeutralPlanLabel(roster.squadLabel)
                             ? ` / Squad ${roster.squadLabel}`
                             : ""}
@@ -10222,6 +12376,9 @@ export default function PlayerHubPage({
                             Note: {roster.adminNote}
                           </span>
                         ) : null}
+                        <span style={playerHubStyles.previewSubtitle}>
+                          Public cannot see player names.
+                        </span>
                       </div>
                       <div style={playerHubStyles.chipRow}>
                         <span
@@ -10232,7 +12389,56 @@ export default function PlayerHubPage({
                         >
                           {formatRosterStatus(status)}
                         </span>
+                        {rosterLock.afterDeadline ? (
+                          <span style={playerHubStyles.chip}>After deadline</span>
+                        ) : null}
+                        {changedAfterDeadline ? (
+                          <span style={playerHubStyles.chip}>Late change</span>
+                        ) : null}
+                        {duplicateWarnings.length ? (
+                          <span style={playerHubStyles.chip}>
+                            Duplicate warning
+                          </span>
+                        ) : null}
+                        {rosterLockLabel(rosterLock) ? (
+                          <span style={playerHubStyles.chip}>
+                            {rosterLockLabel(rosterLock)}
+                          </span>
+                        ) : null}
                       </div>
+                      <div style={playerHubStyles.chipRow}>
+                        {roster.submittedAt ? (
+                          <span style={playerHubStyles.chip}>
+                            Submitted: {new Date(roster.submittedAt).toLocaleString()}
+                          </span>
+                        ) : null}
+                        {roster.reviewedAt ? (
+                          <span style={playerHubStyles.chip}>
+                            Reviewed: {new Date(roster.reviewedAt).toLocaleString()}
+                          </span>
+                        ) : null}
+                        {roster.lockedAt ? (
+                          <span style={playerHubStyles.chip}>
+                            Locked: {new Date(roster.lockedAt).toLocaleString()}
+                          </span>
+                        ) : null}
+                        {roster.lockedBy || roster.reviewedBy || roster.submittedBy ? (
+                          <span style={playerHubStyles.chip}>
+                            Changed by:{" "}
+                            {roster.lockedBy || roster.reviewedBy || roster.submittedBy}
+                          </span>
+                        ) : null}
+                        {roster.lockReason ? (
+                          <span style={playerHubStyles.chip}>
+                            Reason: {roster.lockReason}
+                          </span>
+                        ) : null}
+                      </div>
+                      {duplicateWarnings.length ? (
+                        <div style={playerHubStyles.profileMessage}>
+                          {duplicateWarnings.join(" ")}
+                        </div>
+                      ) : null}
                       <details>
                         <summary style={playerHubStyles.adminActionButton}>
                           View
@@ -10253,12 +12459,10 @@ export default function PlayerHubPage({
                                   <span style={playerHubStyles.squadPlayerMeta}>
                                     {[
                                       player.playerCountry || "No country",
-                                      normalizeAssignedSquad(player.assignedSquad) ===
-                                      "RESERVE"
-                                        ? "Reserve"
-                                        : `Team ${normalizeAssignedSquad(
-                                            player.assignedSquad
-                                          )}`,
+                                      squadDisplayName(
+                                        player.assignedSquad,
+                                        roster
+                                      ),
                                     ].join(" / ")}
                                   </span>
                                 </div>
@@ -10271,7 +12475,7 @@ export default function PlayerHubPage({
                           )}
                         </div>
                       </details>
-                      {status === "SUBMITTED" ? (
+                      {status === "SUBMITTED" || status === "CHANGE_REQUESTED" ? (
                         <div style={playerHubStyles.profileMeta}>
                           <textarea
                             value={noteValue}
