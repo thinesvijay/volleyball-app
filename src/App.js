@@ -16105,6 +16105,23 @@ const savedRound = readStorageWithTtl(
         <small>{resolved ? "From completed group results" : "Placeholder"}</small>
       </div>
     );
+    const getKnockoutPairingRuleLabel = (advancement = []) => {
+      const groupCodes = advancement
+        .map((group) => String(group.groupCode || "").trim())
+        .filter(Boolean);
+      const pairings = [];
+
+      for (let index = 0; index < groupCodes.length; index += 2) {
+        const groupA = groupCodes[index];
+        const groupB = groupCodes[index + 1];
+        if (!groupA || !groupB) continue;
+        pairings.push(`${groupA}1 vs ${groupB}2 / ${groupB}1 vs ${groupA}2`);
+      }
+
+      return pairings.length
+        ? pairings.slice(0, 2).join(" | ") + (pairings.length > 2 ? " ..." : "")
+        : "A1 vs B2 / B1 vs A2";
+    };
     const renderKnockoutSetupCard = (section, advancement, status) => (
       <div style={styles.tournamentKnockoutSetupCardV1}>
         <div style={styles.tournamentSectionHeader}>
@@ -16119,9 +16136,10 @@ const savedRound = readStorageWithTtl(
 
         <div style={styles.tournamentKnockoutRuleGridV1}>
           {[
+            ["Class", getSeriesDisplayName(section.series)],
             ["Groups", advancement.length],
             ["Advancement", "Winner + runner-up"],
-            ["Semi rule", "A1 vs B2 / B1 vs A2"],
+            ["Semi rule", getKnockoutPairingRuleLabel(advancement)],
             ["3rd place", activeTournament.thirdPlaceMatch ? "Enabled" : "Disabled"],
           ].map(([label, value]) => (
             <div key={`knockout-rule-${label}`} style={styles.tournamentDrawMetricV1}>
@@ -16203,7 +16221,9 @@ const savedRound = readStorageWithTtl(
           <div style={styles.tournamentKnockoutChipRowV1}>
             {renderKnockoutStageChip(
               "Group stage",
-              advancement.every((group) => group.allResultsKnown)
+              status === "Missing groups"
+                ? "Missing groups"
+                : advancement.every((group) => group.allResultsKnown)
                 ? "Completed"
                 : "Missing results"
             )}
