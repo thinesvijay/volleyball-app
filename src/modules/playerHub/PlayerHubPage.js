@@ -3766,6 +3766,379 @@ Object.assign(playerHubStyles, {
   },
 });
 
+const hubGlassV3 = {
+  background:
+    "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(8,47,73,0.54) 58%, rgba(6,78,59,0.22))",
+  border: "1px solid rgba(125,211,252,0.20)",
+  boxShadow:
+    "0 24px 72px rgba(2,6,23,0.34), inset 0 1px 0 rgba(255,255,255,0.06)",
+  backdropFilter: "blur(18px)",
+};
+
+const hubGlassSoftV3 = {
+  background:
+    "linear-gradient(145deg, rgba(15,23,42,0.66), rgba(8,47,73,0.34))",
+  border: "1px solid rgba(125,211,252,0.15)",
+  boxShadow: "0 16px 44px rgba(2,6,23,0.24)",
+  backdropFilter: "blur(16px)",
+};
+
+const hubRowV3 = {
+  background: "rgba(2,6,23,0.38)",
+  border: "1px solid rgba(148,163,184,0.13)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+};
+
+Object.assign(playerHubStyles, {
+  shell: {
+    ...playerHubStyles.shell,
+    maxWidth: "1280px",
+    padding: "clamp(12px, 2vw, 22px)",
+    borderRadius: "34px",
+    background:
+      "radial-gradient(circle at 10% -4%, rgba(56,189,248,0.28), transparent 32%), radial-gradient(circle at 92% 4%, rgba(34,197,94,0.20), transparent 30%), linear-gradient(135deg, #010713 0%, #04111f 48%, #071b24 100%)",
+    border: "1px solid rgba(125,211,252,0.18)",
+    boxShadow: "0 32px 96px rgba(2,6,23,0.42)",
+  },
+  hero: {
+    ...playerHubStyles.hero,
+    ...hubGlassV3,
+    borderRadius: "30px",
+    padding: "clamp(16px, 2.2vw, 24px)",
+  },
+  title: {
+    ...playerHubStyles.title,
+    fontSize: "clamp(25px, 3vw, 36px)",
+    letterSpacing: 0,
+  },
+  subtitle: {
+    ...playerHubStyles.subtitle,
+    maxWidth: "820px",
+  },
+  hubNav: {
+    ...playerHubStyles.hubNav,
+    position: "sticky",
+    top: "8px",
+    zIndex: 5,
+    padding: "6px",
+    borderRadius: "24px",
+    background: "rgba(2,6,23,0.54)",
+    border: "1px solid rgba(125,211,252,0.18)",
+    backdropFilter: "blur(18px)",
+    boxShadow: "0 18px 52px rgba(2,6,23,0.30)",
+  },
+  hubNavButton: {
+    ...playerHubStyles.hubNavButton,
+    minHeight: "44px",
+    borderRadius: "18px",
+    background: "rgba(15,23,42,0.54)",
+    border: "1px solid rgba(148,163,184,0.12)",
+  },
+  hubNavButtonActive: {
+    ...playerHubStyles.hubNavButtonActive,
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    color: "#03111f",
+    boxShadow:
+      "0 14px 34px rgba(14,165,233,0.28), inset 0 1px 0 rgba(255,255,255,0.28)",
+  },
+  profileCard: {
+    ...playerHubStyles.profileCard,
+    ...hubGlassSoftV3,
+    borderRadius: "26px",
+  },
+  homeCard: {
+    ...playerHubStyles.homeCard,
+    ...hubGlassSoftV3,
+    borderRadius: "24px",
+  },
+  playerHeroCard: {
+    ...playerHubStyles.playerHeroCard,
+    ...hubGlassV3,
+  },
+  nextTournamentCard: {
+    ...playerHubStyles.nextTournamentCard,
+    ...hubGlassV3,
+  },
+  feedPanel: {
+    ...playerHubStyles.feedPanel,
+    ...hubGlassV3,
+    borderRadius: "28px",
+  },
+  feedItem: {
+    ...playerHubStyles.feedItem,
+    ...hubRowV3,
+    borderRadius: "18px",
+  },
+  compactRow: {
+    ...playerHubStyles.compactRow,
+    ...hubRowV3,
+    borderRadius: "16px",
+  },
+  previewCard: {
+    ...playerHubStyles.previewCard,
+    ...hubGlassSoftV3,
+  },
+  teamNeedCard: {
+    ...playerHubStyles.teamNeedCard,
+    ...hubGlassSoftV3,
+  },
+  profilePreviewPanel: {
+    ...playerHubStyles.profilePreviewPanel,
+    ...hubGlassSoftV3,
+  },
+  profilePreviewCard: {
+    ...playerHubStyles.profilePreviewCard,
+    ...hubGlassSoftV3,
+  },
+  editorSection: {
+    ...playerHubStyles.editorSection,
+    ...hubRowV3,
+  },
+  actionDrawer: {
+    ...playerHubStyles.actionDrawer,
+    ...hubGlassSoftV3,
+  },
+  profileInput: {
+    ...playerHubStyles.profileInput,
+    minHeight: "42px",
+    background: "rgba(2,6,23,0.54)",
+    border: "1px solid rgba(148,163,184,0.20)",
+  },
+  profileTextarea: {
+    ...playerHubStyles.profileTextarea,
+    background: "rgba(2,6,23,0.54)",
+    border: "1px solid rgba(148,163,184,0.20)",
+  },
+  profileTextareaCompact: {
+    ...playerHubStyles.profileTextareaCompact,
+    background: "rgba(2,6,23,0.54)",
+    border: "1px solid rgba(148,163,184,0.20)",
+  },
+  saveButton: {
+    ...playerHubStyles.saveButton,
+    minHeight: "42px",
+    border: "1px solid rgba(125,211,252,0.36)",
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    color: "#03111f",
+    boxShadow: "0 14px 34px rgba(14,165,233,0.26)",
+  },
+  adminActionButton: {
+    ...playerHubStyles.adminActionButton,
+    minHeight: "40px",
+    border: "1px solid rgba(125,211,252,0.22)",
+    background: "rgba(14,165,233,0.14)",
+  },
+  chip: {
+    ...playerHubStyles.chip,
+    background: "rgba(14,165,233,0.14)",
+    border: "1px solid rgba(125,211,252,0.22)",
+    color: "#dff7ff",
+  },
+  statusChip: {
+    ...playerHubStyles.statusChip,
+    background: "rgba(14,165,233,0.16)",
+    border: "1px solid rgba(125,211,252,0.26)",
+  },
+  accessStatusChip: {
+    ...playerHubStyles.accessStatusChip,
+    borderRadius: "999px",
+    padding: "6px 9px",
+  },
+  homeDashboardGrid: {
+    ...playerHubStyles.homeDashboardGrid,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 380px), 1fr))",
+  },
+  homeNextActionCard: {
+    ...playerHubStyles.homeNextActionCard,
+    ...hubGlassV3,
+    borderRadius: "30px",
+    padding: "clamp(16px, 2vw, 22px)",
+  },
+  homePrimaryButton: {
+    ...playerHubStyles.homePrimaryButton,
+    minHeight: "46px",
+    borderRadius: "16px",
+  },
+  homeQuickStatCard: {
+    ...playerHubStyles.homeQuickStatCard,
+    ...hubRowV3,
+    borderRadius: "18px",
+  },
+  homePreviewCard: {
+    ...playerHubStyles.homePreviewCard,
+    ...hubGlassSoftV3,
+    borderRadius: "24px",
+  },
+  homePreviewRow: {
+    ...playerHubStyles.homePreviewRow,
+    ...hubRowV3,
+    borderRadius: "18px",
+  },
+  homeCaptainTaskRow: {
+    ...playerHubStyles.homeCaptainTaskRow,
+    ...hubRowV3,
+  },
+  eventGrid: {
+    ...playerHubStyles.eventGrid,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 360px), 1fr))",
+  },
+  eventCard: {
+    ...playerHubStyles.eventCard,
+    ...hubGlassV3,
+    maxWidth: "none",
+    borderRadius: "24px",
+    padding: "14px",
+  },
+  eventCardFeatured: {
+    ...playerHubStyles.eventCardFeatured,
+    borderColor: "rgba(56,189,248,0.48)",
+    boxShadow:
+      "0 24px 70px rgba(8,47,73,0.38), inset 0 1px 0 rgba(255,255,255,0.10)",
+  },
+  eventStat: {
+    ...playerHubStyles.eventStat,
+    minHeight: "28px",
+  },
+  eventResponseButton: {
+    ...playerHubStyles.eventResponseButton,
+    minHeight: "44px",
+    borderRadius: "16px",
+  },
+  eventCommentDrawer: {
+    ...playerHubStyles.eventCommentDrawer,
+    ...hubRowV3,
+  },
+  teamDashboardShell: {
+    ...playerHubStyles.teamDashboardShell,
+    ...hubGlassV3,
+    borderRadius: "30px",
+  },
+  teamDashboardGrid: {
+    ...playerHubStyles.teamDashboardGrid,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))",
+  },
+  teamSummaryCard: {
+    ...playerHubStyles.teamSummaryCard,
+    ...hubGlassV3,
+    borderRadius: "28px",
+  },
+  teamSummaryStat: {
+    ...playerHubStyles.teamSummaryStat,
+    ...hubRowV3,
+  },
+  captainActionStrip: {
+    ...playerHubStyles.captainActionStrip,
+    ...hubGlassSoftV3,
+  },
+  captainActionButton: {
+    ...playerHubStyles.captainActionButton,
+    minHeight: "44px",
+    borderRadius: "16px",
+  },
+  teamCompactPanel: {
+    ...playerHubStyles.teamCompactPanel,
+    ...hubGlassSoftV3,
+  },
+  teamCompactRow: {
+    ...playerHubStyles.teamCompactRow,
+    ...hubRowV3,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+  },
+  teamControlPanel: {
+    ...playerHubStyles.teamControlPanel,
+    ...hubGlassSoftV3,
+  },
+  teamControlWidePanel: {
+    ...playerHubStyles.teamControlWidePanel,
+    ...hubGlassSoftV3,
+  },
+  teamControlRow: {
+    ...playerHubStyles.teamControlRow,
+    ...hubRowV3,
+  },
+  captainChecklistCard: {
+    ...playerHubStyles.captainChecklistCard,
+    ...hubGlassSoftV3,
+  },
+  captainChecklistStep: {
+    ...playerHubStyles.captainChecklistStep,
+    ...hubRowV3,
+  },
+  squadNamesPanel: {
+    ...playerHubStyles.squadNamesPanel,
+    ...hubGlassSoftV3,
+  },
+  compactSquadNameField: {
+    ...playerHubStyles.compactSquadNameField,
+    ...hubRowV3,
+  },
+  squadNameInput: {
+    ...playerHubStyles.squadNameInput,
+    background: "rgba(2,6,23,0.54)",
+    border: "1px solid rgba(148,163,184,0.20)",
+    color: hubDarkPalette.text,
+    colorScheme: "dark",
+  },
+  passportShell: {
+    ...playerHubStyles.passportShell,
+    ...hubGlassV3,
+    borderRadius: "30px",
+  },
+  passportSummaryCard: {
+    ...playerHubStyles.passportSummaryCard,
+    ...hubGlassSoftV3,
+    borderRadius: "24px",
+  },
+  passportPanel: {
+    ...playerHubStyles.passportPanel,
+    ...hubGlassSoftV3,
+  },
+  passportStatCard: {
+    ...playerHubStyles.passportStatCard,
+    ...hubRowV3,
+  },
+  passportActivityRow: {
+    ...playerHubStyles.passportActivityRow,
+    ...hubRowV3,
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+  },
+  passportAchievementBadge: {
+    ...playerHubStyles.passportAchievementBadge,
+    background:
+      "linear-gradient(135deg, rgba(16,185,129,0.18), rgba(14,165,233,0.12))",
+  },
+  playersAdPanel: {
+    ...playerHubStyles.playersAdPanel,
+    ...hubGlassV3,
+  },
+  playersAdCard: {
+    ...playerHubStyles.playersAdCard,
+    ...hubGlassSoftV3,
+  },
+  adminReviewCard: {
+    ...playerHubStyles.adminReviewCard,
+    ...hubGlassV3,
+    borderRadius: "30px",
+  },
+  adminInboxSection: {
+    ...playerHubStyles.adminInboxSection,
+    ...hubGlassSoftV3,
+  },
+  adminDashboardTile: {
+    ...playerHubStyles.adminDashboardTile,
+    ...hubGlassSoftV3,
+    minHeight: "150px",
+  },
+  adminAccordion: {
+    ...playerHubStyles.adminAccordion,
+    ...hubGlassV3,
+  },
+  adminReviewProfileCard: {
+    ...playerHubStyles.adminReviewProfileCard,
+    ...hubGlassSoftV3,
+  },
+});
+
 export default function PlayerHubPage({
   username = "",
   isAdmin = false,

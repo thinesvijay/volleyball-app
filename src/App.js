@@ -26822,3 +26822,629 @@ Object.assign(styles, {
   },
 });
 
+const sportsGlassV3 = {
+  background:
+    "linear-gradient(145deg, rgba(15,23,42,0.84), rgba(8,47,73,0.54) 58%, rgba(6,78,59,0.26))",
+  border: "1px solid rgba(125,211,252,0.18)",
+  boxShadow:
+    "0 24px 72px rgba(2,6,23,0.34), inset 0 1px 0 rgba(255,255,255,0.06)",
+  backdropFilter: "blur(18px)",
+};
+
+const sportsGlassSoftV3 = {
+  background:
+    "linear-gradient(145deg, rgba(15,23,42,0.66), rgba(8,47,73,0.34))",
+  border: "1px solid rgba(125,211,252,0.14)",
+  boxShadow: "0 16px 44px rgba(2,6,23,0.24)",
+  backdropFilter: "blur(16px)",
+};
+
+const sportsRowV3 = {
+  background: "rgba(2,6,23,0.36)",
+  border: "1px solid rgba(148,163,184,0.13)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+};
+
+Object.assign(styles, {
+  app: {
+    ...styles.app,
+    background:
+      "radial-gradient(circle at 10% -4%, rgba(56,189,248,0.30), transparent 30%), radial-gradient(circle at 92% 4%, rgba(34,197,94,0.22), transparent 30%), radial-gradient(circle at 50% 112%, rgba(59,130,246,0.16), transparent 36%), linear-gradient(135deg, #010713 0%, #04111f 44%, #071b24 100%)",
+  },
+  shell: {
+    ...styles.shell,
+    maxWidth: "1500px",
+    gap: "clamp(12px, 1.5vw, 18px)",
+  },
+  header: {
+    ...styles.header,
+    ...sportsGlassV3,
+    borderRadius: "32px",
+    padding: "clamp(12px, 1.8vw, 18px)",
+  },
+  appBrandMark: {
+    ...styles.appBrandMark,
+    boxShadow:
+      "0 0 0 1px rgba(255,255,255,0.14), 0 18px 42px rgba(14,165,233,0.34)",
+  },
+  tabBar: {
+    ...styles.tabBar,
+    ...sportsGlassV3,
+    padding: "7px",
+    borderRadius: "24px",
+  },
+  tabButton: {
+    ...styles.tabButton,
+    borderRadius: "18px",
+    background: "rgba(2,6,23,0.38)",
+    border: "1px solid rgba(148,163,184,0.12)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+  },
+  tabButtonActive: {
+    ...styles.tabButtonActive,
+    background:
+      "linear-gradient(135deg, #38bdf8 0%, #22c55e 100%)",
+    color: "#03111f",
+    boxShadow:
+      "0 16px 38px rgba(14,165,233,0.28), inset 0 1px 0 rgba(255,255,255,0.28)",
+  },
+  section: {
+    ...styles.section,
+    ...sportsGlassV3,
+    padding: "clamp(12px, 1.6vw, 18px)",
+  },
+  lockedCard: {
+    ...styles.lockedCard,
+    ...sportsGlassSoftV3,
+  },
+  adminCard: {
+    ...styles.adminCard,
+    ...sportsGlassV3,
+  },
+  authCard: {
+    ...styles.authCard,
+    ...sportsGlassV3,
+  },
+  formCard: {
+    ...styles.formCard,
+    ...sportsGlassSoftV3,
+    borderRadius: "20px",
+  },
+  loginMessage: {
+    ...styles.loginMessage,
+    border: "1px solid rgba(125,211,252,0.20)",
+    background: "rgba(14,165,233,0.12)",
+    color: "#dff7ff",
+  },
+  primaryButton: {
+    ...styles.primaryButton,
+    border: "1px solid rgba(125,211,252,0.34)",
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    color: "#03111f",
+    boxShadow: "0 16px 34px rgba(14,165,233,0.26)",
+  },
+  primaryButtonSmall: {
+    ...styles.primaryButtonSmall,
+    border: "1px solid rgba(125,211,252,0.32)",
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    color: "#03111f",
+    boxShadow: "0 12px 28px rgba(14,165,233,0.22)",
+  },
+  secondaryButton: {
+    ...styles.secondaryButton,
+    border: "1px solid rgba(125,211,252,0.22)",
+    background: "rgba(14,165,233,0.13)",
+    color: "#dff7ff",
+    boxShadow: "0 10px 24px rgba(2,6,23,0.18)",
+  },
+  secondaryButtonCompact: {
+    ...styles.secondaryButtonCompact,
+    border: "1px solid rgba(125,211,252,0.20)",
+    background: "rgba(14,165,233,0.12)",
+    color: "#bae6fd",
+  },
+  teamCountCard: {
+    ...styles.teamCountCard,
+    ...sportsGlassSoftV3,
+    borderRadius: "22px",
+  },
+  selectedBadge: {
+    ...styles.selectedBadge,
+    ...sportsRowV3,
+    color: "#e5f3ff",
+  },
+  settingsCard: {
+    ...styles.settingsCard,
+    ...sportsGlassSoftV3,
+  },
+  compactSettingsCard: {
+    ...styles.compactSettingsCard,
+    ...sportsRowV3,
+  },
+  playerCardCompact: {
+    ...styles.playerCardCompact,
+    ...sportsRowV3,
+    borderRadius: "18px",
+  },
+  playerCardListCompact: {
+    ...styles.playerCardListCompact,
+    ...sportsRowV3,
+  },
+  teamCard: {
+    ...styles.teamCard,
+    ...sportsGlassSoftV3,
+    borderRadius: "24px",
+  },
+  matchCard: {
+    ...styles.matchCard,
+    ...sportsRowV3,
+  },
+  tournamentDashboardSection: {
+    ...styles.tournamentDashboardSection,
+    background:
+      "radial-gradient(circle at 12% 0%, rgba(56,189,248,0.18), transparent 30%), radial-gradient(circle at 92% 8%, rgba(34,197,94,0.14), transparent 28%), linear-gradient(145deg, rgba(3,7,18,0.88), rgba(8,47,73,0.54))",
+    border: "1px solid rgba(125,211,252,0.18)",
+    boxShadow: "0 30px 90px rgba(2,6,23,0.38)",
+  },
+  tournamentDashboardShell: {
+    ...styles.tournamentDashboardShell,
+    gap: "clamp(12px, 1.3vw, 18px)",
+  },
+  tournamentSetupPanel: {
+    ...styles.tournamentSetupPanel,
+    ...sportsGlassV3,
+    background:
+      "linear-gradient(160deg, rgba(2,6,23,0.88), rgba(8,47,73,0.66) 58%, rgba(6,78,59,0.26))",
+    borderRadius: "28px",
+  },
+  tournamentSetupBlock: {
+    ...styles.tournamentSetupBlock,
+    ...sportsRowV3,
+    borderRadius: "18px",
+  },
+  tournamentOptionalDetails: {
+    ...styles.tournamentOptionalDetails,
+    ...sportsRowV3,
+  },
+  tournamentOptionalSummary: {
+    ...styles.tournamentOptionalSummary,
+    color: "#bae6fd",
+  },
+  tournamentNewButton: {
+    ...styles.tournamentNewButton,
+    background: "linear-gradient(135deg, #22c55e, #38bdf8)",
+    color: "#03111f",
+    boxShadow: "0 14px 34px rgba(34,197,94,0.24)",
+  },
+  tournamentListItem: {
+    ...styles.tournamentListItem,
+    ...sportsRowV3,
+    borderRadius: "16px",
+  },
+  tournamentListItemActive: {
+    ...styles.tournamentListItemActive,
+    background: "rgba(14,165,233,0.20)",
+    borderColor: "rgba(125,211,252,0.42)",
+    boxShadow: "0 0 0 2px rgba(14,165,233,0.14)",
+  },
+  tournamentListStatusBadge: {
+    ...styles.tournamentListStatusBadge,
+    background: "rgba(14,165,233,0.13)",
+    border: "1px solid rgba(125,211,252,0.20)",
+    color: "#bae6fd",
+  },
+  tournamentListStatusBadgeLive: {
+    ...styles.tournamentListStatusBadgeLive,
+    background: "rgba(34,197,94,0.18)",
+    border: "1px solid rgba(52,211,153,0.30)",
+    color: "#bbf7d0",
+  },
+  tournamentListItemStatsChip: {
+    ...styles.tournamentListItemStatsChip,
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(148,163,184,0.12)",
+    color: "#cbd5e1",
+  },
+  tournamentStatusBadge: {
+    ...styles.tournamentStatusBadge,
+    background: "rgba(14,165,233,0.14)",
+    border: "1px solid rgba(125,211,252,0.24)",
+    color: "#bae6fd",
+  },
+  tournamentSidebarGroup: {
+    ...styles.tournamentSidebarGroup,
+    ...sportsRowV3,
+  },
+  tournamentTeamRow: {
+    ...styles.tournamentTeamRow,
+    ...sportsRowV3,
+    borderRadius: "16px",
+  },
+  tournamentPlayerPill: {
+    ...styles.tournamentPlayerPill,
+    background: "rgba(14,165,233,0.12)",
+    border: "1px solid rgba(125,211,252,0.16)",
+    color: "#dff7ff",
+  },
+  tournamentMainPanel: {
+    ...styles.tournamentMainPanel,
+    ...sportsGlassV3,
+    borderRadius: "30px",
+  },
+  tournamentHero: {
+    ...styles.tournamentHero,
+    background:
+      "radial-gradient(circle at 88% 0%, rgba(34,197,94,0.22), transparent 34%), linear-gradient(145deg, rgba(14,165,233,0.22), rgba(2,6,23,0.90) 54%, rgba(8,47,73,0.48))",
+    border: "1px solid rgba(125,211,252,0.24)",
+    boxShadow: "0 24px 70px rgba(2,6,23,0.34)",
+  },
+  tournamentHeroTitle: {
+    ...styles.tournamentHeroTitle,
+    fontSize: "clamp(28px, 3vw, 40px)",
+  },
+  tournamentHeroChip: {
+    ...styles.tournamentHeroChip,
+    border: "1px solid rgba(125,211,252,0.18)",
+  },
+  tournamentLightButton: {
+    ...styles.tournamentLightButton,
+    background: "rgba(14,165,233,0.14)",
+    border: "1px solid rgba(125,211,252,0.22)",
+    color: "#dff7ff",
+  },
+  tournamentStatCard: {
+    ...styles.tournamentStatCard,
+    ...sportsRowV3,
+    borderRadius: "20px",
+  },
+  tournamentSubTabs: {
+    ...styles.tournamentSubTabs,
+    ...sportsRowV3,
+    borderRadius: "22px",
+  },
+  tournamentSubTab: {
+    ...styles.tournamentSubTab,
+    minHeight: "42px",
+  },
+  tournamentSurface: {
+    ...styles.tournamentSurface,
+    ...sportsGlassSoftV3,
+    borderRadius: "24px",
+  },
+  tournamentOverviewHero: {
+    ...styles.tournamentOverviewHero,
+    ...sportsGlassV3,
+  },
+  tournamentOverviewStat: {
+    ...styles.tournamentOverviewStat,
+    ...sportsRowV3,
+  },
+  tournamentCompactGroupCard: {
+    ...styles.tournamentCompactGroupCard,
+    ...sportsRowV3,
+  },
+  tournamentInfoTile: {
+    ...styles.tournamentInfoTile,
+    ...sportsRowV3,
+  },
+  tournamentFeatureMatch: {
+    ...styles.tournamentFeatureMatch,
+    ...sportsGlassSoftV3,
+  },
+  tournamentSnapshotRow: {
+    ...styles.tournamentSnapshotRow,
+    ...sportsRowV3,
+  },
+  tournamentPreviewGroupCard: {
+    ...styles.tournamentPreviewGroupCard,
+    ...sportsRowV3,
+  },
+  tournamentPreviewBracketCard: {
+    ...styles.tournamentPreviewBracketCard,
+    ...sportsRowV3,
+  },
+  tournamentPreviewMatchRow: {
+    ...styles.tournamentPreviewMatchRow,
+    ...sportsRowV3,
+  },
+  tournamentSchedulePanel: {
+    ...styles.tournamentSchedulePanel,
+    ...sportsGlassSoftV3,
+    borderRadius: "24px",
+  },
+  tournamentScheduleCourt: {
+    ...styles.tournamentScheduleCourt,
+    background: "rgba(15,23,42,0.62)",
+    border: "1px solid rgba(125,211,252,0.16)",
+  },
+  tournamentScheduleHeaderRow: {
+    ...styles.tournamentScheduleHeaderRow,
+    background: "rgba(2,6,23,0.48)",
+  },
+  tournamentScheduleTimeCell: {
+    ...styles.tournamentScheduleTimeCell,
+    color: "#9fb4d0",
+  },
+  tournamentMiniCard: {
+    ...styles.tournamentMiniCard,
+    ...sportsRowV3,
+  },
+  tournamentGroupCard: {
+    ...styles.tournamentGroupCard,
+    ...sportsGlassSoftV3,
+    borderRadius: "22px",
+  },
+  tournamentGroupTeamRow: {
+    ...styles.tournamentGroupTeamRow,
+    background: "rgba(2,6,23,0.28)",
+    borderColor: "rgba(148,163,184,0.12)",
+  },
+  tournamentBracketMatch: {
+    ...styles.tournamentBracketMatch,
+    ...sportsRowV3,
+  },
+  tournamentMatchCard: {
+    ...styles.tournamentMatchCard,
+    ...sportsGlassSoftV3,
+    borderRadius: "22px",
+  },
+  tournamentStandingsCard: {
+    ...styles.tournamentStandingsCard,
+    ...sportsGlassSoftV3,
+    borderRadius: "22px",
+  },
+  tournamentTable: {
+    ...styles.tournamentTable,
+    color: "#dbeafe",
+  },
+  tournamentTableHead: {
+    ...styles.tournamentTableHead,
+    color: "#7dd3fc",
+    borderBottom: "1px solid rgba(125,211,252,0.18)",
+  },
+  tournamentTableTeam: {
+    ...styles.tournamentTableTeam,
+    borderBottom: "1px solid rgba(148,163,184,0.12)",
+  },
+  tournamentTableCell: {
+    ...styles.tournamentTableCell,
+    borderBottom: "1px solid rgba(148,163,184,0.12)",
+  },
+  tournamentTablePoints: {
+    ...styles.tournamentTablePoints,
+    color: "#86efac",
+    borderBottom: "1px solid rgba(148,163,184,0.12)",
+  },
+  tournamentPublicHeader: {
+    ...styles.tournamentPublicHeader,
+    ...sportsGlassSoftV3,
+    color: "#dbeafe",
+  },
+  tournamentShareCompactCard: {
+    ...styles.tournamentShareCompactCard,
+    ...sportsGlassSoftV3,
+    borderRadius: "24px",
+  },
+  tournamentShareCodeCard: {
+    ...styles.tournamentShareCodeCard,
+    background: "rgba(2,6,23,0.52)",
+    border: "1px solid rgba(125,211,252,0.16)",
+  },
+  tournamentShareInput: {
+    ...styles.tournamentShareInput,
+    background: "rgba(2,6,23,0.42)",
+    border: "1px solid rgba(148,163,184,0.18)",
+    color: "#e5f3ff",
+    colorScheme: "dark",
+  },
+  tournamentShareAdvanced: {
+    ...styles.tournamentShareAdvanced,
+    ...sportsRowV3,
+  },
+  tournamentShareUnavailableCard: {
+    ...styles.tournamentShareUnavailableCard,
+    background: "rgba(245,158,11,0.12)",
+    border: "1px solid rgba(251,191,36,0.24)",
+    color: "#fde68a",
+  },
+  tournamentPromotionNotice: {
+    ...styles.tournamentPromotionNotice,
+    background: "rgba(245,158,11,0.12)",
+    border: "1px solid rgba(251,191,36,0.24)",
+    color: "#fde68a",
+  },
+  tournamentPromotionToggleButton: {
+    ...styles.tournamentPromotionToggleButton,
+    background: "rgba(14,165,233,0.13)",
+    border: "1px solid rgba(125,211,252,0.20)",
+    color: "#dff7ff",
+  },
+  tournamentPromotionPreviewWrap: {
+    ...styles.tournamentPromotionPreviewWrap,
+    ...sportsGlassSoftV3,
+  },
+  tournamentLiveThemePreview: {
+    ...styles.tournamentLiveThemePreview,
+    ...sportsGlassSoftV3,
+  },
+  tournamentThemePresetButton: {
+    ...styles.tournamentThemePresetButton,
+    ...sportsRowV3,
+    color: "#dbeafe",
+  },
+  tournamentMarketingSeriesCard: {
+    ...styles.tournamentMarketingSeriesCard,
+    ...sportsGlassSoftV3,
+  },
+  tournamentMutedPanel: {
+    ...styles.tournamentMutedPanel,
+    ...sportsRowV3,
+  },
+  tournamentEmptyState: {
+    ...styles.tournamentEmptyState,
+    ...sportsRowV3,
+    color: "#9fb4d0",
+  },
+  tournamentStatusPanel: {
+    ...styles.tournamentStatusPanel,
+    ...sportsGlassV3,
+    borderRadius: "28px",
+  },
+  tournamentStatusRailStat: {
+    ...styles.tournamentStatusRailStat,
+    ...sportsRowV3,
+  },
+  tournamentStatusRailNote: {
+    ...styles.tournamentStatusRailNote,
+    background: "rgba(14,165,233,0.12)",
+    border: "1px solid rgba(125,211,252,0.16)",
+  },
+  publicLandingSection: {
+    ...styles.publicLandingSection,
+    borderRadius: "28px",
+    background:
+      "radial-gradient(circle at 10% 0%, rgba(56,189,248,0.24), transparent 30%), linear-gradient(145deg, rgba(2,6,23,0.92), rgba(8,47,73,0.74) 58%, rgba(6,78,59,0.38))",
+  },
+  publicTournamentCardGrid: {
+    ...styles.publicTournamentCardGrid,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+  },
+  landingUpcomingSection: {
+    ...styles.landingUpcomingSection,
+    padding: "clamp(14px, 2.2vw, 22px)",
+    borderRadius: "28px",
+    background:
+      "linear-gradient(145deg, rgba(15,23,42,0.88), rgba(8,47,73,0.60))",
+    border: "1px solid rgba(125,211,252,0.18)",
+    boxShadow: "0 24px 70px rgba(2,6,23,0.22)",
+  },
+  landingEyebrow: {
+    ...styles.landingEyebrow,
+    color: "#67e8f9",
+  },
+  landingSectionTitle: {
+    ...styles.landingSectionTitle,
+    color: "#f8fafc",
+    textShadow: "0 1px 18px rgba(2,6,23,0.28)",
+  },
+  landingPrivacyNote: {
+    ...styles.landingPrivacyNote,
+    color: "#b6c7df",
+  },
+  landingFilterSelect: {
+    ...styles.landingFilterSelect,
+    background: "rgba(2,6,23,0.52)",
+    border: "1px solid rgba(125,211,252,0.22)",
+    color: "#e5f3ff",
+    colorScheme: "dark",
+  },
+  landingEmptyState: {
+    ...styles.landingEmptyState,
+    background: "rgba(2,6,23,0.38)",
+    border: "1px dashed rgba(125,211,252,0.24)",
+    color: "#b6c7df",
+  },
+  landingTournamentGrid: {
+    ...styles.landingTournamentGrid,
+    gap: "12px",
+  },
+  landingTournamentCard: {
+    ...styles.landingTournamentCard,
+    minHeight: "auto",
+    borderRadius: "22px",
+    border: "1px solid rgba(125,211,252,0.20)",
+    boxShadow: "0 22px 52px rgba(2,6,23,0.24)",
+  },
+  landingTournamentCardBody: {
+    ...styles.landingTournamentCardBody,
+    gap: "10px",
+    padding: "14px",
+  },
+  landingTournamentCardTitle: {
+    ...styles.landingTournamentCardTitle,
+    fontSize: "clamp(17px, 2.4vw, 24px)",
+  },
+  landingTournamentStatusPill: {
+    ...styles.landingTournamentStatusPill,
+    minHeight: "30px",
+    padding: "7px 10px",
+    backdropFilter: "blur(12px)",
+  },
+  landingTournamentSeriesBadge: {
+    ...styles.landingTournamentSeriesBadge,
+    minHeight: "28px",
+  },
+  landingTournamentReadinessGrid: {
+    ...styles.landingTournamentReadinessGrid,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 92px), 1fr))",
+  },
+  landingTournamentReadinessItem: {
+    ...styles.landingTournamentReadinessItem,
+    minHeight: "38px",
+    borderRadius: "13px",
+  },
+  landingTournamentOpenButton: {
+    ...styles.landingTournamentOpenButton,
+    minHeight: "42px",
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    color: "#03111f",
+    boxShadow: "0 14px 30px rgba(14,165,233,0.28)",
+  },
+  landingTournamentSecondaryButton: {
+    ...styles.landingTournamentSecondaryButton,
+    minHeight: "42px",
+    backdropFilter: "blur(12px)",
+  },
+  publicTournamentHero: {
+    ...styles.publicTournamentHero,
+    background:
+      "radial-gradient(circle at 92% 0%, rgba(34,197,94,0.18), transparent 34%), linear-gradient(145deg, rgba(15,23,42,0.94), rgba(8,47,73,0.66))",
+  },
+  publicTournamentSection: {
+    ...styles.publicTournamentSection,
+    background:
+      "linear-gradient(145deg, rgba(15,23,42,0.72), rgba(8,47,73,0.42))",
+    border: "1px solid rgba(125,211,252,0.18)",
+  },
+  publicTournamentGroupCard: {
+    ...styles.publicTournamentGroupCard,
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(125,211,252,0.16)",
+  },
+  publicTournamentBracketMatch: {
+    ...styles.publicTournamentBracketMatch,
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(125,211,252,0.16)",
+  },
+  publicTournamentMatchCard: {
+    ...styles.publicTournamentMatchCard,
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(125,211,252,0.16)",
+  },
+  publicTournamentStandingsCard: {
+    ...styles.publicTournamentStandingsCard,
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(125,211,252,0.16)",
+  },
+  publicLiveMainPanel: {
+    ...styles.publicLiveMainPanel,
+    background:
+      "linear-gradient(145deg, rgba(15,23,42,0.72), rgba(8,47,73,0.44))",
+  },
+  publicLiveMatchCardProminent: {
+    ...styles.publicLiveMatchCardProminent,
+    boxShadow:
+      "0 24px 64px rgba(2,6,23,0.34), 0 0 0 1px rgba(125,211,252,0.08)",
+  },
+  publicLiveMatchCardLive: {
+    ...styles.publicLiveMatchCardLive,
+    borderColor: "rgba(52,211,153,0.34)",
+    boxShadow: "0 22px 60px rgba(34,197,94,0.16)",
+  },
+  publicLiveRail: {
+    ...styles.publicLiveRail,
+    background:
+      "linear-gradient(145deg, rgba(15,23,42,0.68), rgba(8,47,73,0.38))",
+  },
+});
+
