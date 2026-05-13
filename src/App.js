@@ -9063,13 +9063,24 @@ const savedRound = readStorageWithTtl(
     if (restored?.teams?.length) {
       setTeams(restored.teams);
       setTeamCount(restored.teamCount || 2);
-      setActiveTab("teams");
+      if (teamBuilderLayoutMode === "classic") {
+        setTeamBuilderStep("players");
+        setActiveTab("players");
+      } else {
+        setActiveTab("teams");
+      }
       return;
     }
 
     setTeams([]);
     setActiveTab("players");
-  }, [auth, hasTeamBuilderAccess, hasTournamentAccess, language]);
+  }, [
+    auth,
+    hasTeamBuilderAccess,
+    hasTournamentAccess,
+    language,
+    teamBuilderLayoutMode,
+  ]);
 
   useEffect(() => {
     function handleResize() {
@@ -10047,10 +10058,11 @@ const savedRound = readStorageWithTtl(
     { label: "Avg level", value: teamBuilderAverageLevel },
   ];
   const isTeamBuilderCoachFlow = teamBuilderLayoutMode === "coachFlow";
+  const isTeamBuilderClassic = teamBuilderLayoutMode === "classic";
   const shouldUseTeamBuilderStepFlow = isTeamBuilderCoachFlow && isMobile;
   const teamBuilderLayoutHint = isTeamBuilderCoachFlow
     ? "Mobile guided flow"
-    : "One-page trainer view";
+    : "Players -> Teams flow";
 
   function renderTeamBuilderHeader() {
     return (
@@ -10147,6 +10159,81 @@ const savedRound = readStorageWithTtl(
               {step.label}
             </button>
           ))}
+        </div>
+      </div>
+    );
+  }
+
+  function renderTeamBuilderClassicTabs() {
+    const tabs = [
+      { id: "players", label: t.players },
+      { id: "teams", label: t.teams },
+    ];
+
+    return (
+      <div style={styles.teamBuilderClassicTabsV1}>
+        {tabs.map((tab) => (
+          <button
+            key={`team-builder-classic-${tab.id}`}
+            type="button"
+            style={{
+              ...styles.teamBuilderClassicTabV1,
+              ...(activeTab === tab.id
+                ? styles.teamBuilderClassicTabActiveV1
+                : {}),
+            }}
+            onClick={() => openTeamBuilderStep(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
+  function renderTeamBuilderTeamCountCard() {
+    return (
+      <div style={styles.teamCountCard}>
+        <span style={styles.teamCountLabel}>{t.numberOfTeams}</span>
+
+        <div style={styles.teamCountRow}>
+          <div style={styles.teamCountInline}>
+            <button
+              style={styles.countButton}
+              onClick={() => setTeamCount((prev) => Math.max(2, prev - 1))}
+              title={
+                language === "no"
+                  ? "Reduser antall lag"
+                  : "Decrease number of teams"
+              }
+              aria-label={
+                language === "no"
+                  ? "Reduser antall lag"
+                  : "Decrease number of teams"
+              }
+            >
+              <SvgIcon type="minus" size={14} strokeWidth={2.5} />
+            </button>
+
+            <div style={styles.countValue}>{teamCount}</div>
+
+            <button
+              style={styles.countButton}
+              onClick={() => setTeamCount((prev) => prev + 1)}
+              title={
+                language === "no"
+                  ? "Øk antall lag"
+                  : "Increase number of teams"
+              }
+              aria-label={
+                language === "no"
+                  ? "Øk antall lag"
+                  : "Increase number of teams"
+              }
+            >
+              <SvgIcon type="plus" size={14} strokeWidth={2.5} />
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -20352,19 +20439,24 @@ const savedRound = readStorageWithTtl(
               <>
                 {renderTeamBuilderHeader()}
                 {renderTeamBuilderLayoutModeToggle()}
-                {isTeamBuilderCoachFlow && renderTeamBuilderStepTabs()}
+                {isTeamBuilderClassic
+                  ? renderTeamBuilderClassicTabs()
+                  : isTeamBuilderCoachFlow && renderTeamBuilderStepTabs()}
 
                 <div
                   style={{
                     ...styles.teamBuilderDashboardGridV2,
-                    ...(isMobile
-                      ? isTeamBuilderCoachFlow
-                        ? styles.teamBuilderDashboardGridMobileV21
-                        : styles.teamBuilderDashboardGridMobileClassicV1
-                      : styles.teamBuilderDashboardGridDesktopV21),
+                    ...(isTeamBuilderClassic
+                      ? styles.teamBuilderClassicPlayersShellV1
+                      : isMobile
+                        ? isTeamBuilderCoachFlow
+                          ? styles.teamBuilderDashboardGridMobileV21
+                          : styles.teamBuilderDashboardGridMobileClassicV1
+                        : styles.teamBuilderDashboardGridDesktopV21),
                   }}
                 >
-                  {(!shouldUseTeamBuilderStepFlow || teamBuilderStep === "setup") && (
+                  {!isTeamBuilderClassic &&
+                    (!shouldUseTeamBuilderStepFlow || teamBuilderStep === "setup") && (
                   <section
                     style={{
                       ...styles.teamBuilderGeneratePanelV2,
@@ -20385,65 +20477,24 @@ const savedRound = readStorageWithTtl(
                     </div>
 
                     <div style={styles.toolbarTop}>
-                  <div style={styles.teamCountCard}>
-                    <span style={styles.teamCountLabel}>{t.numberOfTeams}</span>
-
-                    <div style={styles.teamCountRow}>
-                      <div style={styles.teamCountInline}>
-                        <button
-                          style={styles.countButton}
-                          onClick={() =>
-                            setTeamCount((prev) => Math.max(2, prev - 1))
-                          }
-                          title={
-                            language === "no"
-                              ? "Reduser antall lag"
-                              : "Decrease number of teams"
-                          }
-                          aria-label={
-                            language === "no"
-                              ? "Reduser antall lag"
-                              : "Decrease number of teams"
-                          }
-                        >
-                          <SvgIcon type="minus" size={14} strokeWidth={2.5} />
-                        </button>
-
-                        <div style={styles.countValue}>{teamCount}</div>
-
-                        <button
-                          style={styles.countButton}
-                          onClick={() => setTeamCount((prev) => prev + 1)}
-                          title={
-                            language === "no"
-                              ? "Øk antall lag"
-                              : "Increase number of teams"
-                          }
-                          aria-label={
-                            language === "no"
-                              ? "Øk antall lag"
-                              : "Increase number of teams"
-                          }
-                        >
-                          <SvgIcon type="plus" size={14} strokeWidth={2.5} />
-                        </button>
-                      </div>
+                      {renderTeamBuilderTeamCountCard()}
+                      {renderTeamBuilderSelectedTray()}
                     </div>
-                  </div>
-
-                  {renderTeamBuilderSelectedTray()}
-                </div>
 
                 {renderTeamBuilderFilterControls()}
 
                   </section>
                   )}
 
-                  {(!shouldUseTeamBuilderStepFlow || teamBuilderStep === "players") && (
+                  {(isTeamBuilderClassic ||
+                    !shouldUseTeamBuilderStepFlow ||
+                    teamBuilderStep === "players") && (
                   <section
                     style={{
                       ...styles.teamBuilderPoolPanelV2,
-                      ...(!isMobile
+                      ...(isTeamBuilderClassic
+                        ? styles.teamBuilderClassicPlayersPanelV1
+                        : !isMobile
                         ? styles.teamBuilderPoolPanelDesktopV21
                         : {}),
                     }}
@@ -20463,8 +20514,11 @@ const savedRound = readStorageWithTtl(
                     </div>
 
                     {renderTeamBuilderSearchBox()}
-                    {shouldUseTeamBuilderStepFlow && renderTeamBuilderSelectedTray()}
-                    {shouldUseTeamBuilderStepFlow && renderTeamBuilderFilterControls()}
+                    {isTeamBuilderClassic && renderTeamBuilderTeamCountCard()}
+                    {(shouldUseTeamBuilderStepFlow || isTeamBuilderClassic) &&
+                      renderTeamBuilderSelectedTray()}
+                    {(shouldUseTeamBuilderStepFlow || isTeamBuilderClassic) &&
+                      renderTeamBuilderFilterControls()}
 
                     <div style={styles.actionRow}>
                   <button
@@ -20552,6 +20606,8 @@ const savedRound = readStorageWithTtl(
                       style={
                         isMobile
                           ? styles.teamBuilderPlayerListScrollerMobileV21
+                          : isTeamBuilderClassic
+                            ? styles.teamBuilderClassicPlayerListScrollerV1
                           : styles.teamBuilderPlayerListScrollerV21
                       }
                     >
@@ -20586,7 +20642,8 @@ const savedRound = readStorageWithTtl(
                   </section>
                   )}
 
-                  {(!shouldUseTeamBuilderStepFlow || teamBuilderStep === "teams") && (
+                  {!isTeamBuilderClassic &&
+                    (!shouldUseTeamBuilderStepFlow || teamBuilderStep === "teams") && (
                   <aside
                     style={{
                       ...styles.teamBuilderResultsPanelV2,
@@ -20632,7 +20689,9 @@ const savedRound = readStorageWithTtl(
               <>
                 {renderTeamBuilderHeader()}
                 {renderTeamBuilderLayoutModeToggle()}
-                {isTeamBuilderCoachFlow && renderTeamBuilderStepTabs()}
+                {isTeamBuilderClassic
+                  ? renderTeamBuilderClassicTabs()
+                  : isTeamBuilderCoachFlow && renderTeamBuilderStepTabs()}
 
                 <div style={styles.teamBuilderResultsShellV2}>
                   <div style={styles.teamBuilderResultsToolbarV2}>
@@ -20900,7 +20959,9 @@ const savedRound = readStorageWithTtl(
                       Generate teams to start a training round.
                     </div>
                     <div style={styles.teamBuilderPanelSubtitleV2}>
-                      Select players first, then use Setup to create the round.
+                      {isTeamBuilderClassic
+                        ? "Select players first, then generate a round."
+                        : "Select players first, then use Setup to create the round."}
                     </div>
                     <div style={styles.actionRow}>
                       <button
@@ -20909,12 +20970,14 @@ const savedRound = readStorageWithTtl(
                       >
                         {t.players}
                       </button>
-                      <button
-                        style={styles.secondaryButtonCompact}
-                        onClick={() => openTeamBuilderStep("setup")}
-                      >
-                        Setup
-                      </button>
+                      {isTeamBuilderCoachFlow && (
+                        <button
+                          style={styles.secondaryButtonCompact}
+                          onClick={() => openTeamBuilderStep("setup")}
+                        >
+                          Setup
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -30485,6 +30548,37 @@ Object.assign(styles, {
     border: "1px solid rgba(186,230,253,0.42)",
     boxShadow: "0 12px 28px rgba(14,165,233,0.22)",
   },
+  teamBuilderClassicTabsV1: {
+    width: "min(100%, 340px)",
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "4px",
+    padding: "4px",
+    borderRadius: "18px",
+    background: "rgba(2,6,23,0.42)",
+    border: "1px solid rgba(125,211,252,0.16)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
+    minWidth: 0,
+  },
+  teamBuilderClassicTabV1: {
+    minWidth: 0,
+    minHeight: "40px",
+    border: "1px solid transparent",
+    borderRadius: "14px",
+    padding: "0 12px",
+    background: "transparent",
+    color: "#9fb4d0",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  teamBuilderClassicTabActiveV1: {
+    background: "linear-gradient(135deg, rgba(56,189,248,0.96), rgba(34,197,94,0.94))",
+    color: "#03111f",
+    border: "1px solid rgba(186,230,253,0.42)",
+    boxShadow: "0 12px 28px rgba(14,165,233,0.22)",
+  },
   teamBuilderDashboardGridV2: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 290px), 1fr))",
@@ -30503,6 +30597,11 @@ Object.assign(styles, {
   teamBuilderDashboardGridMobileClassicV1: {
     gridTemplateColumns: "minmax(0, 1fr)",
     paddingBottom: 0,
+  },
+  teamBuilderClassicPlayersShellV1: {
+    gridTemplateColumns: "minmax(0, 1fr)",
+    width: "min(100%, 1020px)",
+    margin: "0 auto",
   },
   teamBuilderGeneratePanelV2: {
     ...sportsGlassSoftV3,
@@ -30531,6 +30630,10 @@ Object.assign(styles, {
     maxHeight: "min(760px, calc(100vh - 128px))",
     overflow: "hidden",
     alignSelf: "start",
+  },
+  teamBuilderClassicPlayersPanelV1: {
+    maxHeight: "none",
+    overflow: "visible",
   },
   teamBuilderResultsPanelV2: {
     ...sportsGlassSoftV3,
@@ -30742,6 +30845,14 @@ Object.assign(styles, {
     paddingRight: "2px",
     minHeight: 0,
     maxHeight: "min(520px, calc(100vh - 430px))",
+    overscrollBehavior: "contain",
+  },
+  teamBuilderClassicPlayerListScrollerV1: {
+    overflowY: "auto",
+    overflowX: "hidden",
+    paddingRight: "2px",
+    minHeight: 0,
+    maxHeight: "min(620px, calc(100vh - 500px))",
     overscrollBehavior: "contain",
   },
   teamBuilderPlayerListScrollerMobileV21: {
