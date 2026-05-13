@@ -2388,6 +2388,9 @@ Object.assign(playerHubStyles, {
   adminDashboardTile: {
     ...playerHubStyles.adminDashboardTile,
     ...hubGlassPanelSoft,
+    gap: "9px",
+    padding: "11px",
+    borderRadius: "18px",
   },
   adminDashboardTileActive: {
     ...playerHubStyles.adminDashboardTileActive,
@@ -2409,6 +2412,61 @@ Object.assign(playerHubStyles, {
   adminDashboardCount: {
     ...playerHubStyles.adminDashboardCount,
     color: hubDarkPalette.text,
+  },
+  adminInboxSection: {
+    ...hubGlassPanelSoft,
+    display: "grid",
+    gap: "10px",
+    padding: "12px",
+    borderRadius: "20px",
+    minWidth: 0,
+  },
+  adminInboxHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  adminInboxGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 210px), 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+  adminInboxQuietGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 160px), 1fr))",
+    gap: "7px",
+    minWidth: 0,
+  },
+  adminInboxStatusClosed: {
+    background: "rgba(14,165,233,0.12)",
+    borderColor: "rgba(125,211,252,0.22)",
+    color: "#bae6fd",
+  },
+  adminInboxStatusEmpty: {
+    background: "rgba(15,23,42,0.32)",
+    borderColor: "rgba(148,163,184,0.14)",
+    color: hubDarkPalette.muted,
+  },
+  adminInboxSecondaryStrip: {
+    display: "flex",
+    gap: "7px",
+    flexWrap: "wrap",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  adminInboxSecondaryButton: {
+    ...playerHubStyles.adminActionButton,
+    minHeight: "34px",
+    padding: "7px 9px",
+    borderRadius: "999px",
+    fontSize: "11px",
+    background: "rgba(15,23,42,0.36)",
+    borderColor: "rgba(148,163,184,0.14)",
+    color: hubDarkPalette.muted,
   },
   adminAccordion: {
     ...playerHubStyles.adminAccordion,
@@ -9540,25 +9598,31 @@ export default function PlayerHubPage({
       )} for ${selectedTournamentAdName}.`
     : "Select tournament first";
   const adminDashboardCards = [
-    isAdmin
+    isAdmin && canReviewRosterDrafts
       ? {
-          id: "players",
-          icon: "P",
-          title: "Players",
+          id: "rosters",
+          icon: "R",
+          title: "Rosters",
           count:
-            adminReviewStatus === "idle"
-              ? adminCounts?.playerProfileReviewCount ?? "Open"
-              : adminProfiles.filter((profile) => profile.publicVisible).length,
-          meta: adminReviewStatus === "idle" ? "Review" : "public requests",
-          status: adminReviewStatus,
-          load: loadAdminReviewProfiles,
+            adminTournamentRosterStatus === "idle"
+              ? adminCounts?.rosterReviewCount ?? "Open"
+              : adminTournamentRosterDrafts.filter(
+                  (roster) =>
+                    normalizeRosterStatus(roster.rosterStatus) === "SUBMITTED"
+                ).length,
+          meta:
+            adminTournamentRosterStatus === "idle" ? "Roster drafts" : "submitted",
+          description: "Submitted rosters, locks and late-change warnings.",
+          priority: "primary",
+          status: adminTournamentRosterStatus,
+          load: loadAdminRosterDrafts,
         }
       : null,
     isAdmin
       ? {
           id: "access",
           icon: "A",
-          title: "Access",
+          title: "Access requests",
           count:
             adminAccessRequestsStatus === "idle"
               ? adminCounts?.accessRequestCount ?? "Open"
@@ -9566,6 +9630,8 @@ export default function PlayerHubPage({
                   (request) => request.status === "PENDING"
                 ).length,
           meta: adminAccessRequestsStatus === "idle" ? "Requests" : "pending",
+          description: "Trainer, organizer and role requests.",
+          priority: "primary",
           status: adminAccessRequestsStatus,
           load: loadAdminAccessRequests,
         }
@@ -9574,12 +9640,14 @@ export default function PlayerHubPage({
       ? {
           id: "clubs",
           icon: "C",
-          title: "Clubs",
+          title: "Clubs/teams",
           count:
             adminClubTeamsStatus === "idle"
               ? adminCounts?.officialClubsCount ?? "Open"
               : adminClubTeams.length,
           meta: adminClubTeamsStatus === "idle" ? "Manage" : "total",
+          description: "Official selectable clubs and teams.",
+          priority: "primary",
           status: adminClubTeamsStatus,
           load: loadAdminClubTeams,
         }
@@ -9588,7 +9656,7 @@ export default function PlayerHubPage({
       ? {
           id: "identity",
           icon: "I",
-          title: "Team identity",
+          title: "Team identity requests",
           count:
             adminTeamIdentityStatus === "idle"
               ? adminCounts?.teamIdentityRequestCount ?? "Open"
@@ -9596,8 +9664,26 @@ export default function PlayerHubPage({
                   (request) => request.status === "PENDING"
                 ).length,
           meta: adminTeamIdentityStatus === "idle" ? "Review" : "pending",
+          description: "Team name, country and city change requests.",
+          priority: "primary",
           status: adminTeamIdentityStatus,
           load: loadAdminTeamIdentityRequests,
+        }
+      : null,
+    isAdmin
+      ? {
+          id: "players",
+          icon: "P",
+          title: "Player profiles",
+          count:
+            adminReviewStatus === "idle"
+              ? adminCounts?.playerProfileReviewCount ?? "Open"
+              : adminProfiles.filter((profile) => profile.publicVisible).length,
+          meta: adminReviewStatus === "idle" ? "Review" : "public requests",
+          description: "Public player profile requests.",
+          priority: "primary",
+          status: adminReviewStatus,
+          load: loadAdminReviewProfiles,
         }
       : null,
     isAdmin
@@ -9610,6 +9696,8 @@ export default function PlayerHubPage({
               ? adminCounts?.teamProfileReviewCount ?? "Open"
               : adminTeamProfiles.length,
           meta: adminTeamProfileStatus === "idle" ? "Review" : "profiles",
+          description: "Captain-managed team profile records.",
+          priority: "secondary",
           status: adminTeamProfileStatus,
           load: loadAdminTeamProfiles,
         }
@@ -9625,6 +9713,8 @@ export default function PlayerHubPage({
               : adminTeamNeedInterests.length,
           meta:
             adminTeamNeedInterestStatus === "idle" ? "Interests" : "interests",
+          description: "Player interest in team needs.",
+          priority: "secondary",
           status: adminTeamNeedInterestStatus,
           load: loadAdminTeamNeedInterests,
         }
@@ -9639,6 +9729,8 @@ export default function PlayerHubPage({
               ? adminCounts?.teamMembersReviewCount ?? "Open"
               : adminTeamMembers.length,
           meta: adminTeamMembersStatus === "idle" ? "Review" : "members",
+          description: "Confirmed and archived team member records.",
+          priority: "secondary",
           status: adminTeamMembersStatus,
           load: loadAdminTeamMembers,
         }
@@ -9655,31 +9747,34 @@ export default function PlayerHubPage({
                   (request) => request.status === "PENDING"
                 ).length,
           meta: adminTeamMembershipStatus === "idle" ? "Requests" : "pending",
+          description: "Player requests for captain confirmation.",
+          priority: "secondary",
           status: adminTeamMembershipStatus,
           load: loadAdminTeamMembershipRequests,
         }
       : null,
-    canReviewRosterDrafts
-      ? {
-          id: "rosters",
-          icon: "O",
-          title: "Rosters",
-          count:
-            adminTournamentRosterStatus === "idle"
-              ? adminCounts?.rosterReviewCount ?? "Open"
-              : adminTournamentRosterDrafts.filter(
-                  (roster) =>
-                    normalizeRosterStatus(roster.rosterStatus) === "SUBMITTED"
-                ).length,
-          meta:
-            adminTournamentRosterStatus === "idle" ? "Review" : "submitted",
-          status: adminTournamentRosterStatus,
-          load: loadAdminRosterDrafts,
-        }
-      : null,
   ].filter(Boolean);
 
-  const canOpenAdminHubTab = adminDashboardCards.length > 0;
+  const adminPrimaryReviewCards = adminDashboardCards.filter(
+    (card) => card.priority === "primary"
+  );
+  const adminSecondaryReviewCards = adminDashboardCards.filter(
+    (card) => card.priority !== "primary"
+  );
+  const adminNeedsReviewCards = adminPrimaryReviewCards.filter((card) =>
+    adminCardNeedsReview(card)
+  );
+  const adminQuietReviewCards = adminPrimaryReviewCards.filter(
+    (card) => !adminCardNeedsReview(card)
+  );
+  const adminAllCaughtUp =
+    adminPrimaryReviewCards.length > 0 &&
+    adminPrimaryReviewCards.every((card) => adminCardNumericCount(card) === 0);
+  const adminInboxBadge = adminAllCaughtUp
+    ? "All caught up"
+    : `${adminNeedsReviewCards.length || adminPrimaryReviewCards.length} open`;
+
+  const canOpenAdminHubTab = isAdmin && adminDashboardCards.length > 0;
   const hubTabs = [
     { id: "home", label: "Home" },
     { id: "events", label: "Events" },
@@ -9699,6 +9794,71 @@ export default function PlayerHubPage({
   const showPlayerAdsArea = showHubPlayers;
   const adminRosterDuplicateWarningsByRosterId =
     buildAdminRosterDuplicateWarnings(adminTournamentRosterDrafts);
+
+  function adminCardNumericCount(card) {
+    const count = Number(card?.count);
+    return Number.isFinite(count) ? count : null;
+  }
+
+  function adminCardNeedsReview(card) {
+    const count = adminCardNumericCount(card);
+    return count === null || count > 0;
+  }
+
+  function adminCardStatusLabel(card) {
+    if (openAdminPanel === card.id) return "Open";
+    if (adminCardNumericCount(card) === 0) return "Empty";
+    return "Closed";
+  }
+
+  function adminCardStatusStyle(card) {
+    const label = adminCardStatusLabel(card);
+    if (label === "Open") return playerHubStyles.accessStatusApproved;
+    if (label === "Empty") return playerHubStyles.adminInboxStatusEmpty;
+    return playerHubStyles.adminInboxStatusClosed;
+  }
+
+  function renderAdminInboxCard(card, quiet = false) {
+    const active = openAdminPanel === card.id;
+    const loading = card.status === "loading";
+    const count = loading ? "..." : card.count;
+    const cardStyle = {
+      ...playerHubStyles.adminDashboardTile,
+      ...(active ? playerHubStyles.adminDashboardTileActive : {}),
+      ...(quiet ? playerHubStyles.adminDashboardTileMuted : {}),
+    };
+
+    return (
+      <article key={card.id} style={cardStyle}>
+        <div style={playerHubStyles.homeCardHeader}>
+          <span style={playerHubStyles.adminDashboardIcon}>{card.icon}</span>
+          <span
+            style={{
+              ...playerHubStyles.accessStatusChip,
+              ...adminCardStatusStyle(card),
+            }}
+          >
+            {adminCardStatusLabel(card)}
+          </span>
+        </div>
+        <div style={playerHubStyles.profileMeta}>
+          <strong style={playerHubStyles.previewTitle}>{card.title}</strong>
+          <span style={playerHubStyles.adminDashboardCount}>{count}</span>
+          <span style={playerHubStyles.previewSubtitle}>
+            {card.description || card.meta}
+          </span>
+        </div>
+        <button
+          type="button"
+          style={playerHubStyles.adminActionButton}
+          onClick={() => openAdminDashboardPanel(card)}
+          disabled={loading}
+        >
+          {loading ? "Loading..." : active ? "Close" : "Open"}
+        </button>
+      </article>
+    );
+  }
 
   useEffect(() => {
     if (activeHubTab === "admin" && !canOpenAdminHubTab) {
@@ -12151,65 +12311,83 @@ export default function PlayerHubPage({
             <div style={playerHubStyles.profileMeta}>
               <div style={playerHubStyles.sectionTitle}>Admin dashboard</div>
               <div style={playerHubStyles.cardText}>
-                Open one review area at a time. Details load on demand.
+                Review inbox. Open one area at a time; details load on demand.
               </div>
             </div>
+            <span style={playerHubStyles.chip}>{adminInboxBadge}</span>
           </div>
-          <div style={playerHubStyles.adminDashboardGrid}>
-            {adminDashboardCards.map((card) => {
-              const active = openAdminPanel === card.id;
-              const loading = card.status === "loading";
-              const numericCount = Number(card.count);
-              const muted =
-                !active && !loading && Number.isFinite(numericCount) && numericCount === 0;
+          <div style={playerHubStyles.adminInboxSection}>
+            <div style={playerHubStyles.adminInboxHeader}>
+              <div style={playerHubStyles.profileMeta}>
+                <strong style={playerHubStyles.previewTitle}>Needs review</strong>
+                <span style={playerHubStyles.previewSubtitle}>
+                  Roster drafts, access, clubs, identity and player profiles.
+                </span>
+              </div>
+              <span style={playerHubStyles.chip}>
+                {adminNeedsReviewCards.length}
+              </span>
+            </div>
+            {adminNeedsReviewCards.length ? (
+              <div style={playerHubStyles.adminInboxGrid}>
+                {adminNeedsReviewCards.map((card) =>
+                  renderAdminInboxCard(card)
+                )}
+              </div>
+            ) : (
+              <div style={playerHubStyles.passportEmpty}>All caught up.</div>
+            )}
+          </div>
 
-              return (
-                <article
-                  key={card.id}
-                  style={{
-                    ...playerHubStyles.adminDashboardTile,
-                    ...(active ? playerHubStyles.adminDashboardTileActive : {}),
-                    ...(muted ? playerHubStyles.adminDashboardTileMuted : {}),
-                  }}
-                >
-                  <div style={playerHubStyles.homeCardHeader}>
-                    <span style={playerHubStyles.adminDashboardIcon}>
-                      {card.icon}
-                    </span>
-                    <span
+          {adminQuietReviewCards.length ? (
+            <div style={playerHubStyles.adminInboxSection}>
+              <div style={playerHubStyles.adminInboxHeader}>
+                <strong style={playerHubStyles.previewTitle}>Quiet</strong>
+                <span style={playerHubStyles.previewSubtitle}>
+                  Empty inbox areas stay available without taking over the page.
+                </span>
+              </div>
+              <div style={playerHubStyles.adminInboxQuietGrid}>
+                {adminQuietReviewCards.map((card) =>
+                  renderAdminInboxCard(card, true)
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {adminSecondaryReviewCards.length ? (
+            <div style={playerHubStyles.adminInboxSection}>
+              <div style={playerHubStyles.adminInboxHeader}>
+                <strong style={playerHubStyles.previewTitle}>
+                  Other admin areas
+                </strong>
+                <span style={playerHubStyles.previewSubtitle}>
+                  Loaded only when opened.
+                </span>
+              </div>
+              <div style={playerHubStyles.adminInboxSecondaryStrip}>
+                {adminSecondaryReviewCards.map((card) => {
+                  const active = openAdminPanel === card.id;
+                  const loading = card.status === "loading";
+
+                  return (
+                    <button
+                      key={card.id}
+                      type="button"
                       style={{
-                        ...playerHubStyles.accessStatusChip,
-                        ...(card.status === "error"
-                          ? playerHubStyles.accessStatusRejected
-                          : {}),
+                        ...playerHubStyles.adminInboxSecondaryButton,
+                        ...(active ? playerHubStyles.adminDashboardTileActive : {}),
                       }}
+                      onClick={() => openAdminDashboardPanel(card)}
+                      disabled={loading}
                     >
-                      {loading ? "Loading" : active ? "Open" : "Closed"}
-                    </span>
-                  </div>
-                  <div style={playerHubStyles.profileMeta}>
-                    <strong style={playerHubStyles.previewTitle}>
-                      {card.title}
-                    </strong>
-                    <span style={playerHubStyles.adminDashboardCount}>
-                      {loading ? "..." : card.count}
-                    </span>
-                    <span style={playerHubStyles.previewSubtitle}>
-                      {card.meta}
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    style={playerHubStyles.adminActionButton}
-                    onClick={() => openAdminDashboardPanel(card)}
-                    disabled={loading}
-                  >
-                    {active ? "Close" : "Open"}
-                  </button>
-                </article>
-              );
-            })}
-          </div>
+                      {card.title} / {loading ? "..." : card.count}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
