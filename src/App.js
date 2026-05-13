@@ -10532,6 +10532,14 @@ const savedRound = readStorageWithTtl(
     const publicLogoUrl = getTournamentPublicLogoUrl(tournament);
     const readinessMetrics = getPublicTournamentReadinessMetrics(tournament);
     const isLiveStatus = isTournamentLiveForFilter(tournament);
+    const visibleReadinessMetrics = isMobile
+      ? readinessMetrics.slice(0, 4)
+      : readinessMetrics;
+    const hiddenReadinessCount = Math.max(
+      readinessMetrics.length - visibleReadinessMetrics.length,
+      0
+    );
+    const uniqueSeriesLabels = Array.from(new Set(seriesLabels));
 
     return (
       <article
@@ -10550,8 +10558,8 @@ const savedRound = readStorageWithTtl(
         }}
       >
         <div style={styles.landingTournamentCardShine} />
-        <div style={styles.landingTournamentCardTop}>
-          <div style={styles.landingTournamentTopLeft}>
+        <div style={styles.landingTournamentCardBody}>
+          <div style={styles.landingTournamentIdentityRow}>
             {publicLogoUrl && (
               <span
                 style={{
@@ -10567,6 +10575,41 @@ const savedRound = readStorageWithTtl(
                 />
               </span>
             )}
+            <div style={styles.landingTournamentTitleStack}>
+              <h3
+                style={{
+                  ...styles.landingTournamentCardTitle,
+                  color: publicTheme.text,
+                }}
+              >
+                {publicTitle}
+              </h3>
+              <div style={styles.landingTournamentMetaLine}>
+                <span
+                  style={{
+                    ...styles.landingTournamentDatePill,
+                    background: hexToRgba(publicTheme.accent, 0.18),
+                    borderColor: hexToRgba(publicTheme.accent, 0.44),
+                    color: publicTheme.text,
+                  }}
+                >
+                  {formatPublicTournamentDate(tournament)}
+                </span>
+                {location ? (
+                  <span
+                    style={{
+                      ...styles.landingTournamentLocationLine,
+                      color: publicTheme.mutedText,
+                    }}
+                  >
+                    {location}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div style={styles.landingTournamentStatusRow}>
             <span
               style={{
                 ...styles.landingTournamentStatusPill,
@@ -10581,76 +10624,40 @@ const savedRound = readStorageWithTtl(
                 color: publicTheme.text,
               }}
             >
+              <span
+                style={{
+                  ...styles.landingTournamentStatusDot,
+                  background: isLiveStatus ? "#22c55e" : publicTheme.accent,
+                }}
+              />
               {getLandingTournamentStatusLabel(tournament)}
             </span>
+
+            {uniqueSeriesLabels.length > 0 && (
+              <div style={styles.landingTournamentSeriesRow}>
+                {uniqueSeriesLabels.map((label) => (
+                  <span
+                    key={label}
+                    style={{
+                      ...styles.landingTournamentSeriesBadge,
+                      background: publicTheme.surface,
+                      borderColor: publicTheme.border,
+                      color: publicTheme.mutedText,
+                    }}
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
-          <span
-            style={{
-              ...styles.landingTournamentDatePill,
-              background: publicTheme.accent,
-              borderColor: publicTheme.accent,
-              color: publicTheme.background,
-            }}
-          >
-            {formatPublicTournamentDate(tournament)}
-          </span>
-        </div>
-
-        <div style={styles.landingTournamentCardBody}>
-          <h3
-            style={{
-              ...styles.landingTournamentCardTitle,
-              color: publicTheme.text,
-            }}
-          >
-            {publicTitle}
-          </h3>
-
-          {location ? (
-            <div
-              style={{
-                ...styles.landingTournamentLocationLine,
-                color: publicTheme.mutedText,
-              }}
-            >
-              <span>{tournamentText.locationLabel}</span>
-              <strong
-                style={{
-                  color: publicTheme.text,
-                  minWidth: 0,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {location}
-              </strong>
-            </div>
-          ) : null}
-
-          {seriesLabels.length > 0 && (
-            <div style={styles.landingTournamentSeriesRow}>
-              {Array.from(new Set(seriesLabels)).map((label) => (
-                <span
-                  key={label}
-                  style={{
-                    ...styles.landingTournamentSeriesBadge,
-                    background: publicTheme.surface,
-                    borderColor: publicTheme.border,
-                    color: publicTheme.mutedText,
-                  }}
-                >
-                  {label}
-                </span>
-              ))}
-            </div>
-          )}
 
           {readinessMetrics.length > 0 ? (
             <div style={styles.landingTournamentReadinessGrid}>
-              {readinessMetrics.map((metric) => (
+              {visibleReadinessMetrics.map((metric) => (
                 <span
                   key={metric.label}
+                  title={`${metric.value} ${metric.label}`}
                   style={{
                     ...styles.landingTournamentReadinessItem,
                     background: hexToRgba(publicTheme.surface, 0.78),
@@ -10679,6 +10686,10 @@ const savedRound = readStorageWithTtl(
                   <span
                     style={{
                       color: publicTheme.mutedText,
+                      minWidth: 0,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
                       fontSize: "10px",
                       lineHeight: 1,
                       fontWeight: "900",
@@ -10688,10 +10699,30 @@ const savedRound = readStorageWithTtl(
                   </span>
                 </span>
               ))}
+              {hiddenReadinessCount > 0 ? (
+                <span
+                  style={{
+                    ...styles.landingTournamentReadinessItem,
+                    ...styles.landingTournamentReadinessMore,
+                    background: hexToRgba(publicTheme.surface, 0.62),
+                    borderColor: hexToRgba(publicTheme.border, 0.42),
+                    color: publicTheme.mutedText,
+                  }}
+                >
+                  +{hiddenReadinessCount} more
+                </span>
+              ) : null}
             </div>
           ) : null}
 
-          <div style={styles.landingTournamentActionRow}>
+          <div
+            style={{
+              ...styles.landingTournamentActionRow,
+              gridTemplateColumns: tournament?.publicCode
+                ? "repeat(2, minmax(0, 1fr))"
+                : "minmax(0, 1fr)",
+            }}
+          >
             <button
               type="button"
               style={{
@@ -10741,9 +10772,6 @@ const savedRound = readStorageWithTtl(
               {tournamentText.teamReadinessTitle}
             </span>
             <h2 style={styles.landingSectionTitle}>{t.landingUpcomingTitle}</h2>
-            <p style={styles.landingSectionSubtitle}>
-              {tournamentText.teamReadinessSubtitle}
-            </p>
             <p style={styles.landingPrivacyNote}>
               {tournamentText.publicCountsPrivacyNote}
             </p>
@@ -20701,12 +20729,12 @@ const styles = {
 
   landingUpcomingSection: {
     display: "grid",
-    gap: "12px",
-    padding: "15px",
-    borderRadius: "26px",
+    gap: "10px",
+    padding: "12px",
+    borderRadius: "22px",
     background: "rgba(255,255,255,0.82)",
     border: "1px solid rgba(37,99,235,0.14)",
-    boxShadow: "0 26px 70px rgba(37,99,235,0.10)",
+    boxShadow: "0 22px 54px rgba(37,99,235,0.09)",
     backdropFilter: "blur(18px)",
     minWidth: 0,
     width: "100%",
@@ -20717,9 +20745,9 @@ const styles = {
 
   landingSectionHeader: {
     display: "flex",
-    justifyContent: "flex-start",
+    justifyContent: "space-between",
     gap: "10px",
-    alignItems: "center",
+    alignItems: "flex-start",
     flexWrap: "wrap",
   },
 
@@ -20749,15 +20777,15 @@ const styles = {
   },
 
   landingPrivacyNote: {
-    margin: "7px 0 0",
+    margin: "6px 0 0",
     width: "fit-content",
     maxWidth: "100%",
     borderRadius: "999px",
-    padding: "7px 10px",
+    padding: "6px 9px",
     background: "rgba(219,234,254,0.74)",
     border: "1px solid rgba(37,99,235,0.14)",
     color: "#1d4ed8",
-    fontSize: "11px",
+    fontSize: "10px",
     lineHeight: 1.25,
     fontWeight: "900",
   },
@@ -20795,7 +20823,7 @@ const styles = {
   landingTournamentGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
-    gap: "12px",
+    gap: "10px",
     justifyContent: "start",
     maxWidth: "100%",
   },
@@ -20803,16 +20831,17 @@ const styles = {
   landingTournamentCard: {
     position: "relative",
     overflow: "hidden",
-    borderRadius: "20px",
+    borderRadius: "18px",
     border: "1px solid rgba(37,99,235,0.18)",
     minHeight: "0",
     display: "grid",
     alignContent: "start",
-    gap: "9px",
-    padding: "12px",
+    gap: "0",
+    padding: "10px",
     cursor: "pointer",
-    boxShadow: "0 16px 34px rgba(37,99,235,0.10)",
+    boxShadow: "0 14px 30px rgba(15,23,42,0.14)",
     isolation: "isolate",
+    minWidth: 0,
   },
 
   landingTournamentPoster: {
@@ -20846,6 +20875,37 @@ const styles = {
     flexWrap: "wrap",
   },
 
+  landingTournamentIdentityRow: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "9px",
+    minWidth: 0,
+  },
+
+  landingTournamentTitleStack: {
+    display: "grid",
+    gap: "6px",
+    minWidth: 0,
+    flex: 1,
+  },
+
+  landingTournamentMetaLine: {
+    display: "flex",
+    alignItems: "center",
+    gap: "5px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+
+  landingTournamentStatusRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "6px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+
   landingTournamentTopLeft: {
     display: "inline-flex",
     alignItems: "center",
@@ -20854,9 +20914,9 @@ const styles = {
   },
 
   landingTournamentLogoBadge: {
-    width: "28px",
-    height: "28px",
-    borderRadius: "10px",
+    width: "26px",
+    height: "26px",
+    borderRadius: "9px",
     border: "1px solid rgba(255,255,255,0.24)",
     display: "inline-flex",
     alignItems: "center",
@@ -20875,18 +20935,33 @@ const styles = {
 
   landingTournamentStatusPill: {
     borderRadius: "999px",
-    padding: "5px 8px",
+    padding: "4px 8px",
     fontSize: "10px",
     fontWeight: "950",
     backdropFilter: "blur(8px)",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
+    minWidth: 0,
+    whiteSpace: "nowrap",
+  },
+
+  landingTournamentStatusDot: {
+    width: "6px",
+    height: "6px",
+    borderRadius: "999px",
+    boxShadow: "0 0 0 3px rgba(255,255,255,0.10)",
+    flexShrink: 0,
   },
 
   landingTournamentDatePill: {
     borderRadius: "999px",
-    padding: "5px 8px",
+    padding: "4px 7px",
     border: "1px solid rgba(37,99,235,0.16)",
     fontSize: "10px",
-    fontWeight: "900",
+    lineHeight: 1,
+    fontWeight: "950",
+    whiteSpace: "nowrap",
   },
 
   landingTournamentCardBody: {
@@ -20899,7 +20974,7 @@ const styles = {
 
   landingTournamentCardTitle: {
     margin: 0,
-    fontSize: "18px",
+    fontSize: "17px",
     lineHeight: 1.15,
     fontWeight: "950",
     overflowWrap: "anywhere",
@@ -20907,26 +20982,32 @@ const styles = {
 
   landingTournamentSeriesRow: {
     display: "flex",
-    gap: "5px",
+    gap: "4px",
     flexWrap: "wrap",
+    justifyContent: "flex-end",
+    minWidth: 0,
   },
 
   landingTournamentSeriesBadge: {
     borderRadius: "999px",
-    padding: "5px 8px",
+    padding: "4px 7px",
     border: "1px solid rgba(37,99,235,0.16)",
-    fontSize: "10px",
+    fontSize: "9px",
+    lineHeight: 1,
     fontWeight: "950",
+    whiteSpace: "nowrap",
   },
 
   landingTournamentLocationLine: {
-    display: "flex",
-    alignItems: "center",
-    gap: "6px",
+    display: "inline-block",
     minWidth: 0,
+    maxWidth: "100%",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
     fontSize: "11px",
-    lineHeight: 1.25,
-    fontWeight: "850",
+    lineHeight: 1.15,
+    fontWeight: "900",
   },
 
   landingTournamentMetaList: {
@@ -20938,24 +21019,26 @@ const styles = {
   landingTournamentReadinessGrid: {
     display: "flex",
     flexWrap: "wrap",
-    gap: "6px",
+    gap: "5px",
     minWidth: 0,
   },
 
   landingTournamentReadinessItem: {
     display: "inline-flex",
     alignItems: "center",
-    gap: "5px",
-    padding: "5px 7px",
+    gap: "4px",
+    padding: "5px 6px",
     borderRadius: "999px",
     border: "1px solid rgba(37,99,235,0.12)",
     minWidth: 0,
     maxWidth: "100%",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
   },
 
   landingTournamentReadinessIcon: {
-    width: "17px",
-    height: "17px",
+    width: "16px",
+    height: "16px",
     borderRadius: "999px",
     display: "inline-flex",
     alignItems: "center",
@@ -20964,6 +21047,13 @@ const styles = {
     lineHeight: 1,
     fontWeight: "950",
     flexShrink: 0,
+  },
+
+  landingTournamentReadinessMore: {
+    justifyContent: "center",
+    fontSize: "10px",
+    lineHeight: 1,
+    fontWeight: "950",
   },
 
   landingTournamentMetaItem: {
@@ -20979,30 +21069,38 @@ const styles = {
 
   landingTournamentOpenButton: {
     border: "none",
-    borderRadius: "13px",
-    padding: "10px 12px",
+    borderRadius: "12px",
+    padding: "9px 10px",
     fontSize: "12px",
     fontWeight: "950",
     cursor: "pointer",
     minWidth: 0,
+    minHeight: "36px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
 
   landingTournamentActionRow: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
-    gap: "8px",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "6px",
     minWidth: 0,
     alignItems: "center",
   },
 
   landingTournamentSecondaryButton: {
     border: "1px solid rgba(37,99,235,0.16)",
-    borderRadius: "13px",
-    padding: "10px 12px",
+    borderRadius: "12px",
+    padding: "9px 10px",
     fontSize: "12px",
     fontWeight: "950",
     cursor: "pointer",
     minWidth: 0,
+    minHeight: "36px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
 
   app: {
@@ -26411,13 +26509,13 @@ Object.assign(styles, {
   },
   landingTournamentGrid: {
     ...styles.landingTournamentGrid,
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 310px), 1fr))",
-    gap: "12px",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 300px), 1fr))",
+    gap: "10px",
   },
   landingTournamentCard: {
     ...styles.landingTournamentCard,
-    borderRadius: "20px",
-    boxShadow: "0 16px 34px rgba(2,6,23,0.18)",
+    borderRadius: "18px",
+    boxShadow: "0 14px 30px rgba(2,6,23,0.18)",
   },
   landingTournamentMetaItem: {
     ...styles.landingTournamentMetaItem,
