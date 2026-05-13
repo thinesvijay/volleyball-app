@@ -160,6 +160,15 @@ function SvgIcon({ type, size = 16, strokeWidth = 2, style }) {
     );
   }
 
+  if (type === "search") {
+    return (
+      <svg {...commonProps}>
+        <circle cx="11" cy="11" r="6" />
+        <path d="m16 16 4 4" />
+      </svg>
+    );
+  }
+
   if (type === "lock") {
     return (
       <svg {...commonProps}>
@@ -1494,6 +1503,7 @@ export default function App() {
   const [showArchivedPlayers, setShowArchivedPlayers] = useState(false);
   const [playerActionMessage, setPlayerActionMessage] = useState("");
   const [showPlayerManageActions, setShowPlayerManageActions] = useState(false);
+  const [playerPoolSearch, setPlayerPoolSearch] = useState("");
 
   const [showCreateTrainerForm, setShowCreateTrainerForm] = useState(false);
   const [trainerUsername, setTrainerUsername] = useState("");
@@ -9794,17 +9804,27 @@ const savedRound = readStorageWithTtl(
     }, [archivedPlayers, playerSortMode]);
 
   const noClubLabel = t.noClub;
+  const normalizedPlayerPoolSearch = playerPoolSearch.trim().toLowerCase();
+
+  const filteredSortedPlayers = useMemo(() => {
+    if (!normalizedPlayerPoolSearch) return sortedPlayers;
+
+    return sortedPlayers.filter((player) =>
+      [
+        displayPlayerName(player),
+        player.name,
+        player.club,
+        player.team,
+        player.teamName,
+        player.clubTeam,
+      ]
+        .map((value) => String(value || "").trim().toLowerCase())
+        .some((value) => value.includes(normalizedPlayerPoolSearch))
+    );
+  }, [normalizedPlayerPoolSearch, sortedPlayers]);
 
   const groupedPlayersByClub = useMemo(() => {
-    const sourcePlayers = [...players];
-
-    if (playerSortMode === "recent") {
-      sourcePlayers.reverse();
-    } else {
-      sourcePlayers.sort((a, b) =>
-        displayPlayerName(a).localeCompare(displayPlayerName(b))
-      );
-    }
+    const sourcePlayers = [...filteredSortedPlayers];
 
     const groups = {};
 
@@ -9824,7 +9844,12 @@ const savedRound = readStorageWithTtl(
       clubName,
       players: groups[clubName],
     }));
-  }, [players, playerSortMode, noClubLabel]);
+  }, [filteredSortedPlayers, noClubLabel]);
+
+  const selectedPlayerDetails = useMemo(() => {
+    const playersByName = new Map(players.map((player) => [player.name, player]));
+    return selected.map((name) => playersByName.get(name)).filter(Boolean);
+  }, [players, selected]);
 
   const teamsWithTotals = useMemo(() => {
   return teams.map((team, index) => ({
@@ -9954,6 +9979,7 @@ const savedRound = readStorageWithTtl(
   }, [activeScheduleRounds, matchRoundIndex]);
 
   const totalPlayers = sortedPlayers.length;
+  const filteredPlayerCount = filteredSortedPlayers.length;
   const teamBuilderAverageLevel = useMemo(() => {
     const sourcePlayers = selected.length
       ? players.filter((player) => selected.includes(player.name))
@@ -10033,6 +10059,98 @@ const savedRound = readStorageWithTtl(
           >
             {t.teams}
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderTeamBuilderSelectedTray() {
+    return (
+      <div style={styles.teamBuilderSelectedTrayV21}>
+        <div style={styles.teamBuilderSelectedTrayHeaderV21}>
+          <div>
+            <div style={styles.teamBuilderPanelTitleV2}>Selected players</div>
+            <div style={styles.teamBuilderPanelSubtitleV2}>
+              {selected.length} selected for {teamCount} teams
+            </div>
+          </div>
+          <button
+            style={{
+              ...styles.teamBuilderActionButtonPrimaryV2,
+              opacity: selected.length < 2 || loading ? 0.6 : 1,
+            }}
+            onClick={generateTeams}
+            disabled={selected.length < 2 || loading}
+          >
+            {loading ? t.generating : t.generateTeams}
+          </button>
+        </div>
+
+        {selectedPlayerDetails.length > 0 ? (
+          <div style={styles.teamBuilderSelectedChipsV21}>
+            {selectedPlayerDetails.map((player) => {
+              const skillStyle = getSkillStyle(
+                player.skill,
+                skillView,
+                skillScale
+              );
+              return (
+                <button
+                  key={`selected-${player.name}`}
+                  type="button"
+                  style={styles.teamBuilderSelectedChipV21}
+                  onClick={() => togglePlayer(player.name)}
+                  title={`Remove ${displayPlayerName(player)}`}
+                >
+                  <span>{displayPlayerName(player)}</span>
+                  <span
+                    style={{
+                      ...styles.teamBuilderSelectedSkillV21,
+                      background: skillStyle.background,
+                      color: skillStyle.color,
+                    }}
+                  >
+                    {skillStyle.text}
+                  </span>
+                  <SvgIcon type="x" size={12} strokeWidth={2.5} />
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={styles.teamBuilderSelectedEmptyV21}>
+            Search and tap players to build this round.
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderTeamBuilderSearchBox() {
+    return (
+      <div style={styles.teamBuilderSearchBoxV21}>
+        <label style={styles.teamBuilderSearchLabelV21} htmlFor="team-builder-search">
+          Find player
+        </label>
+        <div style={styles.teamBuilderSearchInputWrapV21}>
+          <SvgIcon type="search" size={15} strokeWidth={2.3} />
+          <input
+            id="team-builder-search"
+            style={styles.teamBuilderSearchInputV21}
+            value={playerPoolSearch}
+            onChange={(event) => setPlayerPoolSearch(event.target.value)}
+            placeholder="Search name or club"
+          />
+          {playerPoolSearch && (
+            <button
+              type="button"
+              style={styles.teamBuilderSearchClearV21}
+              onClick={() => setPlayerPoolSearch("")}
+              aria-label="Clear player search"
+            >
+              <SvgIcon type="x" size={13} strokeWidth={2.5} />
+            </button>
+          )}
         </div>
       </div>
     );
@@ -10173,6 +10291,19 @@ const savedRound = readStorageWithTtl(
   }
 
   function renderTeamBuilderPlayerList() {
+    if (!filteredPlayerCount) {
+      return (
+        <div style={styles.teamBuilderNoPlayersFoundV21}>
+          <div style={styles.teamBuilderEmptyTitleV2}>No players found</div>
+          <div style={styles.teamBuilderPanelSubtitleV2}>
+            {normalizedPlayerPoolSearch
+              ? "Try another name or club."
+              : "Add a player to start building training teams."}
+          </div>
+        </div>
+      );
+    }
+
     if (playerViewMode === "club") {
       return groupedPlayersByClub.map((group) => (
         <div key={group.clubName} style={styles.clubSection}>
@@ -10187,7 +10318,9 @@ const savedRound = readStorageWithTtl(
     if (playerViewMode === "all") {
       return (
         <div style={styles.playersGrid}>
-          {sortedPlayers.map((player) => renderTeamBuilderPlayerCard(player))}
+          {filteredSortedPlayers.map((player) =>
+            renderTeamBuilderPlayerCard(player)
+          )}
         </div>
       );
     }
@@ -15703,6 +15836,343 @@ const savedRound = readStorageWithTtl(
       );
     };
 
+    const getKnockoutStageChipStyle = (status) => ({
+      ...styles.tournamentKnockoutStatusChipV1,
+      ...(status === "Completed" ? styles.tournamentSetupStatusDoneV2 : {}),
+      ...(status === "Ready" ? styles.tournamentSetupStatusNextV2 : {}),
+      ...(status === "In progress" ? styles.tournamentOrganizerStatusWarnV2 : {}),
+      ...(status === "Missing results" || status === "Missing groups"
+        ? styles.tournamentSetupStatusMissingV2
+        : {}),
+    });
+    const getSectionGroupMatches = (section, group) =>
+      (section.tournament.matches || []).filter((match) => {
+        const matchGroupId = String(match.groupId || "");
+        const matchGroupCode = String(match.groupCode || "");
+        return (
+          (matchGroupId && matchGroupId === String(group.id || "")) ||
+          (matchGroupCode && matchGroupCode === String(group.code || ""))
+        );
+      });
+    const getGroupAdvancementMeta = (section, group, groupIndex) => {
+      const groupCode = group.code || getTournamentGroupCode(groupIndex);
+      const teams = (group.teams || []).filter((team) =>
+        String(team.name || "").trim()
+      );
+      const expectedMatchCount =
+        teams.length > 1 ? (teams.length * (teams.length - 1)) / 2 : 0;
+      const groupMatches = getSectionGroupMatches(section, group);
+      const completedMatches = groupMatches.filter(isMatchCompleted);
+      const allResultsKnown =
+        expectedMatchCount > 0 && completedMatches.length >= expectedMatchCount;
+      const standing =
+        section.standings.find(
+          (item) => String(item.groupId || "") === String(group.id || "")
+        ) || {};
+
+      return {
+        group,
+        groupCode,
+        groupName: group.name || `Group ${groupCode}`,
+        teams,
+        expectedMatchCount,
+        completedMatches: completedMatches.length,
+        allResultsKnown,
+        winner:
+          allResultsKnown && standing.rows?.[0]?.teamName
+            ? standing.rows[0].teamName
+            : `Group ${groupCode} Winner`,
+        runnerUp:
+          allResultsKnown && standing.rows?.[1]?.teamName
+            ? standing.rows[1].teamName
+            : `Group ${groupCode} Runner-up`,
+      };
+    };
+    const getSectionAdvancementPreview = (section) =>
+      (section.groups || []).map((group, groupIndex) =>
+        getGroupAdvancementMeta(section, group, groupIndex)
+      );
+    const getSectionKnockoutMatches = (knockout = {}) =>
+      [
+        ...(knockout.quarterFinals || []),
+        ...(knockout.semiFinals || []),
+        knockout.final,
+        knockout.thirdPlace,
+      ].filter(Boolean);
+    const getSectionKnockoutStatus = (section) => {
+      const advancement = getSectionAdvancementPreview(section);
+      const hasEnoughGroups = advancement.length >= 2;
+      const groupsReady =
+        hasEnoughGroups &&
+        advancement.every((group) => group.teams.length >= 2);
+      if (!groupsReady) return "Missing groups";
+
+      const knockoutMatches = getSectionKnockoutMatches(
+        section.displayKnockout || {}
+      );
+      const finalMatch = section.displayKnockout?.final;
+      const thirdPlaceMatch = section.displayKnockout?.thirdPlace;
+      const finalComplete = finalMatch && isMatchCompleted(finalMatch);
+      const thirdComplete =
+        !activeTournament.thirdPlaceMatch ||
+        !thirdPlaceMatch ||
+        isMatchCompleted(thirdPlaceMatch);
+      if (finalComplete && thirdComplete) return "Completed";
+
+      const knockoutStarted = knockoutMatches.some(
+        (match) =>
+          isMatchCompleted(match) ||
+          getMatchDisplayStatus(match).status === "in_progress" ||
+          hasScoreValue(match.scoreA) ||
+          hasScoreValue(match.scoreB) ||
+          match.winnerSource
+      );
+      if (knockoutStarted) return "In progress";
+
+      const allGroupResultsKnown = advancement.every(
+        (group) => group.allResultsKnown
+      );
+      return allGroupResultsKnown ? "Ready" : "Missing results";
+    };
+    const getStageCompletionStatus = (matches = []) => {
+      const safeMatches = matches.filter(Boolean);
+      if (!safeMatches.length) return "Missing results";
+      if (safeMatches.every(isMatchCompleted)) return "Completed";
+      if (
+        safeMatches.some(
+          (match) =>
+            isMatchCompleted(match) ||
+            getMatchDisplayStatus(match).status === "in_progress" ||
+            hasScoreValue(match.scoreA) ||
+            hasScoreValue(match.scoreB) ||
+            match.winnerSource
+        )
+      ) {
+        return "In progress";
+      }
+      return "Ready";
+    };
+    const renderKnockoutStageChip = (label, status) => (
+      <span key={`${label}-${status}`} style={getKnockoutStageChipStyle(status)}>
+        {label}: {status}
+      </span>
+    );
+    const renderAdvancementSlot = (label, value, resolved) => (
+      <div key={label} style={styles.tournamentAdvancementSlotV1}>
+        <span>{label}</span>
+        <strong>{value}</strong>
+        <small>{resolved ? "From completed group results" : "Placeholder"}</small>
+      </div>
+    );
+    const renderKnockoutSetupCard = (section, advancement, status) => (
+      <div style={styles.tournamentKnockoutSetupCardV1}>
+        <div style={styles.tournamentSectionHeader}>
+          <div>
+            <div style={styles.tournamentEyebrow}>Knockout</div>
+            <div style={styles.tournamentSectionTitle}>
+              {getSeriesDisplayName(section.series)}
+            </div>
+          </div>
+          <span style={getKnockoutStageChipStyle(status)}>{status}</span>
+        </div>
+
+        <div style={styles.tournamentKnockoutRuleGridV1}>
+          {[
+            ["Groups", advancement.length],
+            ["Advancement", "Winner + runner-up"],
+            ["Semi rule", "A1 vs B2 / B1 vs A2"],
+            ["3rd place", activeTournament.thirdPlaceMatch ? "Enabled" : "Disabled"],
+          ].map(([label, value]) => (
+            <div key={`knockout-rule-${label}`} style={styles.tournamentDrawMetricV1}>
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+
+        <label style={styles.tournamentKnockoutToggleV1}>
+          <input
+            type="checkbox"
+            checked={Boolean(activeTournament.thirdPlaceMatch)}
+            onChange={(event) =>
+              updateActiveTournament({
+                thirdPlaceMatch: event.target.checked,
+              })
+            }
+          />
+          <span>Play optional 3rd place match</span>
+        </label>
+      </div>
+    );
+    const renderAdvancementPreview = (advancement) => (
+      <div style={styles.tournamentKnockoutColumnV1}>
+        <div style={styles.tournamentBracketStageTitle}>Group stage</div>
+        <div style={styles.tournamentAdvancementGridV1}>
+          {advancement.flatMap((group) => [
+            renderAdvancementSlot(
+              `${group.groupName} Winner`,
+              group.winner,
+              group.allResultsKnown
+            ),
+            renderAdvancementSlot(
+              `${group.groupName} Runner-up`,
+              group.runnerUp,
+              group.allResultsKnown
+            ),
+          ])}
+        </div>
+      </div>
+    );
+    const renderKnockoutFlowSection = (section) => {
+      const sectionDisplayKnockout = section.displayKnockout || {};
+      const advancement = getSectionAdvancementPreview(section);
+      const status = getSectionKnockoutStatus(section);
+      const sectionContext = {
+        seriesId: hasExplicitTournamentSeries(activeTournament)
+          ? section.series.id
+          : "",
+        knockout: sectionDisplayKnockout,
+        matches: section.tournament.matches || [],
+        advancingTeamsByGroup: advancement.map((group) => ({
+          groupId: group.group.id,
+          groupName: group.groupName,
+          groupCode: group.groupCode,
+          winner: group.winner,
+          runnerUp: group.runnerUp,
+        })),
+      };
+      const semiStatus = getStageCompletionStatus(
+        sectionDisplayKnockout.semiFinals || []
+      );
+      const finalStatus = getStageCompletionStatus(
+        sectionDisplayKnockout.final ? [sectionDisplayKnockout.final] : []
+      );
+      const thirdStatus =
+        activeTournament.thirdPlaceMatch && sectionDisplayKnockout.thirdPlace
+          ? getStageCompletionStatus([sectionDisplayKnockout.thirdPlace])
+          : "Ready";
+
+      return (
+        <div
+          key={`knockout-flow-${section.series.id}`}
+          style={styles.tournamentKnockoutFlowCardV1}
+        >
+          {renderKnockoutSetupCard(section, advancement, status)}
+
+          <div style={styles.tournamentKnockoutChipRowV1}>
+            {renderKnockoutStageChip(
+              "Group stage",
+              advancement.every((group) => group.allResultsKnown)
+                ? "Completed"
+                : "Missing results"
+            )}
+            {renderKnockoutStageChip("Semi-final", semiStatus)}
+            {renderKnockoutStageChip("Final", finalStatus)}
+            {activeTournament.thirdPlaceMatch &&
+              renderKnockoutStageChip("3rd place", thirdStatus)}
+          </div>
+
+          <div
+            style={{
+              ...styles.tournamentKnockoutFlowGridV1,
+              ...(isMobile ? styles.tournamentKnockoutFlowGridMobileV1 : {}),
+            }}
+          >
+            {renderAdvancementPreview(advancement)}
+
+            <div style={styles.tournamentKnockoutColumnV1}>
+              <div style={styles.tournamentBracketStageTitle}>Semi-finals</div>
+              {(sectionDisplayKnockout.semiFinals || []).length ? (
+                (sectionDisplayKnockout.semiFinals || []).map((match) =>
+                  section.hasStoredKnockout
+                    ? renderBracketMatch(
+                        match,
+                        "semiFinals",
+                        false,
+                        sectionContext
+                      )
+                    : renderBracketPreviewMatch(match, false, sectionContext)
+                )
+              ) : (
+                <div style={styles.tournamentMutedPanel}>
+                  Build groups to preview semifinals.
+                </div>
+              )}
+            </div>
+
+            <div style={styles.tournamentKnockoutColumnV1}>
+              <div style={styles.tournamentBracketStageTitle}>Finals</div>
+              {section.hasStoredKnockout
+                ? renderBracketMatch(
+                    sectionDisplayKnockout.final,
+                    "final",
+                    true,
+                    sectionContext
+                  )
+                : renderBracketPreviewMatch(
+                    sectionDisplayKnockout.final,
+                    true,
+                    sectionContext
+                  )}
+              {activeTournament.thirdPlaceMatch &&
+                sectionDisplayKnockout.thirdPlace && (
+                  section.hasStoredKnockout
+                    ? renderBracketMatch(
+                        sectionDisplayKnockout.thirdPlace,
+                        "thirdPlace",
+                        false,
+                        sectionContext
+                      )
+                    : renderBracketPreviewMatch(
+                        sectionDisplayKnockout.thirdPlace,
+                        false,
+                        sectionContext
+                      )
+                )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+    const renderTournamentKnockoutFlow = () => {
+      const sectionsWithKnockout = visibleBracketSections.filter((section) =>
+        Boolean(
+          (section.displayKnockout?.quarterFinals || []).length ||
+            (section.displayKnockout?.semiFinals || []).length ||
+            section.displayKnockout?.final
+        )
+      );
+
+      return (
+        <div style={styles.tournamentSurface}>
+          <div style={styles.tournamentSectionHeader}>
+            <div>
+              <div style={styles.tournamentEyebrow}>Finals flow</div>
+              <div style={styles.tournamentSectionTitle}>
+                Knockout setup and preview
+              </div>
+            </div>
+            <button
+              style={styles.primaryButtonSmall}
+              onClick={generateTournamentKnockout}
+            >
+              {tournamentText.generateKnockout}
+            </button>
+          </div>
+
+          {sectionsWithKnockout.length ? (
+            <div style={styles.tournamentStandingsList}>
+              {sectionsWithKnockout.map(renderKnockoutFlowSection)}
+            </div>
+          ) : (
+            <div style={styles.tournamentMutedPanel}>
+              {tournamentText.noKnockoutYet}
+            </div>
+          )}
+        </div>
+      );
+    };
+
     const getPreviewTeamName = (team) =>
       String(team?.name || "").trim() || team?.slot || "-";
     const parseScheduleStart = (value) => {
@@ -17206,201 +17676,8 @@ const savedRound = readStorageWithTtl(
                     {activeTournamentView === "groups" &&
                       renderTournamentDrawBoard()}
 
-                    {activeTournamentView === "bracket" && (
-                      <div style={styles.tournamentSurface}>
-                        <div style={styles.tournamentSectionHeader}>
-                          <div>
-                            <div style={styles.tournamentEyebrow}>
-                              {tournamentText.knockoutLabel}
-                            </div>
-                            <div style={styles.tournamentSectionTitle}>
-                              {tournamentText.knockoutPreview}
-                            </div>
-                          </div>
-                          <button
-                            style={styles.primaryButtonSmall}
-                            onClick={generateTournamentKnockout}
-                          >
-                            {tournamentText.generateKnockout}
-                          </button>
-                        </div>
-
-                        {visibleBracketSections.some(
-                          (section) =>
-                            (section.displayKnockout.quarterFinals || [])
-                              .length ||
-                            (section.displayKnockout.semiFinals || []).length
-                        ) ? (
-                          <div style={styles.tournamentStandingsList}>
-                            {visibleBracketSections.map((section) => {
-                              const sectionDisplayKnockout =
-                                section.displayKnockout || {};
-                              const hasSectionKnockout = Boolean(
-                                (sectionDisplayKnockout.quarterFinals || [])
-                                  .length ||
-                                  (sectionDisplayKnockout.semiFinals || []).length
-                              );
-                              if (!hasSectionKnockout) return null;
-
-                              const sectionAdvancingTeams = section.standings.map(
-                                (group, index) => {
-                                  const sourceGroup =
-                                    section.groups.find(
-                                      (item) => item.id === group.groupId
-                                    ) || {};
-
-                                  return {
-                                    groupId: group.groupId,
-                                    groupName: group.groupName,
-                                    groupCode:
-                                      sourceGroup.code ||
-                                      getTournamentGroupCode(index),
-                                    winner:
-                                      group.rows?.[0]?.teamName ||
-                                      `${group.groupName} ${tournamentText.winnerLabel}`,
-                                    runnerUp:
-                                      group.rows?.[1]?.teamName ||
-                                      `${group.groupName} ${tournamentText.runnerUpLabel}`,
-                                  };
-                                }
-                              );
-                              const sectionContext = {
-                                seriesId: hasExplicitTournamentSeries(activeTournament)
-                                  ? section.series.id
-                                  : "",
-                                knockout: sectionDisplayKnockout,
-                                matches: section.tournament.matches || [],
-                                advancingTeamsByGroup: sectionAdvancingTeams,
-                              };
-
-                              return (
-                                <div
-                                  key={`bracket-series-${section.series.id}`}
-                                  style={styles.tournamentStandingsCard}
-                                >
-                                  {hasExplicitTournamentSeries(activeTournament) && (
-                                    <div style={styles.tournamentMiniTitle}>
-                                      {getSeriesDisplayName(section.series)}
-                                    </div>
-                                  )}
-                                  <div
-                                    style={{
-                                      ...styles.tournamentBracketBoard,
-                                      ...(isMobile
-                                        ? styles.tournamentGroupGridMobile
-                                        : {}),
-                                    }}
-                                  >
-                                    {(sectionDisplayKnockout.quarterFinals || [])
-                                      .length > 0 && (
-                                      <div style={styles.tournamentBracketStage}>
-                                        <div
-                                          style={
-                                            styles.tournamentBracketStageTitle
-                                          }
-                                        >
-                                          {tournamentText.firstKnockoutLabel}
-                                        </div>
-                                        {sectionDisplayKnockout.quarterFinals.map(
-                                          (match) =>
-                                            section.hasStoredKnockout
-                                              ? renderBracketMatch(
-                                                  match,
-                                                  "quarterFinals",
-                                                  false,
-                                                  sectionContext
-                                                )
-                                              : renderBracketPreviewMatch(
-                                                  match,
-                                                  false,
-                                                  sectionContext
-                                                )
-                                        )}
-                                      </div>
-                                    )}
-
-                                    <div style={styles.tournamentBracketStage}>
-                                      <div
-                                        style={styles.tournamentBracketStageTitle}
-                                      >
-                                        {tournamentText.semiFinals}
-                                      </div>
-                                      {(
-                                        sectionDisplayKnockout.semiFinals || []
-                                      ).map((match) =>
-                                        section.hasStoredKnockout
-                                          ? renderBracketMatch(
-                                              match,
-                                              "semiFinals",
-                                              false,
-                                              sectionContext
-                                            )
-                                          : renderBracketPreviewMatch(
-                                              match,
-                                              false,
-                                              sectionContext
-                                            )
-                                      )}
-                                    </div>
-
-                                    <div style={styles.tournamentBracketStage}>
-                                      <div
-                                        style={styles.tournamentBracketStageTitle}
-                                      >
-                                        {tournamentText.final}
-                                      </div>
-                                      {section.hasStoredKnockout
-                                        ? renderBracketMatch(
-                                            sectionDisplayKnockout.final,
-                                            "final",
-                                            true,
-                                            sectionContext
-                                          )
-                                        : renderBracketPreviewMatch(
-                                            sectionDisplayKnockout.final,
-                                            true,
-                                            sectionContext
-                                          )}
-                                    </div>
-
-                                    {activeTournament.thirdPlaceMatch &&
-                                      sectionDisplayKnockout.thirdPlace && (
-                                        <div
-                                          style={styles.tournamentBracketStage}
-                                        >
-                                          <div
-                                            style={
-                                              styles.tournamentBracketStageTitle
-                                            }
-                                          >
-                                            {tournamentText.thirdPlace}
-                                          </div>
-                                          {section.hasStoredKnockout
-                                            ? renderBracketMatch(
-                                                sectionDisplayKnockout.thirdPlace,
-                                                "thirdPlace",
-                                                false,
-                                                sectionContext
-                                              )
-                                            : renderBracketPreviewMatch(
-                                                sectionDisplayKnockout.thirdPlace,
-                                                false,
-                                                sectionContext
-                                              )}
-                                        </div>
-                                      )}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <div style={styles.tournamentMutedPanel}>
-                            {tournamentText.noKnockoutYet}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    {activeTournamentView === "bracket" &&
+                      renderTournamentKnockoutFlow()}
 
                     {activeTournamentView === "matches" && (
                       <div style={styles.tournamentSurface}>
@@ -19342,8 +19619,22 @@ const savedRound = readStorageWithTtl(
                 {renderTeamBuilderHeader()}
                 {renderTeamBuilderStepTabs()}
 
-                <div style={styles.teamBuilderDashboardGridV2}>
-                  <section style={styles.teamBuilderGeneratePanelV2}>
+                <div
+                  style={{
+                    ...styles.teamBuilderDashboardGridV2,
+                    ...(isMobile
+                      ? styles.teamBuilderDashboardGridMobileV21
+                      : styles.teamBuilderDashboardGridDesktopV21),
+                  }}
+                >
+                  <section
+                    style={{
+                      ...styles.teamBuilderGeneratePanelV2,
+                      ...(!isMobile
+                        ? styles.teamBuilderGeneratePanelDesktopV21
+                        : {}),
+                    }}
+                  >
                     <div style={styles.teamBuilderPanelHeaderV2}>
                       <div>
                         <div style={styles.teamBuilderPanelTitleV2}>
@@ -19399,23 +19690,10 @@ const savedRound = readStorageWithTtl(
                           <SvgIcon type="plus" size={14} strokeWidth={2.5} />
                         </button>
                       </div>
-
-                      <button
-                        style={{
-                          ...styles.generateButtonInline,
-                          opacity: selected.length < 2 || loading ? 0.6 : 1,
-                        }}
-                        onClick={generateTeams}
-                        disabled={selected.length < 2 || loading}
-                      >
-                        {loading ? t.generating : t.generateTeams}
-                      </button>
                     </div>
                   </div>
 
-                  <div style={styles.selectedBadge}>
-                    {t.selected}: {selected.length} / {totalPlayers}
-                  </div>
+                  {renderTeamBuilderSelectedTray()}
                 </div>
 
                 <div style={styles.settingsCompactRow}>
@@ -19488,7 +19766,14 @@ const savedRound = readStorageWithTtl(
 
                   </section>
 
-                  <section style={styles.teamBuilderPoolPanelV2}>
+                  <section
+                    style={{
+                      ...styles.teamBuilderPoolPanelV2,
+                      ...(!isMobile
+                        ? styles.teamBuilderPoolPanelDesktopV21
+                        : {}),
+                    }}
+                  >
                     <div style={styles.teamBuilderPanelHeaderV2}>
                       <div>
                         <div style={styles.teamBuilderPanelTitleV2}>
@@ -19498,7 +19783,12 @@ const savedRound = readStorageWithTtl(
                           Tap players to select them for the next round.
                         </div>
                       </div>
+                      <span style={styles.teamBuilderMetricChipV2}>
+                        {filteredPlayerCount}/{totalPlayers}
+                      </span>
                     </div>
+
+                    {renderTeamBuilderSearchBox()}
 
                     <div style={styles.actionRow}>
                   <button
@@ -19582,7 +19872,15 @@ const savedRound = readStorageWithTtl(
                   </div>
                 )}
 
-                    {renderTeamBuilderPlayerList()}
+                    <div
+                      style={
+                        isMobile
+                          ? styles.teamBuilderPlayerListScrollerMobileV21
+                          : styles.teamBuilderPlayerListScrollerV21
+                      }
+                    >
+                      {renderTeamBuilderPlayerList()}
+                    </div>
 
                 {showArchivedPlayers && (
                   <div style={styles.archivedCard}>
@@ -19611,7 +19909,14 @@ const savedRound = readStorageWithTtl(
                 )}
                   </section>
 
-                  <aside style={styles.teamBuilderResultsPanelV2}>
+                  <aside
+                    style={{
+                      ...styles.teamBuilderResultsPanelV2,
+                      ...(!isMobile
+                        ? styles.teamBuilderResultsPanelDesktopV21
+                        : {}),
+                    }}
+                  >
                     <div style={styles.teamBuilderPanelHeaderV2}>
                       <div>
                         <div style={styles.teamBuilderPanelTitleV2}>
@@ -28271,6 +28576,104 @@ Object.assign(styles, {
     border: "1px solid rgba(251,113,133,0.24)",
     color: "#fecdd3",
   },
+  tournamentKnockoutSetupCardV1: {
+    display: "grid",
+    gap: "13px",
+    padding: "15px",
+    borderRadius: "24px",
+    background:
+      "linear-gradient(145deg, rgba(15,23,42,0.76), rgba(8,47,73,0.42))",
+    border: "1px solid rgba(125,211,252,0.16)",
+    boxShadow: "0 18px 48px rgba(2,6,23,0.24)",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  tournamentKnockoutRuleGridV1: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 118px), 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+  tournamentKnockoutToggleV1: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    color: "#dbeafe",
+    fontSize: "12px",
+    fontWeight: "850",
+    minHeight: "36px",
+  },
+  tournamentKnockoutChipRowV1: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "7px",
+    minWidth: 0,
+  },
+  tournamentKnockoutStatusChipV1: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "26px",
+    borderRadius: "999px",
+    padding: "0 9px",
+    background: "rgba(148,163,184,0.12)",
+    border: "1px solid rgba(148,163,184,0.15)",
+    color: "#cbd5e1",
+    fontSize: "10px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+    whiteSpace: "nowrap",
+  },
+  tournamentKnockoutFlowCardV1: {
+    display: "grid",
+    gap: "13px",
+    padding: "14px",
+    borderRadius: "26px",
+    background:
+      "linear-gradient(145deg, rgba(15,23,42,0.64), rgba(8,47,73,0.32))",
+    border: "1px solid rgba(125,211,252,0.14)",
+    boxShadow: "0 18px 48px rgba(2,6,23,0.22)",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  tournamentKnockoutFlowGridV1: {
+    display: "grid",
+    gridTemplateColumns: "minmax(210px, 0.9fr) minmax(230px, 1fr) minmax(220px, 0.9fr)",
+    gap: "13px",
+    alignItems: "start",
+    minWidth: 0,
+  },
+  tournamentKnockoutFlowGridMobileV1: {
+    gridTemplateColumns: "minmax(0, 1fr)",
+  },
+  tournamentKnockoutColumnV1: {
+    display: "grid",
+    gap: "10px",
+    alignContent: "start",
+    padding: "12px",
+    borderRadius: "20px",
+    background: "rgba(2,6,23,0.32)",
+    border: "1px solid rgba(148,163,184,0.12)",
+    minWidth: 0,
+  },
+  tournamentAdvancementGridV1: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  tournamentAdvancementSlotV1: {
+    display: "grid",
+    gap: "3px",
+    padding: "10px",
+    borderRadius: "15px",
+    background: "rgba(14,165,233,0.11)",
+    border: "1px solid rgba(125,211,252,0.16)",
+    color: "#dff7ff",
+    minWidth: 0,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
 });
 
 const sportsGlassV3 = {
@@ -28985,6 +29388,13 @@ Object.assign(styles, {
     alignItems: "start",
     minWidth: 0,
   },
+  teamBuilderDashboardGridDesktopV21: {
+    gridTemplateColumns:
+      "minmax(320px, 0.95fr) minmax(290px, 0.78fr) minmax(310px, 0.95fr)",
+  },
+  teamBuilderDashboardGridMobileV21: {
+    gridTemplateColumns: "minmax(0, 1fr)",
+  },
   teamBuilderGeneratePanelV2: {
     ...sportsGlassSoftV3,
     order: 2,
@@ -28993,6 +29403,11 @@ Object.assign(styles, {
     display: "grid",
     gap: "12px",
     minWidth: 0,
+  },
+  teamBuilderGeneratePanelDesktopV21: {
+    position: "sticky",
+    top: "12px",
+    alignSelf: "start",
   },
   teamBuilderPoolPanelV2: {
     ...sportsGlassSoftV3,
@@ -29003,6 +29418,11 @@ Object.assign(styles, {
     gap: "12px",
     minWidth: 0,
   },
+  teamBuilderPoolPanelDesktopV21: {
+    maxHeight: "min(760px, calc(100vh - 128px))",
+    overflow: "hidden",
+    alignSelf: "start",
+  },
   teamBuilderResultsPanelV2: {
     ...sportsGlassSoftV3,
     order: 3,
@@ -29011,6 +29431,14 @@ Object.assign(styles, {
     display: "grid",
     gap: "12px",
     minWidth: 0,
+  },
+  teamBuilderResultsPanelDesktopV21: {
+    position: "sticky",
+    top: "12px",
+    alignSelf: "start",
+    maxHeight: "min(760px, calc(100vh - 128px))",
+    overflowY: "auto",
+    overflowX: "hidden",
   },
   teamBuilderPanelHeaderV2: {
     display: "flex",
@@ -29087,6 +29515,137 @@ Object.assign(styles, {
     justifyContent: "center",
     minHeight: "40px",
     borderRadius: "16px",
+  },
+  teamBuilderSelectedTrayV21: {
+    display: "grid",
+    gap: "10px",
+    padding: "12px",
+    borderRadius: "18px",
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(125,211,252,0.16)",
+    minWidth: 0,
+  },
+  teamBuilderSelectedTrayHeaderV21: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "10px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  teamBuilderSelectedChipsV21: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "7px",
+    maxHeight: "132px",
+    overflowY: "auto",
+    overflowX: "hidden",
+    paddingRight: "2px",
+    minWidth: 0,
+  },
+  teamBuilderSelectedChipV21: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "6px",
+    minHeight: "34px",
+    maxWidth: "100%",
+    borderRadius: "999px",
+    padding: "0 9px",
+    border: "1px solid rgba(52,211,153,0.26)",
+    background: "rgba(34,197,94,0.14)",
+    color: "#dff7ff",
+    fontSize: "11px",
+    fontWeight: "900",
+    cursor: "pointer",
+  },
+  teamBuilderSelectedSkillV21: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: "22px",
+    height: "22px",
+    borderRadius: "999px",
+    fontSize: "10px",
+    fontWeight: "950",
+  },
+  teamBuilderSelectedEmptyV21: {
+    minHeight: "42px",
+    display: "flex",
+    alignItems: "center",
+    padding: "10px",
+    borderRadius: "14px",
+    background: "rgba(148,163,184,0.10)",
+    border: "1px dashed rgba(148,163,184,0.18)",
+    color: "#9fb4d0",
+    fontSize: "12px",
+    fontWeight: "800",
+  },
+  teamBuilderSearchBoxV21: {
+    display: "grid",
+    gap: "6px",
+    minWidth: 0,
+  },
+  teamBuilderSearchLabelV21: {
+    color: "#9fb4d0",
+    fontSize: "11px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+  teamBuilderSearchInputWrapV21: {
+    minHeight: "44px",
+    display: "grid",
+    gridTemplateColumns: "auto minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: "8px",
+    padding: "0 10px",
+    borderRadius: "16px",
+    background: "rgba(2,6,23,0.40)",
+    border: "1px solid rgba(125,211,252,0.20)",
+    color: "#bae6fd",
+    minWidth: 0,
+  },
+  teamBuilderSearchInputV21: {
+    width: "100%",
+    minWidth: 0,
+    border: "none",
+    outline: "none",
+    background: "transparent",
+    color: "#ecfeff",
+    fontSize: "14px",
+    fontWeight: "850",
+  },
+  teamBuilderSearchClearV21: {
+    width: "30px",
+    height: "30px",
+    borderRadius: "999px",
+    border: "1px solid rgba(148,163,184,0.18)",
+    background: "rgba(148,163,184,0.12)",
+    color: "#cbd5e1",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+  },
+  teamBuilderPlayerListScrollerV21: {
+    overflowY: "auto",
+    overflowX: "hidden",
+    paddingRight: "2px",
+    minHeight: 0,
+    maxHeight: "min(520px, calc(100vh - 430px))",
+    overscrollBehavior: "contain",
+  },
+  teamBuilderPlayerListScrollerMobileV21: {
+    overflow: "visible",
+    minHeight: 0,
+  },
+  teamBuilderNoPlayersFoundV21: {
+    ...sportsRowV3,
+    borderRadius: "18px",
+    padding: "16px",
+    display: "grid",
+    gap: "6px",
+    minWidth: 0,
   },
   settingsCompactRow: {
     ...styles.settingsCompactRow,
