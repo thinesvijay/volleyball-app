@@ -53,6 +53,7 @@ const TEAM_SKILL_VISIBILITY_KEY = "volleyball-team-skill-visibility";
 const TEAM_LOCK_VISIBILITY_KEY = "volleyball-team-lock-visibility";
 const MATCH_METHOD_KEY = "volleyball-match-method";
 const PLAYER_SORT_KEY = "volleyball-player-sort";
+const TEAM_BUILDER_LAYOUT_MODE_KEY = "makeTeamsPro.teamBuilder.layoutMode.v1";
 const TOURNAMENTS_STORAGE_KEY = "volleyball-tournaments-v1";
 const ACTIVE_TOURNAMENT_STORAGE_KEY_PREFIX = "volleyball-active-tournament-id:";
 const CURRENT_ROUND_TTL_MS = 60 * 60 * 1000;
@@ -1460,6 +1461,12 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState("players");
   const [teamBuilderStep, setTeamBuilderStep] = useState("players");
+  const [teamBuilderLayoutMode, setTeamBuilderLayoutMode] = useState(() => {
+    if (typeof window === "undefined") return "coachFlow";
+    return localStorage.getItem(TEAM_BUILDER_LAYOUT_MODE_KEY) === "classic"
+      ? "classic"
+      : "coachFlow";
+  });
   const [dragging, setDragging] = useState(null);
   const [isMobile, setIsMobile] = useState(
     typeof window !== "undefined" ? window.innerWidth < 900 : true
@@ -9173,6 +9180,18 @@ const savedRound = readStorageWithTtl(
   }, [playerSortMode]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(
+        TEAM_BUILDER_LAYOUT_MODE_KEY,
+        teamBuilderLayoutMode
+      );
+    } catch (error) {
+      console.error("Could not save Team Builder layout mode:", error);
+    }
+  }, [teamBuilderLayoutMode]);
+
+  useEffect(() => {
     const key = getToolbarSettingsStorageKey(auth.username);
     try {
       const raw = localStorage.getItem(key);
@@ -10023,6 +10042,11 @@ const savedRound = readStorageWithTtl(
     { label: "Teams", value: teamCount },
     { label: "Avg level", value: teamBuilderAverageLevel },
   ];
+  const isTeamBuilderCoachFlow = teamBuilderLayoutMode === "coachFlow";
+  const shouldUseTeamBuilderStepFlow = isTeamBuilderCoachFlow && isMobile;
+  const teamBuilderLayoutHint = isTeamBuilderCoachFlow
+    ? "Mobile guided flow"
+    : "One-page trainer view";
 
   function renderTeamBuilderHeader() {
     return (
@@ -10054,6 +10078,42 @@ const savedRound = readStorageWithTtl(
         >
           {loading ? t.generating : t.generateTeams}
         </button>
+      </div>
+    );
+  }
+
+  function renderTeamBuilderLayoutModeToggle() {
+    const modes = [
+      { id: "classic", label: "Classic" },
+      { id: "coachFlow", label: "Coach Flow" },
+    ];
+
+    return (
+      <div style={styles.teamBuilderLayoutModeBarV1}>
+        <div>
+          <div style={styles.teamBuilderLayoutModeTitleV1}>Layout</div>
+          <div style={styles.teamBuilderLayoutModeHintV1}>
+            {teamBuilderLayoutHint}
+          </div>
+        </div>
+
+        <div style={styles.teamBuilderLayoutModeControlV1}>
+          {modes.map((mode) => (
+            <button
+              key={mode.id}
+              type="button"
+              style={{
+                ...styles.teamBuilderLayoutModeButtonV1,
+                ...(teamBuilderLayoutMode === mode.id
+                  ? styles.teamBuilderLayoutModeButtonActiveV1
+                  : {}),
+              }}
+              onClick={() => setTeamBuilderLayoutMode(mode.id)}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
@@ -10253,7 +10313,7 @@ const savedRound = readStorageWithTtl(
   }
 
   function renderTeamBuilderMobileActionBar() {
-    if (!isMobile) return null;
+    if (!isMobile || !isTeamBuilderCoachFlow) return null;
 
     return (
       <div style={styles.teamBuilderMobileActionBarV22}>
@@ -19778,17 +19838,20 @@ const savedRound = readStorageWithTtl(
             ) : (
               <>
                 {renderTeamBuilderHeader()}
-                {renderTeamBuilderStepTabs()}
+                {renderTeamBuilderLayoutModeToggle()}
+                {isTeamBuilderCoachFlow && renderTeamBuilderStepTabs()}
 
                 <div
                   style={{
                     ...styles.teamBuilderDashboardGridV2,
                     ...(isMobile
-                      ? styles.teamBuilderDashboardGridMobileV21
+                      ? isTeamBuilderCoachFlow
+                        ? styles.teamBuilderDashboardGridMobileV21
+                        : styles.teamBuilderDashboardGridMobileClassicV1
                       : styles.teamBuilderDashboardGridDesktopV21),
                   }}
                 >
-                  {(!isMobile || teamBuilderStep === "setup") && (
+                  {(!shouldUseTeamBuilderStepFlow || teamBuilderStep === "setup") && (
                   <section
                     style={{
                       ...styles.teamBuilderGeneratePanelV2,
@@ -19863,7 +19926,7 @@ const savedRound = readStorageWithTtl(
                   </section>
                   )}
 
-                  {(!isMobile || teamBuilderStep === "players") && (
+                  {(!shouldUseTeamBuilderStepFlow || teamBuilderStep === "players") && (
                   <section
                     style={{
                       ...styles.teamBuilderPoolPanelV2,
@@ -19887,8 +19950,8 @@ const savedRound = readStorageWithTtl(
                     </div>
 
                     {renderTeamBuilderSearchBox()}
-                    {isMobile && renderTeamBuilderSelectedTray()}
-                    {isMobile && renderTeamBuilderFilterControls()}
+                    {shouldUseTeamBuilderStepFlow && renderTeamBuilderSelectedTray()}
+                    {shouldUseTeamBuilderStepFlow && renderTeamBuilderFilterControls()}
 
                     <div style={styles.actionRow}>
                   <button
@@ -20010,7 +20073,7 @@ const savedRound = readStorageWithTtl(
                   </section>
                   )}
 
-                  {(!isMobile || teamBuilderStep === "teams") && (
+                  {(!shouldUseTeamBuilderStepFlow || teamBuilderStep === "teams") && (
                   <aside
                     style={{
                       ...styles.teamBuilderResultsPanelV2,
@@ -20055,7 +20118,8 @@ const savedRound = readStorageWithTtl(
             ) : (
               <>
                 {renderTeamBuilderHeader()}
-                {renderTeamBuilderStepTabs()}
+                {renderTeamBuilderLayoutModeToggle()}
+                {isTeamBuilderCoachFlow && renderTeamBuilderStepTabs()}
 
                 <div style={styles.teamBuilderResultsShellV2}>
                   <div style={styles.teamBuilderResultsToolbarV2}>
@@ -29501,6 +29565,60 @@ Object.assign(styles, {
     cursor: "pointer",
     whiteSpace: "nowrap",
   },
+  teamBuilderLayoutModeBarV1: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    flexWrap: "wrap",
+    padding: "10px 12px",
+    borderRadius: "20px",
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(125,211,252,0.16)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
+    minWidth: 0,
+  },
+  teamBuilderLayoutModeTitleV1: {
+    color: "#ecfeff",
+    fontSize: "12px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+  teamBuilderLayoutModeHintV1: {
+    color: "#9fb4d0",
+    fontSize: "12px",
+    fontWeight: "800",
+    marginTop: "2px",
+  },
+  teamBuilderLayoutModeControlV1: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "4px",
+    minWidth: "220px",
+    padding: "4px",
+    borderRadius: "17px",
+    background: "rgba(2,6,23,0.46)",
+    border: "1px solid rgba(148,163,184,0.14)",
+  },
+  teamBuilderLayoutModeButtonV1: {
+    minHeight: "38px",
+    border: "1px solid transparent",
+    borderRadius: "13px",
+    padding: "0 10px",
+    background: "transparent",
+    color: "#9fb4d0",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  teamBuilderLayoutModeButtonActiveV1: {
+    background: "linear-gradient(135deg, rgba(56,189,248,0.96), rgba(34,197,94,0.94))",
+    border: "1px solid rgba(186,230,253,0.42)",
+    color: "#03111f",
+    boxShadow: "0 12px 28px rgba(14,165,233,0.20)",
+  },
   teamBuilderSegmentedTabsV22: {
     width: "100%",
     maxWidth: "430px",
@@ -29547,6 +29665,10 @@ Object.assign(styles, {
   teamBuilderDashboardGridMobileV21: {
     gridTemplateColumns: "minmax(0, 1fr)",
     paddingBottom: "78px",
+  },
+  teamBuilderDashboardGridMobileClassicV1: {
+    gridTemplateColumns: "minmax(0, 1fr)",
+    paddingBottom: 0,
   },
   teamBuilderGeneratePanelV2: {
     ...sportsGlassSoftV3,
