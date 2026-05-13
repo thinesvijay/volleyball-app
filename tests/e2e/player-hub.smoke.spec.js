@@ -17,6 +17,8 @@ const BAD_RUNTIME_TEXT = [
   "Compiled with problems",
 ];
 
+const LOGIN_TIMEOUT_MS = 60_000;
+
 const playerCredentials = {
   username: process.env.E2E_PLAYER_USERNAME || "",
   password: process.env.E2E_PLAYER_PASSWORD || "",
@@ -49,6 +51,28 @@ function addNote(testInfo, description) {
 
 function hasCredentials(credentials) {
   return Boolean(credentials.username && credentials.password);
+}
+
+function buildLoginDiagnostic(bodyText) {
+  const lines = String(bodyText || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const errorLine = lines.find((line) =>
+    /login failed|sign in failed|failed to fetch|invalid|incorrect|wrong|denied|unknown action|could not|error/i.test(
+      line
+    )
+  );
+
+  return errorLine || lines.slice(0, 18).join(" | ") || "No visible page text.";
+}
+
+async function getLoginDiagnostic(page) {
+  const bodyText = await page
+    .locator("body")
+    .innerText({ timeout: 2_000 })
+    .catch(() => "");
+  return buildLoginDiagnostic(bodyText);
 }
 
 function collectRuntimeErrors(page) {
@@ -96,9 +120,39 @@ async function login(page, credentials) {
   });
   await loginForm.locator('button[type="submit"]').click();
 
-  await expect(page.getByTestId("module-tab-player-hub")).toBeVisible({
-    timeout: 20_000,
+  const loggingInButton = page.getByRole("button", {
+    name: "Logging in...",
+    exact: true,
   });
+  await loggingInButton
+    .waitFor({ state: "hidden", timeout: LOGIN_TIMEOUT_MS })
+    .catch(async () => {
+      const diagnostic = await getLoginDiagnostic(page);
+      throw new Error(
+        `Login did not finish within ${
+          LOGIN_TIMEOUT_MS / 1000
+        }s; still waiting on "Logging in...". ${diagnostic}`
+      );
+    });
+
+  const moduleNavigation = page.locator('[data-testid^="module-tab-"]');
+  await expect(moduleNavigation.first())
+    .toBeVisible({ timeout: 15_000 })
+    .catch(async () => {
+      const diagnostic = await getLoginDiagnostic(page);
+      throw new Error(
+        `Login finished but module navigation did not appear. ${diagnostic}`
+      );
+    });
+
+  await expect(page.getByTestId("module-tab-player-hub"))
+    .toBeVisible({ timeout: 15_000 })
+    .catch(async () => {
+      const diagnostic = await getLoginDiagnostic(page);
+      throw new Error(
+        `Login finished but Player Hub module tab was not visible. ${diagnostic}`
+      );
+    });
 }
 
 async function openPlayerHub(page) {
