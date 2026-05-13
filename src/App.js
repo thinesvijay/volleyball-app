@@ -10022,6 +10022,295 @@ const savedRound = readStorageWithTtl(
   }, [activeScheduleRounds, matchRoundIndex]);
 
   const totalPlayers = sortedPlayers.length;
+  const teamBuilderAverageLevel = useMemo(() => {
+    const sourcePlayers = selected.length
+      ? players.filter((player) => selected.includes(player.name))
+      : players;
+    const levels = sourcePlayers
+      .map((player) => Number(player.skill))
+      .filter((level) => Number.isFinite(level));
+
+    if (!levels.length) return "-";
+
+    const average = levels.reduce((sum, level) => sum + level, 0) / levels.length;
+    return average.toFixed(average % 1 === 0 ? 0 : 1);
+  }, [players, selected]);
+
+  const teamBuilderStats = [
+    { label: "Active players", value: totalPlayers },
+    { label: "Selected", value: selected.length },
+    { label: "Teams", value: teamCount },
+    { label: "Avg level", value: teamBuilderAverageLevel },
+  ];
+
+  function renderTeamBuilderHeader() {
+    return (
+      <div style={styles.teamBuilderHeroV2}>
+        <div style={styles.teamBuilderHeroTextV2}>
+          <div style={styles.teamBuilderEyebrowV2}>Coach tool</div>
+          <h2 style={styles.teamBuilderHeroTitleV2}>Team Builder</h2>
+          <div style={styles.teamBuilderHeroSubtitleV2}>
+            Balanced teams for training
+          </div>
+        </div>
+
+        <div style={styles.teamBuilderStatsGridV2}>
+          {teamBuilderStats.map((stat) => (
+            <div key={stat.label} style={styles.teamBuilderStatCardV2}>
+              <span style={styles.teamBuilderStatValueV2}>{stat.value}</span>
+              <span style={styles.teamBuilderStatLabelV2}>{stat.label}</span>
+            </div>
+          ))}
+        </div>
+
+        <button
+          style={{
+            ...styles.teamBuilderHeroGenerateButtonV2,
+            opacity: selected.length < 2 || loading ? 0.6 : 1,
+          }}
+          onClick={generateTeams}
+          disabled={selected.length < 2 || loading}
+        >
+          {loading ? t.generating : t.generateTeams}
+        </button>
+      </div>
+    );
+  }
+
+  function renderTeamBuilderStepTabs() {
+    return (
+      <div style={styles.teamBuilderStepRow}>
+        <div style={styles.workflowSteps}>
+          <button
+            type="button"
+            style={{
+              ...styles.workflowStepButton,
+              ...(activeTab === "players" ? styles.workflowStepButtonActive : {}),
+            }}
+            onClick={() => setActiveTab("players")}
+          >
+            {t.players}
+          </button>
+          <button
+            type="button"
+            style={{
+              ...styles.workflowStepButton,
+              ...(activeTab === "teams" ? styles.workflowStepButtonActive : {}),
+            }}
+            onClick={() => setActiveTab("teams")}
+          >
+            {t.teams}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderTeamBuilderPlayerCard(player) {
+    const isSelected = selected.includes(player.name);
+    const skillStyle = getSkillStyle(player.skill, skillView, skillScale);
+    const playerClub = String(player.club || "").trim();
+    const activeLabel = isSelected ? t.selected : t.activeStatus;
+
+    if (showPlayerManageActions) {
+      return (
+        <div
+          key={player.name}
+          style={{
+            ...styles.playerCardCompact,
+            ...(isSelected ? styles.playerCardSelected : {}),
+          }}
+          onClick={() => togglePlayer(player.name)}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              togglePlayer(player.name);
+            }
+          }}
+        >
+          <div style={styles.playerCompactTop}>
+            <div style={styles.playerListTextV2}>
+              <div style={styles.playerNameCompact}>
+                {displayPlayerName(player)}
+              </div>
+              {playerClub && (
+                <div style={styles.playerListMetaV2}>{playerClub}</div>
+              )}
+            </div>
+            <div
+              style={{
+                ...styles.skillMini,
+                background: skillStyle.background,
+                color: skillStyle.color,
+              }}
+            >
+              {skillStyle.text}
+            </div>
+          </div>
+
+          <div style={styles.playerCompactBottom}>
+            <span
+              style={{
+                ...styles.teamBuilderTinyStatusV2,
+                ...(isSelected ? styles.teamBuilderTinyStatusActiveV2 : {}),
+              }}
+            >
+              {activeLabel}
+            </span>
+            <div style={styles.playerCardActions}>
+              <button
+                style={styles.editMiniButton}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openEditPlayer(player);
+                }}
+              >
+                {t.edit}
+              </button>
+
+              <button
+                style={styles.archiveMiniButton}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  archivePlayer(player.name);
+                }}
+              >
+                {t.archive}
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        key={player.name}
+        style={{
+          ...styles.playerCardListCompact,
+          ...(isSelected ? styles.playerCardListCompactSelected : {}),
+        }}
+        onClick={() => togglePlayer(player.name)}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            togglePlayer(player.name);
+          }
+        }}
+      >
+        <div style={styles.playerListTextV2}>
+          <div style={styles.playerListCompactName}>
+            {displayPlayerName(player)}
+          </div>
+          {playerClub && <div style={styles.playerListMetaV2}>{playerClub}</div>}
+        </div>
+        <div style={styles.playerListCompactRight}>
+          <span
+            style={{
+              ...styles.teamBuilderTinyStatusV2,
+              ...(isSelected ? styles.teamBuilderTinyStatusActiveV2 : {}),
+            }}
+          >
+            {activeLabel}
+          </span>
+          <div
+            style={{
+              ...styles.skillMini,
+              background: skillStyle.background,
+              color: skillStyle.color,
+            }}
+          >
+            {skillStyle.text}
+          </div>
+          <button
+            style={styles.editMiniButton}
+            onClick={(e) => {
+              e.stopPropagation();
+              openEditPlayer(player);
+            }}
+          >
+            {t.edit}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderTeamBuilderPlayerList() {
+    if (playerViewMode === "club") {
+      return groupedPlayersByClub.map((group) => (
+        <div key={group.clubName} style={styles.clubSection}>
+          <div style={styles.clubSectionTitle}>{group.clubName}</div>
+          <div style={styles.clubSectionPlayers}>
+            {group.players.map((player) => renderTeamBuilderPlayerCard(player))}
+          </div>
+        </div>
+      ));
+    }
+
+    if (playerViewMode === "all") {
+      return (
+        <div style={styles.playersGrid}>
+          {sortedPlayers.map((player) => renderTeamBuilderPlayerCard(player))}
+        </div>
+      );
+    }
+
+    return null;
+  }
+
+  function renderTeamBuilderTeamPreview() {
+    if (!teamsWithTotals.length) {
+      return (
+        <div style={styles.teamBuilderEmptyStateV2}>
+          <div style={styles.teamBuilderEmptyTitleV2}>No generated teams yet</div>
+          <div style={styles.teamBuilderPanelSubtitleV2}>
+            Select at least two players, then generate a training round.
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div style={styles.teamBuilderPreviewListV2}>
+        {teamsWithTotals.map((team) => {
+          const teamAverage = team.players.length
+            ? (team.total / team.players.length).toFixed(1)
+            : "-";
+
+          return (
+            <button
+              type="button"
+              key={team.name}
+              style={styles.teamBuilderPreviewCardV2}
+              onClick={() => setActiveTab("teams")}
+            >
+              <div style={styles.teamBuilderPreviewHeaderV2}>
+                <span>{team.name}</span>
+                <span style={styles.teamBuilderMetricChipV2}>
+                  Avg {teamAverage}
+                </span>
+              </div>
+              <div style={styles.teamBuilderPreviewPlayersV2}>
+                {team.players.slice(0, 4).map((player) => (
+                  <span key={`${team.name}-${player.name}`}>
+                    {displayPlayerName(player)}
+                  </span>
+                ))}
+                {team.players.length > 4 && (
+                  <span>+{team.players.length - 4}</span>
+                )}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
 
   const publicUpcomingFilterResult = useMemo(() => {
     function getPublicTournamentFilterReason(tournament) {
@@ -18169,36 +18458,23 @@ const savedRound = readStorageWithTtl(
               </div>
             ) : (
               <>
-                <div style={styles.teamBuilderStepRow}>
-                  <div style={styles.workflowSteps}>
-                    <button
-                      type="button"
-                      style={{
-                        ...styles.workflowStepButton,
-                        ...(activeTab === "players"
-                          ? styles.workflowStepButtonActive
-                          : {}),
-                      }}
-                      onClick={() => setActiveTab("players")}
-                    >
-                      {t.players}
-                    </button>
-                    <button
-                      type="button"
-                      style={{
-                        ...styles.workflowStepButton,
-                        ...(activeTab === "teams"
-                          ? styles.workflowStepButtonActive
-                          : {}),
-                      }}
-                      onClick={() => setActiveTab("teams")}
-                    >
-                      {t.teams}
-                    </button>
-                  </div>
-                </div>
+                {renderTeamBuilderHeader()}
+                {renderTeamBuilderStepTabs()}
 
-                <div style={styles.toolbarTop}>
+                <div style={styles.teamBuilderDashboardGridV2}>
+                  <section style={styles.teamBuilderGeneratePanelV2}>
+                    <div style={styles.teamBuilderPanelHeaderV2}>
+                      <div>
+                        <div style={styles.teamBuilderPanelTitleV2}>
+                          Generate teams
+                        </div>
+                        <div style={styles.teamBuilderPanelSubtitleV2}>
+                          Choose settings, then build a balanced training round.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={styles.toolbarTop}>
                   <div style={styles.teamCountCard}>
                     <span style={styles.teamCountLabel}>{t.numberOfTeams}</span>
 
@@ -18329,7 +18605,21 @@ const savedRound = readStorageWithTtl(
                   </div>
                 </div>
 
-                <div style={styles.actionRow}>
+                  </section>
+
+                  <section style={styles.teamBuilderPoolPanelV2}>
+                    <div style={styles.teamBuilderPanelHeaderV2}>
+                      <div>
+                        <div style={styles.teamBuilderPanelTitleV2}>
+                          Player pool
+                        </div>
+                        <div style={styles.teamBuilderPanelSubtitleV2}>
+                          Tap players to select them for the next round.
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={styles.actionRow}>
                   <button
                     style={styles.secondaryButton}
                     onClick={() => setShowAddForm((prev) => !prev)}
@@ -18411,218 +18701,7 @@ const savedRound = readStorageWithTtl(
                   </div>
                 )}
 
-                {playerViewMode === "club" ? (
-                  groupedPlayersByClub.map((group) => (
-                    <div key={group.clubName} style={styles.clubSection}>
-                      <div style={styles.clubSectionTitle}>{group.clubName}</div>
-                      <div style={styles.clubSectionPlayers}>
-                        {group.players.map((p) => {
-                          const isSelected = selected.includes(p.name);
-                          const skillStyle = getSkillStyle(
-                            p.skill,
-                            skillView,
-                            skillScale
-                          );
-
-                          return !showPlayerManageActions ? (
-                            <div
-                              key={p.name}
-                              style={{
-                                ...styles.playerCardListCompact,
-                                ...(isSelected
-                                  ? styles.playerCardListCompactSelected
-                                  : {}),
-                              }}
-                              onClick={() => togglePlayer(p.name)}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.preventDefault();
-                                  togglePlayer(p.name);
-                                }
-                              }}
-                            >
-                              <div style={styles.playerListCompactName}>
-                                {displayPlayerName(p)}
-                              </div>
-                              <div style={styles.playerListCompactRight}>
-                                <div
-                                  style={{
-                                    ...styles.skillMini,
-                                    background: skillStyle.background,
-                                    color: skillStyle.color,
-                                  }}
-                                >
-                                  {skillStyle.text}
-                                </div>
-                              </div>
-                            </div>
-                          ) : (
-                            <div
-                              key={p.name}
-                              style={{
-                                ...styles.playerCardCompact,
-                                ...(isSelected ? styles.playerCardSelected : {}),
-                              }}
-                              onClick={() => togglePlayer(p.name)}
-                              role="button"
-                              tabIndex={0}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.preventDefault();
-                                  togglePlayer(p.name);
-                                }
-                              }}
-                            >
-                              <div style={styles.playerCompactTop}>
-                                <div style={styles.playerNameCompact}>
-                                  {displayPlayerName(p)}
-                                </div>
-                                <div
-                                  style={{
-                                    ...styles.skillMini,
-                                    background: skillStyle.background,
-                                    color: skillStyle.color,
-                                  }}
-                                >
-                                  {skillStyle.text}
-                                </div>
-                              </div>
-
-                              <div style={styles.playerCompactBottom}>
-                                <div style={styles.playerCardActions}>
-                                  <button
-                                    style={styles.editMiniButton}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openEditPlayer(p);
-                                    }}
-                                  >
-                                    {t.edit}
-                                  </button>
-
-                                  <button
-                                    style={styles.archiveMiniButton}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      archivePlayer(p.name);
-                                    }}
-                                  >
-                                    {t.archive}
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))
-                ) : playerViewMode === "all" ? (
-                  <div style={styles.playersGrid}>
-                    {sortedPlayers.map((p) => {
-                      const isSelected = selected.includes(p.name);
-                      const skillStyle = getSkillStyle(
-                        p.skill,
-                        skillView,
-                        skillScale
-                      );
-
-                      return !showPlayerManageActions ? (
-                        <div
-                          key={p.name}
-                          style={{
-                            ...styles.playerCardListCompact,
-                            ...(isSelected
-                              ? styles.playerCardListCompactSelected
-                              : {}),
-                          }}
-                          onClick={() => togglePlayer(p.name)}
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              togglePlayer(p.name);
-                            }
-                          }}
-                        >
-                          <div style={styles.playerListCompactName}>
-                            {displayPlayerName(p)}
-                          </div>
-                          <div style={styles.playerListCompactRight}>
-                            <div
-                              style={{
-                                ...styles.skillMini,
-                                background: skillStyle.background,
-                                color: skillStyle.color,
-                              }}
-                            >
-                              {skillStyle.text}
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          key={p.name}
-                          style={{
-                            ...styles.playerCardCompact,
-                            ...(isSelected ? styles.playerCardSelected : {}),
-                          }}
-                          onClick={() => togglePlayer(p.name)}
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              togglePlayer(p.name);
-                            }
-                          }}
-                        >
-                          <div style={styles.playerCompactTop}>
-                            <div style={styles.playerNameCompact}>
-                              {displayPlayerName(p)}
-                            </div>
-                            <div
-                              style={{
-                                ...styles.skillMini,
-                                background: skillStyle.background,
-                                color: skillStyle.color,
-                              }}
-                            >
-                              {skillStyle.text}
-                            </div>
-                          </div>
-
-                          <div style={styles.playerCompactBottom}>
-                            <div style={styles.playerCardActions}>
-                              <button
-                                style={styles.editMiniButton}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openEditPlayer(p);
-                                }}
-                              >
-                                {t.edit}
-                              </button>
-
-                              <button
-                                style={styles.archiveMiniButton}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  archivePlayer(p.name);
-                                }}
-                              >
-                                {t.archive}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null}
+                    {renderTeamBuilderPlayerList()}
 
                 {showArchivedPlayers && (
                   <div style={styles.archivedCard}>
@@ -18649,6 +18728,29 @@ const savedRound = readStorageWithTtl(
                     </div>
                   </div>
                 )}
+                  </section>
+
+                  <aside style={styles.teamBuilderResultsPanelV2}>
+                    <div style={styles.teamBuilderPanelHeaderV2}>
+                      <div>
+                        <div style={styles.teamBuilderPanelTitleV2}>
+                          Current round
+                        </div>
+                        <div style={styles.teamBuilderPanelSubtitleV2}>
+                          Generated teams stay separate from Hub and Tournaments.
+                        </div>
+                      </div>
+                      <button
+                        style={styles.secondaryButtonCompact}
+                        onClick={() => setActiveTab("teams")}
+                      >
+                        {t.teams}
+                      </button>
+                    </div>
+
+                    {renderTeamBuilderTeamPreview()}
+                  </aside>
+                </div>
               </>
             )}
           </div>
@@ -18662,62 +18764,49 @@ const savedRound = readStorageWithTtl(
               </div>
             ) : (
               <>
-                <div style={styles.teamBuilderStepRow}>
-                  <div style={styles.workflowSteps}>
-                    <button
-                      type="button"
-                      style={{
-                        ...styles.workflowStepButton,
-                        ...(activeTab === "players"
-                          ? styles.workflowStepButtonActive
-                          : {}),
-                      }}
-                      onClick={() => setActiveTab("players")}
-                    >
-                      {t.players}
-                    </button>
-                    <button
-                      type="button"
-                      style={{
-                        ...styles.workflowStepButton,
-                        ...(activeTab === "teams"
-                          ? styles.workflowStepButtonActive
-                          : {}),
-                      }}
-                      onClick={() => setActiveTab("teams")}
-                    >
-                      {t.teams}
-                    </button>
-                  </div>
-                </div>
+                {renderTeamBuilderHeader()}
+                {renderTeamBuilderStepTabs()}
 
-                <div style={styles.topTeamActionsCompact}>
-                  <button
-                    style={{
-                      ...styles.toolbarIconButtonPrimary,
-                      opacity: teams.length === 0 || loading ? 0.6 : 1,
-                    }}
+                <div style={styles.teamBuilderResultsShellV2}>
+                  <div style={styles.teamBuilderResultsToolbarV2}>
+                    <div>
+                      <div style={styles.teamBuilderPanelTitleV2}>
+                        Generated teams
+                      </div>
+                      <div style={styles.teamBuilderPanelSubtitleV2}>
+                        Drag on desktop, use Move on mobile, and save/export when ready.
+                      </div>
+                    </div>
+
+                    <div style={styles.topTeamActionsCompact}>
+                    <button
+                      style={{
+                        ...styles.teamBuilderActionButtonPrimaryV2,
+                        opacity: teams.length === 0 || loading ? 0.6 : 1,
+                      }}
                     onClick={generateNewRound}
                     disabled={teams.length === 0 || loading}
                     title={t.newRound}
                     aria-label={t.newRound}
-                  >
-                    <SvgIcon type="refresh" size={15} strokeWidth={2.4} />
-                  </button>
+                    >
+                      <SvgIcon type="refresh" size={15} strokeWidth={2.4} />
+                      <span>{t.newRound}</span>
+                    </button>
 
                   {visibleActions.saveRound && (
                     <button
-                      style={{
-                        ...styles.toolbarIconButton,
-                        opacity: teams.length === 0 ? 0.6 : 1,
-                      }}
+                        style={{
+                          ...styles.teamBuilderActionButtonV2,
+                          opacity: teams.length === 0 ? 0.6 : 1,
+                        }}
                       onClick={saveRoundForSixHours}
                       disabled={teams.length === 0}
                       title={t.saveRound}
                       aria-label={t.saveRound}
-                    >
-                      <SvgIcon type="save" size={15} strokeWidth={2.2} />
-                    </button>
+                      >
+                        <SvgIcon type="save" size={15} strokeWidth={2.2} />
+                        <span>{t.saveRound}</span>
+                      </button>
                   )}
 
                   {teams.length >= 3 && (
@@ -18736,33 +18825,36 @@ const savedRound = readStorageWithTtl(
                   )}
 
                   <button
-                    style={styles.toolbarIconButton}
+                    style={styles.teamBuilderActionButtonV2}
                     onClick={() => setShowAddToTeamsModal(true)}
                     disabled={teams.length === 0}
-                    title={t.addPlayer}
-                    aria-label={t.addPlayer}
+                    title="Add late player"
+                    aria-label="Add late player"
                   >
                     <SvgIcon type="plus" size={15} strokeWidth={2.5} />
+                    <span>Add late player</span>
                   </button>
 
                   <button
-                    style={styles.toolbarDangerIconButton}
+                    style={styles.teamBuilderActionButtonDangerV2}
                     onClick={() => setShowRemoveFromTeamsModal(true)}
                     disabled={teams.length === 0}
-                    title={t.removePlayer}
-                    aria-label={t.removePlayer}
+                    title="Remove from round"
+                    aria-label="Remove from round"
                   >
                     <SvgIcon type="minus" size={15} strokeWidth={2.5} />
+                    <span>Remove from round</span>
                   </button>
 
                   {visibleActions.export && teams.length > 0 && (
                     <button
-                      style={styles.toolbarIconButton}
+                      style={styles.teamBuilderActionButtonV2}
                       onClick={() => setShowExportView(true)}
                       title={t.export}
                       aria-label={t.export}
                     >
                       <SvgIcon type="download" size={15} strokeWidth={2.3} />
+                      <span>{t.export}</span>
                     </button>
                   )}
 
@@ -18813,7 +18905,8 @@ const savedRound = readStorageWithTtl(
                       />
                     </button>
                   )}
-                </div>
+                    </div>
+                  </div>
 
                 {matchMode && teams.length >= 3 && (
                   <div style={styles.matchModeCard}>
@@ -18927,6 +19020,23 @@ const savedRound = readStorageWithTtl(
                   </div>
                 )}
 
+                {teamsWithTotals.length === 0 && (
+                  <div style={styles.teamBuilderEmptyStateV2}>
+                    <div style={styles.teamBuilderEmptyTitleV2}>
+                      No generated teams yet
+                    </div>
+                    <div style={styles.teamBuilderPanelSubtitleV2}>
+                      Return to Players, select your group, then generate teams.
+                    </div>
+                    <button
+                      style={styles.primaryButtonSmall}
+                      onClick={() => setActiveTab("players")}
+                    >
+                      {t.players}
+                    </button>
+                  </div>
+                )}
+
                 <div
                   style={{
                     ...styles.teamsGrid,
@@ -18957,6 +19067,12 @@ const savedRound = readStorageWithTtl(
                       <div style={styles.teamHeaderRow}>
                         <div>
                           <div style={styles.teamTitle}>{team.name}</div>
+                          <div style={styles.teamBuilderTeamMetaV2}>
+                            {team.players.length} players / Avg{" "}
+                            {team.players.length
+                              ? (team.total / team.players.length).toFixed(1)
+                              : "-"}
+                          </div>
                           {isMobile && mobileMoveSelection && (
                             <button
                               style={{
@@ -19123,6 +19239,7 @@ const savedRound = readStorageWithTtl(
                       </div>
                     </div>
                   ))}
+                </div>
                 </div>
               </>
             )}
@@ -27445,6 +27562,478 @@ Object.assign(styles, {
     ...styles.publicLiveRail,
     background:
       "linear-gradient(145deg, rgba(15,23,42,0.68), rgba(8,47,73,0.38))",
+  },
+});
+
+Object.assign(styles, {
+  teamBuilderHeroV2: {
+    ...sportsGlassV3,
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))",
+    gap: "clamp(12px, 1.5vw, 18px)",
+    alignItems: "center",
+    borderRadius: "28px",
+    padding: "clamp(16px, 2vw, 22px)",
+    minWidth: 0,
+    overflow: "hidden",
+  },
+  teamBuilderHeroTextV2: {
+    display: "grid",
+    gap: "4px",
+    minWidth: 0,
+  },
+  teamBuilderEyebrowV2: {
+    color: "#7dd3fc",
+    fontSize: "11px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+  teamBuilderHeroTitleV2: {
+    margin: 0,
+    color: "#f8fafc",
+    fontSize: "clamp(28px, 3.2vw, 46px)",
+    lineHeight: 0.95,
+    fontWeight: "950",
+    letterSpacing: 0,
+  },
+  teamBuilderHeroSubtitleV2: {
+    color: "#b9cde3",
+    fontSize: "14px",
+    fontWeight: "800",
+  },
+  teamBuilderStatsGridV2: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 92px), 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+  teamBuilderStatCardV2: {
+    ...sportsRowV3,
+    borderRadius: "16px",
+    padding: "10px",
+    display: "grid",
+    gap: "2px",
+    minHeight: "58px",
+    minWidth: 0,
+  },
+  teamBuilderStatValueV2: {
+    color: "#ecfeff",
+    fontSize: "20px",
+    fontWeight: "950",
+    lineHeight: 1,
+  },
+  teamBuilderStatLabelV2: {
+    color: "#9fb4d0",
+    fontSize: "10px",
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+    overflowWrap: "break-word",
+  },
+  teamBuilderHeroGenerateButtonV2: {
+    border: "1px solid rgba(125,211,252,0.36)",
+    borderRadius: "18px",
+    minHeight: "52px",
+    padding: "0 18px",
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    color: "#03111f",
+    fontSize: "14px",
+    fontWeight: "950",
+    boxShadow: "0 18px 44px rgba(14,165,233,0.28)",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  teamBuilderDashboardGridV2: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 290px), 1fr))",
+    gap: "clamp(12px, 1.3vw, 16px)",
+    alignItems: "start",
+    minWidth: 0,
+  },
+  teamBuilderGeneratePanelV2: {
+    ...sportsGlassSoftV3,
+    order: 2,
+    borderRadius: "24px",
+    padding: "14px",
+    display: "grid",
+    gap: "12px",
+    minWidth: 0,
+  },
+  teamBuilderPoolPanelV2: {
+    ...sportsGlassSoftV3,
+    order: 1,
+    borderRadius: "24px",
+    padding: "14px",
+    display: "grid",
+    gap: "12px",
+    minWidth: 0,
+  },
+  teamBuilderResultsPanelV2: {
+    ...sportsGlassSoftV3,
+    order: 3,
+    borderRadius: "24px",
+    padding: "14px",
+    display: "grid",
+    gap: "12px",
+    minWidth: 0,
+  },
+  teamBuilderPanelHeaderV2: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "10px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  teamBuilderPanelTitleV2: {
+    color: "#ecfeff",
+    fontSize: "15px",
+    fontWeight: "950",
+    lineHeight: 1.1,
+  },
+  teamBuilderPanelSubtitleV2: {
+    color: "#9fb4d0",
+    fontSize: "12px",
+    fontWeight: "750",
+    lineHeight: 1.35,
+    marginTop: "3px",
+    maxWidth: "52ch",
+  },
+  toolbarTop: {
+    ...styles.toolbarTop,
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gap: "10px",
+  },
+  teamCountCard: {
+    ...styles.teamCountCard,
+    padding: "14px",
+    borderRadius: "20px",
+  },
+  teamCountLabel: {
+    ...styles.teamCountLabel,
+    color: "#9fb4d0",
+    fontWeight: "900",
+  },
+  teamCountRow: {
+    ...styles.teamCountRow,
+    alignItems: "stretch",
+  },
+  teamCountInline: {
+    ...styles.teamCountInline,
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(125,211,252,0.16)",
+  },
+  countButton: {
+    ...styles.countButton,
+    minWidth: "38px",
+    width: "38px",
+    height: "38px",
+    background: "rgba(14,165,233,0.15)",
+    border: "1px solid rgba(125,211,252,0.22)",
+    color: "#dff7ff",
+  },
+  countValue: {
+    ...styles.countValue,
+    minWidth: "36px",
+    color: "#ecfeff",
+  },
+  generateButtonInline: {
+    ...styles.generateButtonInline,
+    flex: 1,
+    minHeight: "46px",
+    minWidth: "150px",
+    borderRadius: "16px",
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    color: "#03111f",
+    boxShadow: "0 16px 34px rgba(14,165,233,0.24)",
+  },
+  selectedBadge: {
+    ...styles.selectedBadge,
+    justifyContent: "center",
+    minHeight: "40px",
+    borderRadius: "16px",
+  },
+  settingsCompactRow: {
+    ...styles.settingsCompactRow,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 118px), 1fr))",
+  },
+  filterValueButton: {
+    ...styles.filterValueButton,
+    minHeight: "40px",
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(125,211,252,0.16)",
+    color: "#ecfeff",
+  },
+  actionRow: {
+    ...styles.actionRow,
+    gap: "8px",
+  },
+  playersGrid: {
+    ...styles.playersGrid,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+    gap: "8px",
+  },
+  clubSection: {
+    ...styles.clubSection,
+    gap: "8px",
+  },
+  clubSectionTitle: {
+    ...styles.clubSectionTitle,
+    color: "#bae6fd",
+    fontWeight: "950",
+  },
+  clubSectionPlayers: {
+    ...styles.clubSectionPlayers,
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+    gap: "8px",
+  },
+  playerCardListCompact: {
+    ...styles.playerCardListCompact,
+    minHeight: "58px",
+    padding: "10px",
+    borderRadius: "18px",
+  },
+  playerCardListCompactSelected: {
+    ...styles.playerCardListCompactSelected,
+    background: "rgba(34,197,94,0.14)",
+    border: "1px solid rgba(52,211,153,0.34)",
+    boxShadow: "0 0 0 1px rgba(34,197,94,0.12), 0 14px 30px rgba(2,6,23,0.22)",
+  },
+  playerCardCompact: {
+    ...styles.playerCardCompact,
+    minHeight: "82px",
+    padding: "11px",
+  },
+  playerCompactBottom: {
+    ...styles.playerCompactBottom,
+    justifyContent: "space-between",
+    gap: "8px",
+  },
+  playerListTextV2: {
+    minWidth: 0,
+    display: "grid",
+    gap: "3px",
+    flex: 1,
+  },
+  playerListMetaV2: {
+    color: "#9fb4d0",
+    fontSize: "11px",
+    fontWeight: "750",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  playerListCompactRight: {
+    ...styles.playerListCompactRight,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+  },
+  editMiniButton: {
+    ...styles.editMiniButton,
+    minHeight: "32px",
+    borderRadius: "11px",
+    background: "rgba(14,165,233,0.14)",
+    border: "1px solid rgba(125,211,252,0.22)",
+    color: "#dff7ff",
+    fontWeight: "900",
+  },
+  archiveMiniButton: {
+    ...styles.archiveMiniButton,
+    minHeight: "32px",
+    borderRadius: "11px",
+    background: "rgba(244,63,94,0.15)",
+    border: "1px solid rgba(251,113,133,0.22)",
+    color: "#fecdd3",
+  },
+  teamBuilderTinyStatusV2: {
+    minHeight: "22px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "999px",
+    padding: "0 7px",
+    background: "rgba(148,163,184,0.12)",
+    border: "1px solid rgba(148,163,184,0.14)",
+    color: "#cbd5e1",
+    fontSize: "10px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+    whiteSpace: "nowrap",
+  },
+  teamBuilderTinyStatusActiveV2: {
+    background: "rgba(34,197,94,0.18)",
+    border: "1px solid rgba(52,211,153,0.30)",
+    color: "#bbf7d0",
+  },
+  teamBuilderPreviewListV2: {
+    display: "grid",
+    gap: "9px",
+    minWidth: 0,
+  },
+  teamBuilderPreviewCardV2: {
+    ...sportsRowV3,
+    borderRadius: "18px",
+    padding: "11px",
+    display: "grid",
+    gap: "8px",
+    textAlign: "left",
+    cursor: "pointer",
+    color: "#e5f3ff",
+    minWidth: 0,
+  },
+  teamBuilderPreviewHeaderV2: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "8px",
+    color: "#ecfeff",
+    fontSize: "13px",
+    fontWeight: "950",
+    minWidth: 0,
+  },
+  teamBuilderMetricChipV2: {
+    borderRadius: "999px",
+    padding: "4px 7px",
+    background: "rgba(14,165,233,0.14)",
+    border: "1px solid rgba(125,211,252,0.18)",
+    color: "#bae6fd",
+    fontSize: "10px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+  },
+  teamBuilderPreviewPlayersV2: {
+    display: "flex",
+    gap: "5px",
+    flexWrap: "wrap",
+    color: "#cbd5e1",
+    fontSize: "11px",
+    fontWeight: "800",
+  },
+  teamBuilderEmptyStateV2: {
+    ...sportsRowV3,
+    borderRadius: "20px",
+    padding: "18px",
+    display: "grid",
+    gap: "10px",
+    justifyItems: "start",
+    minWidth: 0,
+  },
+  teamBuilderEmptyTitleV2: {
+    color: "#ecfeff",
+    fontSize: "15px",
+    fontWeight: "950",
+  },
+  teamBuilderResultsShellV2: {
+    ...sportsGlassSoftV3,
+    borderRadius: "24px",
+    padding: "14px",
+    display: "grid",
+    gap: "14px",
+    minWidth: 0,
+  },
+  teamBuilderResultsToolbarV2: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "12px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  topTeamActionsCompact: {
+    ...styles.topTeamActionsCompact,
+    gap: "8px",
+    justifyContent: "flex-end",
+  },
+  teamBuilderActionButtonV2: {
+    border: "1px solid rgba(125,211,252,0.18)",
+    borderRadius: "14px",
+    minHeight: "40px",
+    padding: "0 11px",
+    background: "rgba(14,165,233,0.12)",
+    color: "#dff7ff",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "7px",
+    whiteSpace: "nowrap",
+  },
+  teamBuilderActionButtonPrimaryV2: {
+    border: "1px solid rgba(125,211,252,0.34)",
+    borderRadius: "14px",
+    minHeight: "40px",
+    padding: "0 12px",
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    color: "#03111f",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "7px",
+    whiteSpace: "nowrap",
+    boxShadow: "0 14px 30px rgba(14,165,233,0.24)",
+  },
+  teamBuilderActionButtonDangerV2: {
+    border: "1px solid rgba(251,113,133,0.24)",
+    borderRadius: "14px",
+    minHeight: "40px",
+    padding: "0 11px",
+    background: "rgba(244,63,94,0.14)",
+    color: "#fecdd3",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "7px",
+    whiteSpace: "nowrap",
+  },
+  matchModeCard: {
+    ...styles.matchModeCard,
+    borderRadius: "22px",
+  },
+  matchCard: {
+    ...styles.matchCard,
+    borderRadius: "16px",
+  },
+  teamsGrid: {
+    ...styles.teamsGrid,
+    gap: "12px",
+  },
+  teamCard: {
+    ...styles.teamCard,
+    borderRadius: "22px",
+    padding: "14px",
+  },
+  teamHeaderRow: {
+    ...styles.teamHeaderRow,
+    alignItems: "flex-start",
+    marginBottom: "10px",
+  },
+  teamBuilderTeamMetaV2: {
+    color: "#9fb4d0",
+    fontSize: "11px",
+    fontWeight: "850",
+    marginTop: "3px",
+  },
+  teamPlayerRow: {
+    ...styles.teamPlayerRow,
+    minHeight: "38px",
+    padding: "7px 4px",
+  },
+  smallSelect: {
+    ...styles.smallSelect,
+    background: "rgba(2,6,23,0.44)",
+    border: "1px solid rgba(148,163,184,0.22)",
+    color: "#e5f3ff",
+    colorScheme: "dark",
   },
 });
 
