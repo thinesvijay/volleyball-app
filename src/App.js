@@ -1459,6 +1459,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
 
   const [activeTab, setActiveTab] = useState("players");
+  const [teamBuilderStep, setTeamBuilderStep] = useState("players");
   const [dragging, setDragging] = useState(null);
   const [isMobile, setIsMobile] = useState(
     typeof window !== "undefined" ? window.innerWidth < 900 : true
@@ -9097,6 +9098,17 @@ const savedRound = readStorageWithTtl(
   ]);
 
   useEffect(() => {
+    if (activeTab === "teams" && teamBuilderStep !== "teams") {
+      setTeamBuilderStep("teams");
+      return;
+    }
+
+    if (activeTab === "players" && teamBuilderStep === "teams") {
+      setTeamBuilderStep("players");
+    }
+  }, [activeTab, teamBuilderStep]);
+
+  useEffect(() => {
     const roundCacheKey = getRoundStorageKey(ROUND_CACHE_KEY, auth);
 
     if (!teams.length) {
@@ -9282,6 +9294,16 @@ const savedRound = readStorageWithTtl(
     );
   }
 
+  function openTeamBuilderStep(step) {
+    setTeamBuilderStep(step);
+    setActiveTab(step === "teams" ? "teams" : "players");
+  }
+
+  function clearTeamBuilderSelection() {
+    setSelected([]);
+    setMobileMoveSelection(null);
+  }
+
   async function generateTeams() {
     try {
       setLoading(true);
@@ -9308,6 +9330,7 @@ const savedRound = readStorageWithTtl(
 
       setTeams(normalized);
       setMatchRoundIndex(0);
+      setTeamBuilderStep("teams");
       setActiveTab("teams");
       setMatchMode(false);
       setMobileMoveSelection(null);
@@ -9381,8 +9404,8 @@ const savedRound = readStorageWithTtl(
     localStorage.removeItem(getRoundStorageKey(ROUND_CACHE_KEY, auth));
     localStorage.removeItem(getRoundStorageKey(ROUND_SAVE_KEY, auth));
     setTeams([]);
-    setSelected([]);
-    setMobileMoveSelection(null);
+    clearTeamBuilderSelection();
+    setTeamBuilderStep("players");
     setActiveTab("players");
     alert(t.savedRoundCleared);
   }
@@ -10036,29 +10059,30 @@ const savedRound = readStorageWithTtl(
   }
 
   function renderTeamBuilderStepTabs() {
+    const steps = [
+      { id: "players", label: t.players },
+      { id: "setup", label: "Setup" },
+      { id: "teams", label: t.teams },
+    ];
+
     return (
       <div style={styles.teamBuilderStepRow}>
-        <div style={styles.workflowSteps}>
-          <button
-            type="button"
-            style={{
-              ...styles.workflowStepButton,
-              ...(activeTab === "players" ? styles.workflowStepButtonActive : {}),
-            }}
-            onClick={() => setActiveTab("players")}
-          >
-            {t.players}
-          </button>
-          <button
-            type="button"
-            style={{
-              ...styles.workflowStepButton,
-              ...(activeTab === "teams" ? styles.workflowStepButtonActive : {}),
-            }}
-            onClick={() => setActiveTab("teams")}
-          >
-            {t.teams}
-          </button>
+        <div style={styles.teamBuilderSegmentedTabsV22}>
+          {steps.map((step) => (
+            <button
+              key={step.id}
+              type="button"
+              style={{
+                ...styles.teamBuilderSegmentedTabV22,
+                ...(teamBuilderStep === step.id
+                  ? styles.teamBuilderSegmentedTabActiveV22
+                  : {}),
+              }}
+              onClick={() => openTeamBuilderStep(step.id)}
+            >
+              {step.label}
+            </button>
+          ))}
         </div>
       </div>
     );
@@ -10152,6 +10176,123 @@ const savedRound = readStorageWithTtl(
             </button>
           )}
         </div>
+      </div>
+    );
+  }
+
+  function renderTeamBuilderFilterControls() {
+    return (
+      <div style={styles.settingsCompactRow}>
+        <div style={styles.compactSettingsCard}>
+          <span style={styles.settingsLabel}>{t.skillView}</span>
+          <button
+            style={styles.filterValueButton}
+            onClick={() =>
+              setSkillView((prev) =>
+                prev === "numbers" ? "colors" : "numbers"
+              )
+            }
+            title={t.skillView}
+            aria-label={t.skillView}
+          >
+            <span>{skillView === "numbers" ? "123" : "Colors"}</span>
+            <SvgIcon type="chevron" size={13} strokeWidth={2.4} />
+          </button>
+        </div>
+
+        <div style={styles.compactSettingsCard}>
+          <span style={styles.settingsLabel}>{t.skillScale}</span>
+          <button
+            style={styles.filterValueButton}
+            onClick={() =>
+              setSkillScale((prev) => (prev === 3 ? 5 : 3))
+            }
+            title={t.skillScale}
+            aria-label={t.skillScale}
+          >
+            <span>{skillScale === 3 ? "1-3" : "1-5"}</span>
+            <SvgIcon type="chevron" size={13} strokeWidth={2.4} />
+          </button>
+        </div>
+
+        <div style={styles.compactSettingsCard}>
+          <span style={styles.settingsLabel}>{t.sort}</span>
+          <button
+            style={styles.filterValueButton}
+            onClick={() =>
+              setPlayerSortMode((prev) =>
+                prev === "name" ? "recent" : "name"
+              )
+            }
+            title={t.sort}
+            aria-label={t.sort}
+          >
+            <span>{playerSortMode === "name" ? "A-Z" : "Recent"}</span>
+            <SvgIcon type="chevron" size={13} strokeWidth={2.4} />
+          </button>
+        </div>
+
+        <div style={styles.compactSettingsCard}>
+          <span style={styles.settingsLabel}>{t.club}</span>
+          <button
+            style={styles.filterValueButton}
+            onClick={() =>
+              setPlayerViewMode((prev) =>
+                prev === "all" ? "club" : "all"
+              )
+            }
+            title={t.club}
+            aria-label={t.club}
+          >
+            <span>{playerViewMode === "all" ? t.all : t.club}</span>
+            <SvgIcon type="chevron" size={13} strokeWidth={2.4} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderTeamBuilderMobileActionBar() {
+    if (!isMobile) return null;
+
+    return (
+      <div style={styles.teamBuilderMobileActionBarV22}>
+        <div style={styles.teamBuilderMobileActionMetaV22}>
+          <span>{selected.length}</span>
+          <small>{t.selected || "Selected"}</small>
+        </div>
+
+        <button
+          type="button"
+          style={{
+            ...styles.teamBuilderMobileActionPrimaryV22,
+            opacity: selected.length < 2 || loading ? 0.58 : 1,
+          }}
+          onClick={generateTeams}
+          disabled={selected.length < 2 || loading}
+        >
+          {loading ? t.generating : t.generateTeams}
+        </button>
+
+        {selected.length > 0 && (
+          <button
+            type="button"
+            style={styles.teamBuilderMobileActionButtonV22}
+            onClick={clearTeamBuilderSelection}
+          >
+            Clear
+          </button>
+        )}
+
+        {teams.length > 0 && (
+          <button
+            type="button"
+            style={styles.teamBuilderMobileActionButtonV22}
+            onClick={() => openTeamBuilderStep("teams")}
+          >
+            View Teams
+          </button>
+        )}
       </div>
     );
   }
@@ -19460,7 +19601,7 @@ const savedRound = readStorageWithTtl(
                     ? styles.tabButtonActive
                     : {}),
                 }}
-                onClick={() => setActiveTab(teams.length ? "teams" : "players")}
+                onClick={() => openTeamBuilderStep(teams.length ? "teams" : "players")}
               >
                 {t.teamBuilder}
               </button>
@@ -19627,6 +19768,7 @@ const savedRound = readStorageWithTtl(
                       : styles.teamBuilderDashboardGridDesktopV21),
                   }}
                 >
+                  {(!isMobile || teamBuilderStep === "setup") && (
                   <section
                     style={{
                       ...styles.teamBuilderGeneratePanelV2,
@@ -19696,76 +19838,12 @@ const savedRound = readStorageWithTtl(
                   {renderTeamBuilderSelectedTray()}
                 </div>
 
-                <div style={styles.settingsCompactRow}>
-                  <div style={styles.compactSettingsCard}>
-                    <span style={styles.settingsLabel}>{t.skillView}</span>
-                    <button
-                      style={styles.filterValueButton}
-                      onClick={() =>
-                        setSkillView((prev) =>
-                          prev === "numbers" ? "colors" : "numbers"
-                        )
-                      }
-                      title={t.skillView}
-                      aria-label={t.skillView}
-                    >
-                      <span>{skillView === "numbers" ? "123" : "Colors"}</span>
-                      <SvgIcon type="chevron" size={13} strokeWidth={2.4} />
-                    </button>
-                  </div>
-
-                  <div style={styles.compactSettingsCard}>
-                    <span style={styles.settingsLabel}>{t.skillScale}</span>
-                    <button
-                      style={styles.filterValueButton}
-                      onClick={() =>
-                        setSkillScale((prev) => (prev === 3 ? 5 : 3))
-                      }
-                      title={t.skillScale}
-                      aria-label={t.skillScale}
-                    >
-                      <span>{skillScale === 3 ? "1-3" : "1-5"}</span>
-                      <SvgIcon type="chevron" size={13} strokeWidth={2.4} />
-                    </button>
-                  </div>
-
-                  <div style={styles.compactSettingsCard}>
-                    <span style={styles.settingsLabel}>{t.sort}</span>
-                    <button
-                      style={styles.filterValueButton}
-                      onClick={() =>
-                        setPlayerSortMode((prev) =>
-                          prev === "name" ? "recent" : "name"
-                        )
-                      }
-                      title={t.sort}
-                      aria-label={t.sort}
-                    >
-                      <span>{playerSortMode === "name" ? "A-Z" : "Recent"}</span>
-                      <SvgIcon type="chevron" size={13} strokeWidth={2.4} />
-                    </button>
-                  </div>
-
-                  <div style={styles.compactSettingsCard}>
-                    <span style={styles.settingsLabel}>{t.club}</span>
-                    <button
-                      style={styles.filterValueButton}
-                      onClick={() =>
-                        setPlayerViewMode((prev) =>
-                          prev === "all" ? "club" : "all"
-                        )
-                      }
-                      title={t.club}
-                      aria-label={t.club}
-                    >
-                      <span>{playerViewMode === "all" ? t.all : t.club}</span>
-                      <SvgIcon type="chevron" size={13} strokeWidth={2.4} />
-                    </button>
-                  </div>
-                </div>
+                {renderTeamBuilderFilterControls()}
 
                   </section>
+                  )}
 
+                  {(!isMobile || teamBuilderStep === "players") && (
                   <section
                     style={{
                       ...styles.teamBuilderPoolPanelV2,
@@ -19789,6 +19867,8 @@ const savedRound = readStorageWithTtl(
                     </div>
 
                     {renderTeamBuilderSearchBox()}
+                    {isMobile && renderTeamBuilderSelectedTray()}
+                    {isMobile && renderTeamBuilderFilterControls()}
 
                     <div style={styles.actionRow}>
                   <button
@@ -19908,7 +19988,9 @@ const savedRound = readStorageWithTtl(
                   </div>
                 )}
                   </section>
+                  )}
 
+                  {(!isMobile || teamBuilderStep === "teams") && (
                   <aside
                     style={{
                       ...styles.teamBuilderResultsPanelV2,
@@ -19936,7 +20018,9 @@ const savedRound = readStorageWithTtl(
 
                     {renderTeamBuilderTeamPreview()}
                   </aside>
+                  )}
                 </div>
+                {renderTeamBuilderMobileActionBar()}
               </>
             )}
           </div>
@@ -19965,6 +20049,13 @@ const savedRound = readStorageWithTtl(
                     </div>
 
                     <div style={styles.topTeamActionsCompact}>
+                    <button
+                      style={styles.teamBuilderActionButtonV2}
+                      onClick={() => openTeamBuilderStep("players")}
+                    >
+                      {t.players}
+                    </button>
+
                     <button
                       style={{
                         ...styles.teamBuilderActionButtonPrimaryV2,
@@ -20209,17 +20300,25 @@ const savedRound = readStorageWithTtl(
                 {teamsWithTotals.length === 0 && (
                   <div style={styles.teamBuilderEmptyStateV2}>
                     <div style={styles.teamBuilderEmptyTitleV2}>
-                      No generated teams yet
+                      Generate teams to start a training round.
                     </div>
                     <div style={styles.teamBuilderPanelSubtitleV2}>
-                      Return to Players, select your group, then generate teams.
+                      Select players first, then use Setup to create the round.
                     </div>
-                    <button
-                      style={styles.primaryButtonSmall}
-                      onClick={() => setActiveTab("players")}
-                    >
-                      {t.players}
-                    </button>
+                    <div style={styles.actionRow}>
+                      <button
+                        style={styles.primaryButtonSmall}
+                        onClick={() => openTeamBuilderStep("players")}
+                      >
+                        {t.players}
+                      </button>
+                      <button
+                        style={styles.secondaryButtonCompact}
+                        onClick={() => openTeamBuilderStep("setup")}
+                      >
+                        Setup
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -20427,6 +20526,7 @@ const savedRound = readStorageWithTtl(
                   ))}
                 </div>
                 </div>
+                {renderTeamBuilderMobileActionBar()}
               </>
             )}
           </div>
@@ -29381,6 +29481,38 @@ Object.assign(styles, {
     cursor: "pointer",
     whiteSpace: "nowrap",
   },
+  teamBuilderSegmentedTabsV22: {
+    width: "100%",
+    maxWidth: "430px",
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gap: "4px",
+    padding: "4px",
+    borderRadius: "18px",
+    background: "rgba(2,6,23,0.42)",
+    border: "1px solid rgba(125,211,252,0.16)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.06)",
+    minWidth: 0,
+  },
+  teamBuilderSegmentedTabV22: {
+    minWidth: 0,
+    minHeight: "38px",
+    border: "1px solid transparent",
+    borderRadius: "14px",
+    padding: "0 10px",
+    background: "transparent",
+    color: "#9fb4d0",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  teamBuilderSegmentedTabActiveV22: {
+    background: "linear-gradient(135deg, rgba(56,189,248,0.96), rgba(34,197,94,0.94))",
+    color: "#03111f",
+    border: "1px solid rgba(186,230,253,0.42)",
+    boxShadow: "0 12px 28px rgba(14,165,233,0.22)",
+  },
   teamBuilderDashboardGridV2: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 290px), 1fr))",
@@ -29394,6 +29526,7 @@ Object.assign(styles, {
   },
   teamBuilderDashboardGridMobileV21: {
     gridTemplateColumns: "minmax(0, 1fr)",
+    paddingBottom: "78px",
   },
   teamBuilderGeneratePanelV2: {
     ...sportsGlassSoftV3,
@@ -29887,6 +30020,66 @@ Object.assign(styles, {
     justifyContent: "center",
     gap: "7px",
     whiteSpace: "nowrap",
+  },
+  teamBuilderMobileActionBarV22: {
+    position: "sticky",
+    bottom: "10px",
+    zIndex: 35,
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    flexWrap: "nowrap",
+    minWidth: 0,
+    marginTop: "12px",
+    padding: "8px",
+    borderRadius: "20px",
+    background: "rgba(2,6,23,0.92)",
+    border: "1px solid rgba(125,211,252,0.22)",
+    boxShadow: "0 18px 46px rgba(0,0,0,0.42)",
+    backdropFilter: "blur(18px)",
+    overflowX: "auto",
+    overscrollBehaviorInline: "contain",
+  },
+  teamBuilderMobileActionMetaV22: {
+    minWidth: "58px",
+    minHeight: "44px",
+    borderRadius: "16px",
+    background: "rgba(148,163,184,0.12)",
+    border: "1px solid rgba(148,163,184,0.16)",
+    display: "grid",
+    alignContent: "center",
+    justifyItems: "center",
+    gap: "1px",
+    color: "#ecfeff",
+    fontWeight: "950",
+    flex: "0 0 auto",
+  },
+  teamBuilderMobileActionPrimaryV22: {
+    minHeight: "44px",
+    minWidth: "130px",
+    borderRadius: "16px",
+    border: "1px solid rgba(125,211,252,0.34)",
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    color: "#03111f",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+    flex: "1 0 130px",
+    whiteSpace: "nowrap",
+    boxShadow: "0 14px 30px rgba(14,165,233,0.24)",
+  },
+  teamBuilderMobileActionButtonV22: {
+    minHeight: "44px",
+    borderRadius: "16px",
+    border: "1px solid rgba(125,211,252,0.18)",
+    background: "rgba(14,165,233,0.14)",
+    color: "#dff7ff",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+    padding: "0 10px",
+    whiteSpace: "nowrap",
+    flex: "0 0 auto",
   },
   matchModeCard: {
     ...styles.matchModeCard,
