@@ -2469,6 +2469,8 @@ export default function App() {
     useState("all");
   const [activeMatchControlCourt, setActiveMatchControlCourt] =
     useState("all");
+  const [activeTeamInterestFilter, setActiveTeamInterestFilter] =
+    useState("all");
   const [matchFinishWarnings, setMatchFinishWarnings] = useState({});
   const tournamentAutosaveTimerRef = useRef(null);
   const manualGroupEditingRef = useRef(false);
@@ -8219,6 +8221,7 @@ export default function App() {
     setPromotionVisibilityError("");
     setActiveTournamentSeriesFilter("all");
     setActiveTournamentSetupSeriesId("");
+    setActiveTeamInterestFilter("all");
   }, [activeTournamentId]);
 
   useEffect(() => {
@@ -14965,6 +14968,672 @@ const savedRound = readStorageWithTtl(
       ...(status === "Missing" ? styles.tournamentSetupStatusMissingV2 : {}),
       ...(status === "Optional" ? styles.tournamentSetupStatusOptionalV2 : {}),
     });
+    const teamInterestStatusRank = {
+      Interested: 1,
+      Asking: 2,
+      Submitted: 3,
+      "Change requested": 4,
+      Approved: 5,
+      Locked: 6,
+      Late: 7,
+    };
+    const teamInterestAggregateSource =
+      activeTournament?.teamInterestCounts ||
+      activeTournament?.publicTeamInterestCounts ||
+      activeTournament?.publicReadiness ||
+      activeTournament?.readinessCounts ||
+      {};
+    const safeTeamInterestNumber = (...values) => {
+      const value = values.find((item) => item !== undefined && item !== null);
+      const parsed = Number(value);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    };
+    const getTeamInterestAggregateCounts = () => ({
+      interested: safeTeamInterestNumber(
+        teamInterestAggregateSource.interested,
+        teamInterestAggregateSource.interestedTeams,
+        teamInterestAggregateSource.teamInterest
+      ),
+      asking: safeTeamInterestNumber(
+        teamInterestAggregateSource.availabilityActive,
+        teamInterestAggregateSource.availabilityActiveTeams,
+        teamInterestAggregateSource.availabilityAsked,
+        teamInterestAggregateSource.asking
+      ),
+      submitted: safeTeamInterestNumber(
+        teamInterestAggregateSource.rosterSubmitted,
+        teamInterestAggregateSource.rosterSubmittedTeams,
+        teamInterestAggregateSource.submitted
+      ),
+      approved: safeTeamInterestNumber(
+        teamInterestAggregateSource.confirmed,
+        teamInterestAggregateSource.confirmedTeams,
+        teamInterestAggregateSource.approved,
+        teamInterestAggregateSource.approvedTeams
+      ),
+      locked: safeTeamInterestNumber(
+        teamInterestAggregateSource.locked,
+        teamInterestAggregateSource.lockedTeams
+      ),
+      late: safeTeamInterestNumber(
+        teamInterestAggregateSource.late,
+        teamInterestAggregateSource.lateChanges,
+        teamInterestAggregateSource.lateChangeTeams,
+        teamInterestAggregateSource.changeRequested,
+        teamInterestAggregateSource.changeRequestedTeams
+      ),
+    });
+    const getTeamInterestRawStatus = (source = {}) =>
+      String(
+        source.readinessStatus ||
+          source.rosterStatus ||
+          source.interestStatus ||
+          source.availabilityStatus ||
+          source.planStatus ||
+          source.status ||
+          ""
+      )
+        .trim()
+        .toLowerCase();
+    const getTeamInterestStatus = (source = {}, fallback = "Interested") => {
+      const rawStatus = getTeamInterestRawStatus(source);
+      if (
+        source.late ||
+        source.lateChange ||
+        source.lateChangeRequested ||
+        source.afterRosterLock ||
+        rawStatus.includes("late")
+      ) {
+        return "Late";
+      }
+      if (
+        source.changeRequested ||
+        source.revisionRequested ||
+        rawStatus.includes("change requested") ||
+        rawStatus.includes("revision") ||
+        rawStatus.includes("rejected")
+      ) {
+        return "Change requested";
+      }
+      if (source.locked || rawStatus.includes("locked")) return "Locked";
+      if (
+        source.approved ||
+        source.confirmed ||
+        rawStatus.includes("approved") ||
+        rawStatus.includes("confirmed")
+      ) {
+        return "Approved";
+      }
+      if (
+        source.submitted ||
+        source.rosterSubmitted ||
+        rawStatus.includes("submitted")
+      ) {
+        return "Submitted";
+      }
+      if (
+        source.availabilityActive ||
+        source.availabilityAsked ||
+        source.askingAvailability ||
+        rawStatus.includes("availability") ||
+        rawStatus.includes("asking") ||
+        rawStatus.includes("pending")
+      ) {
+        return "Asking";
+      }
+      if (
+        source.interested ||
+        rawStatus.includes("interested") ||
+        rawStatus.includes("interest")
+      ) {
+        return "Interested";
+      }
+      return fallback;
+    };
+    const getTeamInterestName = (source = {}) =>
+      String(
+        source.teamName ||
+          source.TeamName ||
+          source.name ||
+          source.clubTeamName ||
+          source.clubName ||
+          source.team ||
+          ""
+      ).trim();
+    const getTeamInterestSeriesId = (source = {}, context = {}) =>
+      String(
+        source.seriesId ||
+          source.classId ||
+          source.activeSeriesId ||
+          context.seriesId ||
+          ""
+      ).trim();
+    const getTeamInterestSeriesName = (source = {}, context = {}) =>
+      String(
+        source.seriesName ||
+          source.className ||
+          source.activeSeriesName ||
+          context.seriesName ||
+          ""
+      ).trim();
+    const formatTeamInterestTimestamp = (value) => {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      const parsed = new Date(raw);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toLocaleString(
+          language === "no" ? "nb-NO" : language === "dk" ? "da-DK" : "en-US",
+          {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          }
+        );
+      }
+      return raw.replace("T", " ").slice(0, 16);
+    };
+    const getTeamInterestPlayerCount = (source = {}) => {
+      const explicitCount = [
+        source.playerCount,
+        source.playersCount,
+        source.rosterPlayerCount,
+        source.rosterCount,
+        source.confirmedPlayerCount,
+      ].find((value) => value !== undefined && value !== null && value !== "");
+      const parsedCount = Number(explicitCount);
+      if (Number.isFinite(parsedCount) && parsedCount >= 0) return parsedCount;
+
+      const playerList = [
+        source.players,
+        source.rosterPlayers,
+        source.roster,
+        source.members,
+      ].find((value) => Array.isArray(value));
+      return Array.isArray(playerList) ? playerList.length : null;
+    };
+    const normalizeTeamInterestEntry = (
+      source = {},
+      origin = "team",
+      context = {}
+    ) => {
+      const name = getTeamInterestName(source);
+      if (!name) return null;
+
+      const seriesId = getTeamInterestSeriesId(source, context);
+      const seriesName = getTeamInterestSeriesName(source, context);
+      const series =
+        tournamentSeriesClasses.find(
+          (item) => String(item.id) === String(seriesId)
+        ) ||
+        tournamentSeriesClasses.find(
+          (item) =>
+            String(getSeriesDisplayName(item)).toLowerCase() ===
+            String(seriesName).toLowerCase()
+        ) ||
+        null;
+      const teamId = String(
+        source.teamId ||
+          source.TeamId ||
+          source.sourceTeamId ||
+          source.planId ||
+          source.rosterId ||
+          source.rosterDraftId ||
+          source.id ||
+          ""
+      ).trim();
+      const status = getTeamInterestStatus(
+        source,
+        origin === "roster" ? "Submitted" : "Interested"
+      );
+      const submittedAt =
+        source.submittedAt ||
+        source.rosterSubmittedAt ||
+        source.submittedTime ||
+        source.updatedAt ||
+        source.createdAt ||
+        "";
+      const captainLabel = String(
+        source.captainName ||
+          source.captainUsername ||
+          source.contactName ||
+          source.contact ||
+          source.registeredBy ||
+          ""
+      ).trim();
+      const deadline = series
+        ? getSeriesRosterDeadline(series)
+        : activeRosterLock.enabled
+          ? defaultRosterDeadline
+          : "";
+
+      return {
+        id:
+          teamId ||
+          `${seriesId || seriesName || "series"}-${name}`.toLowerCase(),
+        name,
+        status,
+        origin,
+        seriesId: series?.id || seriesId,
+        seriesName: series ? getSeriesDisplayName(series) : seriesName,
+        playerCount: getTeamInterestPlayerCount(source),
+        submittedAt: formatTeamInterestTimestamp(submittedAt),
+        captainLabel,
+        deadline,
+        hasRosterSignal: Boolean(
+          source.rosterId ||
+            source.rosterDraftId ||
+            source.rosterSubmitted ||
+            source.submitted ||
+            status === "Submitted" ||
+            status === "Approved" ||
+            status === "Locked" ||
+            status === "Late" ||
+            status === "Change requested"
+        ),
+        hasAvailabilitySignal: Boolean(
+          source.availabilityActive ||
+            source.availabilityAsked ||
+            source.askingAvailability ||
+            status === "Asking"
+        ),
+      };
+    };
+    const mergeTeamInterestEntries = (entries) => {
+      const byKey = new Map();
+      entries.filter(Boolean).forEach((entry) => {
+        const key =
+          entry.id ||
+          `${entry.seriesId || entry.seriesName || "series"}-${entry.name}`.toLowerCase();
+        const existing = byKey.get(key);
+        if (!existing) {
+          byKey.set(key, entry);
+          return;
+        }
+
+        const nextStatus =
+          (teamInterestStatusRank[entry.status] || 0) >
+          (teamInterestStatusRank[existing.status] || 0)
+            ? entry.status
+            : existing.status;
+        byKey.set(key, {
+          ...existing,
+          ...entry,
+          status: nextStatus,
+          playerCount:
+            entry.playerCount !== null && entry.playerCount !== undefined
+              ? Math.max(Number(existing.playerCount || 0), Number(entry.playerCount))
+              : existing.playerCount,
+          submittedAt: entry.submittedAt || existing.submittedAt,
+          captainLabel: entry.captainLabel || existing.captainLabel,
+          deadline: entry.deadline || existing.deadline,
+          hasRosterSignal: existing.hasRosterSignal || entry.hasRosterSignal,
+          hasAvailabilitySignal:
+            existing.hasAvailabilitySignal || entry.hasAvailabilitySignal,
+        });
+      });
+
+      return Array.from(byKey.values()).sort((left, right) => {
+        const rankDiff =
+          (teamInterestStatusRank[right.status] || 0) -
+          (teamInterestStatusRank[left.status] || 0);
+        if (rankDiff) return rankDiff;
+        return left.name.localeCompare(right.name);
+      });
+    };
+    const collectTeamInterestRows = () => {
+      const rows = [];
+      const addRows = (items, origin, context = {}) => {
+        if (!Array.isArray(items)) return;
+        items.forEach((item) => {
+          const entry = normalizeTeamInterestEntry(item, origin, context);
+          if (entry) rows.push(entry);
+        });
+      };
+      const rootSources = [
+        ["teams", "team"],
+        ["teamInterests", "interest"],
+        ["interestedTeams", "interest"],
+        ["teamRegistrations", "registration"],
+        ["registrations", "registration"],
+        ["tournamentPlans", "plan"],
+        ["teamPlans", "plan"],
+        ["plans", "plan"],
+        ["rosterDrafts", "roster"],
+        ["rosters", "roster"],
+        ["rosterStatuses", "roster"],
+      ];
+
+      rootSources.forEach(([key, origin]) => addRows(activeTournament?.[key], origin));
+      rootSources.forEach(([key, origin]) =>
+        addRows(activeTournament?.playerHub?.[key], origin)
+      );
+
+      allSeriesSections.forEach((section) => {
+        const context = {
+          seriesId: section.series.id,
+          seriesName: getSeriesDisplayName(section.series),
+        };
+        rootSources.forEach(([key, origin]) => addRows(section.series?.[key], origin, context));
+        (section.groups || []).forEach((group) =>
+          addRows(group.teams, "group", context)
+        );
+      });
+
+      return mergeTeamInterestEntries(rows);
+    };
+    const allTeamInterestRows = collectTeamInterestRows();
+    const classFilteredTeamInterestRows = allTeamInterestRows.filter((entry) => {
+      if (
+        !hasExplicitTournamentSeries(activeTournament) ||
+        activeTournamentSeriesFilter === "all"
+      ) {
+        return true;
+      }
+      return String(entry.seriesId || "") === String(activeTournamentSeriesFilter);
+    });
+    const teamInterestStatusMatchesFilter = (entry) => {
+      if (activeTeamInterestFilter === "all") return true;
+      if (activeTeamInterestFilter === "late") {
+        return ["Late", "Change requested"].includes(entry.status);
+      }
+      if (activeTeamInterestFilter === "approved") {
+        return entry.status === "Approved";
+      }
+      if (activeTeamInterestFilter === "locked") return entry.status === "Locked";
+      if (activeTeamInterestFilter === "submitted") {
+        return entry.status === "Submitted";
+      }
+      if (activeTeamInterestFilter === "interested") {
+        return entry.status === "Interested";
+      }
+      return true;
+    };
+    const visibleTeamInterestRows = classFilteredTeamInterestRows.filter(
+      teamInterestStatusMatchesFilter
+    );
+    const countTeamInterestRows = (rows) =>
+      rows.reduce(
+        (counts, entry) => ({
+          interested:
+            counts.interested + (entry.status === "Interested" ? 1 : 0),
+          asking: counts.asking + (entry.status === "Asking" ? 1 : 0),
+          submitted: counts.submitted + (entry.status === "Submitted" ? 1 : 0),
+          approved: counts.approved + (entry.status === "Approved" ? 1 : 0),
+          locked: counts.locked + (entry.status === "Locked" ? 1 : 0),
+          late:
+            counts.late +
+            (entry.status === "Late" || entry.status === "Change requested"
+              ? 1
+              : 0),
+        }),
+        {
+          interested: 0,
+          asking: 0,
+          submitted: 0,
+          approved: 0,
+          locked: 0,
+          late: 0,
+        }
+      );
+    const aggregateTeamInterestCounts = getTeamInterestAggregateCounts();
+    const rowTeamInterestCounts = countTeamInterestRows(
+      classFilteredTeamInterestRows
+    );
+    const hasAggregateTeamInterestSignal = Object.values(
+      aggregateTeamInterestCounts
+    ).some((value) => Number(value || 0) > 0);
+    const teamInterestSummaryCounts =
+      hasAggregateTeamInterestSignal && activeTournamentSeriesFilter === "all"
+        ? aggregateTeamInterestCounts
+        : rowTeamInterestCounts;
+    const teamInterestSummaryItems = [
+      {
+        key: "interested",
+        label: tournamentText.interestedTeamsLabel,
+        value: teamInterestSummaryCounts.interested,
+      },
+      {
+        key: "asking",
+        label: "Asking availability",
+        value: teamInterestSummaryCounts.asking,
+      },
+      {
+        key: "submitted",
+        label: tournamentText.rosterSubmittedLabel,
+        value: teamInterestSummaryCounts.submitted,
+      },
+      {
+        key: "approved",
+        label: "Confirmed / Approved",
+        value: teamInterestSummaryCounts.approved,
+      },
+      {
+        key: "locked",
+        label: tournamentText.lockedTeamsLabel,
+        value: teamInterestSummaryCounts.locked,
+      },
+      {
+        key: "late",
+        label: "Late changes",
+        value: teamInterestSummaryCounts.late,
+      },
+    ];
+    const teamInterestFilterOptions = [
+      { id: "all", label: "All" },
+      { id: "interested", label: "Interested" },
+      { id: "submitted", label: "Submitted" },
+      { id: "approved", label: "Approved" },
+      { id: "locked", label: "Locked" },
+      { id: "late", label: "Late / needs review" },
+    ];
+    const getTeamInterestStatusStyle = (status) => ({
+      ...styles.tournamentTeamInterestStatusChipV1,
+      ...(status === "Interested"
+        ? styles.tournamentTeamInterestStatusInterestedV1
+        : {}),
+      ...(status === "Asking"
+        ? styles.tournamentTeamInterestStatusAskingV1
+        : {}),
+      ...(status === "Submitted"
+        ? styles.tournamentTeamInterestStatusSubmittedV1
+        : {}),
+      ...(status === "Approved"
+        ? styles.tournamentTeamInterestStatusApprovedV1
+        : {}),
+      ...(status === "Locked"
+        ? styles.tournamentTeamInterestStatusLockedV1
+        : {}),
+      ...(status === "Late" || status === "Change requested"
+        ? styles.tournamentTeamInterestStatusLateV1
+        : {}),
+    });
+    const openTeamInterestPlan = (entry) => {
+      setActiveTournamentView("groups");
+      if (entry.seriesId) {
+        setActiveTournamentSeriesFilter(entry.seriesId);
+        setActiveTournamentSetupSeriesId(entry.seriesId);
+      }
+    };
+    const openTeamInterestPlayerHub = () => {
+      if (hasPlayerHubAccess) setActiveTab("player-hub");
+    };
+    const renderTournamentTeamInterestBoard = () => (
+      <div style={styles.tournamentTeamInterestBoardV1}>
+        <div style={styles.tournamentSectionHeader}>
+          <div>
+            <div style={styles.tournamentEyebrow}>Team interest</div>
+            <div style={styles.tournamentSectionTitle}>
+              {tournamentText.teamReadinessTitle}
+            </div>
+            <div style={styles.tournamentMutedText}>
+              {tournamentText.teamReadinessSubtitle}
+            </div>
+          </div>
+          <span style={styles.tournamentStatusBadge}>
+            {visibleTeamInterestRows.length}/{classFilteredTeamInterestRows.length}
+          </span>
+        </div>
+
+        <div style={styles.tournamentTeamInterestSummaryGridV1}>
+          {teamInterestSummaryItems.map((item) => (
+            <div
+              key={`team-interest-summary-${item.key}`}
+              style={styles.tournamentTeamInterestSummaryCardV1}
+            >
+              <strong>{item.value}</strong>
+              <span>{item.label}</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={styles.tournamentTeamInterestFilterRowV1}>
+          {teamInterestFilterOptions.map((option) => (
+            <button
+              key={`team-interest-filter-${option.id}`}
+              type="button"
+              style={{
+                ...styles.tournamentMatchControlFilterButtonV2,
+                ...(activeTeamInterestFilter === option.id
+                  ? styles.tournamentMatchControlFilterButtonActiveV2
+                  : {}),
+              }}
+              onClick={() => setActiveTeamInterestFilter(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+
+          {hasTournamentClassFilters && (
+            <>
+              <button
+                type="button"
+                style={{
+                  ...styles.tournamentMatchControlFilterButtonV2,
+                  ...(activeTournamentSeriesFilter === "all"
+                    ? styles.tournamentMatchControlFilterButtonActiveV2
+                    : {}),
+                }}
+                onClick={() => setActiveTournamentSeriesFilter("all")}
+              >
+                {tournamentText.allClassesLabel}
+              </button>
+              {tournamentSeriesClasses.map((series) => (
+                <button
+                  key={`team-interest-series-${series.id}`}
+                  type="button"
+                  style={{
+                    ...styles.tournamentMatchControlFilterButtonV2,
+                    ...(String(activeTournamentSeriesFilter) === String(series.id)
+                      ? styles.tournamentMatchControlFilterButtonActiveV2
+                      : {}),
+                  }}
+                  onClick={() => {
+                    setActiveTournamentSeriesFilter(series.id);
+                    setActiveTournamentSetupSeriesId(series.id);
+                  }}
+                >
+                  {getSeriesShortLabel(series)}
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+
+        {visibleTeamInterestRows.length > 0 ? (
+          <div style={styles.tournamentTeamInterestListV1}>
+            {visibleTeamInterestRows.map((entry) => (
+              <article
+                key={`team-interest-row-${entry.id}`}
+                style={styles.tournamentTeamInterestCardV1}
+              >
+                <div style={styles.tournamentTeamInterestCardTopV1}>
+                  <div style={styles.tournamentTeamInterestNameBlockV1}>
+                    <strong>{entry.name}</strong>
+                    <span>
+                      {entry.seriesName || "Class not set"}
+                      {entry.captainLabel ? ` - ${entry.captainLabel}` : ""}
+                    </span>
+                  </div>
+                  <span style={getTeamInterestStatusStyle(entry.status)}>
+                    {entry.status}
+                  </span>
+                </div>
+
+                <div style={styles.tournamentTeamInterestMetaRowV1}>
+                  {entry.seriesName && (
+                    <span style={styles.tournamentTeamInterestMetaChipV1}>
+                      {entry.seriesName}
+                    </span>
+                  )}
+                  {entry.playerCount !== null &&
+                    entry.playerCount !== undefined && (
+                      <span style={styles.tournamentTeamInterestMetaChipV1}>
+                        {entry.playerCount} players
+                      </span>
+                    )}
+                  {entry.submittedAt && (
+                    <span style={styles.tournamentTeamInterestMetaChipV1}>
+                      Submitted {entry.submittedAt}
+                    </span>
+                  )}
+                  {activeRosterLock.enabled && entry.deadline && (
+                    <span style={styles.tournamentTeamInterestMetaChipWarnV1}>
+                      Lock {entry.deadline}
+                    </span>
+                  )}
+                </div>
+
+                <div style={styles.tournamentTeamInterestActionsV1}>
+                  <button
+                    type="button"
+                    style={styles.secondaryButtonCompact}
+                    onClick={() => openTeamInterestPlan(entry)}
+                  >
+                    Open plan
+                  </button>
+                  {entry.hasAvailabilitySignal && hasPlayerHubAccess && (
+                    <button
+                      type="button"
+                      style={styles.secondaryButtonCompact}
+                      onClick={openTeamInterestPlayerHub}
+                    >
+                      View availability
+                    </button>
+                  )}
+                  {entry.hasRosterSignal && currentUserIsAdmin && hasPlayerHubAccess && (
+                    <button
+                      type="button"
+                      style={styles.primaryButtonSmall}
+                      onClick={openTeamInterestPlayerHub}
+                    >
+                      Review roster
+                    </button>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : hasAggregateTeamInterestSignal ? (
+          <div style={styles.tournamentMutedPanel}>
+            Team readiness counts are available, but team rows are not loaded in
+            this workspace.
+          </div>
+        ) : (
+          <div style={styles.tournamentMutedPanel}>
+            <strong>No team interest yet.</strong>
+            <span>
+              Teams appear here when captains start availability or roster
+              planning.
+            </span>
+          </div>
+        )}
+
+        <div style={styles.tournamentMutedText}>
+          {tournamentText.publicCountsPrivacyNote}
+        </div>
+      </div>
+    );
     const renderTournamentSetupProgress = () => (
       <div style={styles.tournamentSetupProgressCardV2}>
         <div style={styles.tournamentSectionHeader}>
@@ -18536,6 +19205,9 @@ const savedRound = readStorageWithTtl(
                     )}
 
                     {activeTournamentView === "table" && (
+                      <>
+                      {renderTournamentTeamInterestBoard()}
+
                       <div style={styles.tournamentSurface}>
                         <div style={styles.tournamentSectionHeader}>
                           <div>
@@ -18656,6 +19328,7 @@ const savedRound = readStorageWithTtl(
                           </div>
                         )}
                       </div>
+                      </>
                     )}
 
                     {activeTournamentView === "sharing" && (
@@ -30067,6 +30740,138 @@ Object.assign(styles, {
     textAlign: "left",
     color: "#dff7ff",
     cursor: "pointer",
+    minWidth: 0,
+  },
+  tournamentTeamInterestBoardV1: {
+    ...sportsGlassV3,
+    display: "grid",
+    gap: "14px",
+    borderRadius: "24px",
+    padding: "14px",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  tournamentTeamInterestSummaryGridV1: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 112px), 1fr))",
+    gap: "9px",
+    minWidth: 0,
+  },
+  tournamentTeamInterestSummaryCardV1: {
+    ...sportsRowV3,
+    borderRadius: "16px",
+    padding: "11px",
+    display: "grid",
+    gap: "4px",
+    minWidth: 0,
+  },
+  tournamentTeamInterestFilterRowV1: {
+    display: "flex",
+    alignItems: "center",
+    gap: "7px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  tournamentTeamInterestListV1: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+    gap: "10px",
+    minWidth: 0,
+  },
+  tournamentTeamInterestCardV1: {
+    ...sportsRowV3,
+    display: "grid",
+    gap: "10px",
+    borderRadius: "20px",
+    padding: "12px",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  tournamentTeamInterestCardTopV1: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "10px",
+    minWidth: 0,
+  },
+  tournamentTeamInterestNameBlockV1: {
+    display: "grid",
+    gap: "3px",
+    minWidth: 0,
+    color: "#ecfeff",
+  },
+  tournamentTeamInterestStatusChipV1: {
+    borderRadius: "999px",
+    padding: "5px 8px",
+    background: "rgba(148,163,184,0.13)",
+    border: "1px solid rgba(148,163,184,0.16)",
+    color: "#cbd5e1",
+    fontSize: "10px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+    whiteSpace: "nowrap",
+  },
+  tournamentTeamInterestStatusInterestedV1: {
+    background: "rgba(14,165,233,0.17)",
+    border: "1px solid rgba(125,211,252,0.28)",
+    color: "#bae6fd",
+  },
+  tournamentTeamInterestStatusAskingV1: {
+    background: "rgba(245,158,11,0.16)",
+    border: "1px solid rgba(251,191,36,0.26)",
+    color: "#fde68a",
+  },
+  tournamentTeamInterestStatusSubmittedV1: {
+    background: "rgba(99,102,241,0.18)",
+    border: "1px solid rgba(129,140,248,0.28)",
+    color: "#c7d2fe",
+  },
+  tournamentTeamInterestStatusApprovedV1: {
+    background: "rgba(34,197,94,0.18)",
+    border: "1px solid rgba(52,211,153,0.30)",
+    color: "#bbf7d0",
+  },
+  tournamentTeamInterestStatusLockedV1: {
+    background: "rgba(20,184,166,0.18)",
+    border: "1px solid rgba(45,212,191,0.30)",
+    color: "#99f6e4",
+  },
+  tournamentTeamInterestStatusLateV1: {
+    background: "rgba(244,63,94,0.16)",
+    border: "1px solid rgba(251,113,133,0.28)",
+    color: "#fecdd3",
+  },
+  tournamentTeamInterestMetaRowV1: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    minWidth: 0,
+  },
+  tournamentTeamInterestMetaChipV1: {
+    borderRadius: "999px",
+    padding: "5px 8px",
+    background: "rgba(14,165,233,0.12)",
+    border: "1px solid rgba(125,211,252,0.18)",
+    color: "#bae6fd",
+    fontSize: "10px",
+    fontWeight: "900",
+    whiteSpace: "nowrap",
+  },
+  tournamentTeamInterestMetaChipWarnV1: {
+    borderRadius: "999px",
+    padding: "5px 8px",
+    background: "rgba(245,158,11,0.14)",
+    border: "1px solid rgba(251,191,36,0.22)",
+    color: "#fde68a",
+    fontSize: "10px",
+    fontWeight: "900",
+    whiteSpace: "nowrap",
+  },
+  tournamentTeamInterestActionsV1: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "7px",
     minWidth: 0,
   },
   tournamentScheduleCourt: {
