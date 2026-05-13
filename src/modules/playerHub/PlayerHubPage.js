@@ -3000,6 +3000,131 @@ Object.assign(playerHubStyles, {
 });
 
 Object.assign(playerHubStyles, {
+  homeDashboardGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))",
+    gap: "14px",
+    alignItems: "start",
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  homeActionStack: {
+    display: "grid",
+    gap: "12px",
+    alignItems: "start",
+    minWidth: 0,
+  },
+  homeNextActionCard: {
+    ...hubGlassPanel,
+    display: "grid",
+    gap: "13px",
+    padding: "16px",
+    borderRadius: "24px",
+    background:
+      "linear-gradient(145deg, rgba(14,165,233,0.18), rgba(15,23,42,0.88) 48%, rgba(52,211,153,0.12))",
+    minWidth: 0,
+  },
+  homeNextActionTitle: {
+    color: hubDarkPalette.text,
+    fontSize: "21px",
+    lineHeight: 1.12,
+    fontWeight: "950",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  homeNextActionText: {
+    color: hubDarkPalette.muted,
+    fontSize: "13px",
+    lineHeight: 1.38,
+    fontWeight: "750",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  homePrimaryButton: {
+    ...playerHubStyles.saveButton,
+    justifySelf: "start",
+    minHeight: "44px",
+    padding: "11px 15px",
+    fontSize: "13px",
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    borderColor: "rgba(125,211,252,0.34)",
+    color: "#04111f",
+  },
+  homeSecondaryButton: {
+    ...playerHubStyles.adminActionButton,
+    minHeight: "42px",
+    padding: "10px 13px",
+    fontSize: "12px",
+  },
+  homeQuickStatsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: "7px",
+    minWidth: 0,
+  },
+  homeQuickStatCard: {
+    ...hubGlassRow,
+    display: "grid",
+    gap: "4px",
+    padding: "10px 9px",
+    borderRadius: "15px",
+    minWidth: 0,
+  },
+  homeQuickStatValue: {
+    color: hubDarkPalette.text,
+    fontSize: "19px",
+    lineHeight: 1,
+    fontWeight: "950",
+  },
+  homeQuickStatLabel: {
+    color: hubDarkPalette.muted,
+    fontSize: "10px",
+    lineHeight: 1.15,
+    fontWeight: "900",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+    overflowWrap: "break-word",
+  },
+  homePreviewCard: {
+    ...hubGlassPanelSoft,
+    display: "grid",
+    gap: "10px",
+    padding: "14px",
+    borderRadius: "22px",
+    minWidth: 0,
+  },
+  homePreviewList: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  homePreviewRow: {
+    ...hubGlassRow,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "10px",
+    alignItems: "center",
+    padding: "10px 11px",
+    borderRadius: "16px",
+    minWidth: 0,
+  },
+  homeCaptainTaskRow: {
+    ...hubGlassRow,
+    display: "grid",
+    gap: "7px",
+    padding: "10px 11px",
+    borderRadius: "16px",
+    minWidth: 0,
+  },
+  homeCardActions: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+    alignItems: "center",
+    minWidth: 0,
+  },
   passportShell: {
     ...hubGlassPanel,
     display: "grid",
@@ -8771,6 +8896,9 @@ export default function PlayerHubPage({
     passportTrainerRole ? "Trainer" : "",
     isAdmin ? "Admin" : "",
   ].filter(Boolean);
+  const homeSummaryBadges = Array.from(
+    new Set([...passportRoleBadges, ...profileBadges])
+  ).slice(0, 4);
   const passportMemberSince = formatCompactDate(
     primaryConfirmedTeam?.memberSince ||
       primaryConfirmedTeam?.confirmedAt ||
@@ -8802,6 +8930,125 @@ export default function PlayerHubPage({
     ["Player ads", passportStats.playerAdsInterestsCount],
   ];
   const dedupedTournamentPlans = uniqueEventItems(tournamentPlans);
+  const homeQuickStats = [
+    ["Teams", passportStats.teamMembershipCount],
+    ["Invites", passportStats.eventInvitationsCount],
+    ["Going", passportStats.goingResponsesCount],
+    ["Pending", passportStats.pendingResponsesCount],
+  ];
+  const pendingAvailabilityBundle = playerDashboardEvents.find((bundle) => {
+    const status = normalizeTournamentAvailabilityStatus(
+      bundle?.availability?.responseStatus ||
+        bundle?.availability?.availabilityStatus ||
+        bundle?.planning?.availabilityStatus
+    );
+    return Boolean(bundle?.availability) && status === "PENDING";
+  });
+  const approvedRosterBundle = playerDashboardEvents.find((bundle) => {
+    const status = normalizeRosterStatus(
+      bundle?.roster?.rosterStatus || bundle?.roster?.status
+    );
+    return Boolean(bundle?.roster) && (status === "APPROVED" || status === "LOCKED");
+  });
+  const captainHomeFlow = canManageTeamProfile
+    ? buildCaptainTournamentFlow()
+    : null;
+  const captainHomeSteps = captainHomeFlow
+    ? buildCaptainChecklistSteps(captainHomeFlow)
+    : [];
+  const captainHomeOpenTasks = captainHomeSteps.filter(
+    (step) => step.status !== "done" && step.status !== "coming-soon"
+  );
+  const captainHomeNextTask =
+    captainHomeOpenTasks.find((step) => step.status === "next") ||
+    captainHomeOpenTasks.find((step) => step.status === "pending") ||
+    captainHomeOpenTasks.find((step) => step.status === "blocked") ||
+    captainHomeOpenTasks[0] ||
+    null;
+  const captainHasHomeChecklistAction = Boolean(
+    canManageTeamProfile &&
+      captainHomeNextTask &&
+      (captainHomeFlow?.plan || captainHomeFlow?.hasTournamentOptions)
+  );
+  const homeProfileComplete = Boolean(
+    passportText(savedProfilePreview.displayName, username) &&
+      passportText(savedProfilePreview.country) &&
+      passportText(savedProfilePreview.profileType) &&
+      (savedProfilePreview.freeAgent ||
+        selectedProfileClubTeamId ||
+        primaryConfirmedTeam)
+  );
+  const homeNeedsProfileAction = !homeProfileComplete || needsClubTeamSetup;
+  const homeRecentActivityItems = passportActivityItems.slice(0, 2);
+  const pendingAvailabilityEvent = pendingAvailabilityBundle
+    ? mergeEventRows(
+        mergeEventRows(
+          pendingAvailabilityBundle.base,
+          pendingAvailabilityBundle.planning
+        ),
+        pendingAvailabilityBundle.availability
+      )
+    : null;
+  const approvedRosterEvent = approvedRosterBundle
+    ? mergeEventRows(
+        mergeEventRows(
+          approvedRosterBundle.base,
+          approvedRosterBundle.planning
+        ),
+        approvedRosterBundle.roster
+      )
+    : null;
+  const homeNextAction = pendingAvailabilityBundle
+    ? {
+        title: "Respond to availability",
+        detail: [
+          pendingAvailabilityEvent?.tournamentName || "Tournament",
+          eventMetaText(pendingAvailabilityEvent),
+        ]
+          .filter(Boolean)
+          .join(" / "),
+        button: "Open Events",
+        target: "events",
+        status: "Pending",
+      }
+    : approvedRosterBundle
+      ? {
+          title: "View roster",
+          detail: [
+            approvedRosterEvent?.tournamentName || "Tournament",
+            eventMetaText(approvedRosterEvent),
+          ]
+            .filter(Boolean)
+            .join(" / "),
+          button: "Open Events",
+          target: "events",
+          status: "Roster ready",
+        }
+      : captainHasHomeChecklistAction
+        ? {
+            title: "Continue captain checklist",
+            detail: captainHomeNextTask?.detail || "Open Team to continue.",
+            button: "Open Team",
+            target: "team",
+            status: captainChecklistStatusLabel(captainHomeNextTask?.status),
+          }
+        : homeNeedsProfileAction
+          ? {
+              title: "Complete profile",
+              detail: needsClubTeamSetup
+                ? "Choose a club/team or mark yourself as no fixed club/team."
+                : "Add the core details captains and organizers need.",
+              button: "Edit profile",
+              target: "profile",
+              status: "Profile",
+            }
+          : {
+              title: "No urgent actions",
+              detail: "You are caught up for now.",
+              button: "View activity",
+              target: "events",
+              status: "Clear",
+            };
   const selectedTournamentAdOption = tournamentOptions.find(
     (option) =>
       String(option.id || option.tournamentId || option.name || "") ===
@@ -8976,14 +9223,11 @@ export default function PlayerHubPage({
   const showHubTeam = activeHubTab === "team";
   const showHubPlayers = activeHubTab === "players";
   const showHubAdmin = activeHubTab === "admin" && canOpenAdminHubTab;
-  const showPlayerEventArea = showHubHome || showHubEvents;
-  const showTeamOverviewArea = showHubHome || showHubTeam;
-  const showTeamControlArea =
-    canManageTeamProfile &&
-    (showHubHome || showHubEvents || showHubTeam || showHubPlayers);
-  const showCaptainChecklist =
-    canManageTeamProfile && (showHubEvents || showHubTeam);
-  const showPlayerAdsArea = showHubHome || showHubPlayers;
+  const showPlayerEventArea = showHubEvents;
+  const showTeamOverviewArea = showHubTeam;
+  const showTeamControlArea = canManageTeamProfile && showHubTeam;
+  const showCaptainChecklist = canManageTeamProfile && showHubTeam;
+  const showPlayerAdsArea = showHubPlayers;
   const adminRosterDuplicateWarningsByRosterId =
     buildAdminRosterDuplicateWarnings(adminTournamentRosterDrafts);
 
@@ -9001,6 +9245,21 @@ export default function PlayerHubPage({
       Promise.resolve(card.load()).finally(() => {
         logPlayerHubTiming(`admin section ${card.id}`, startedAt);
       });
+    }
+  }
+
+  function handleHomeNextAction() {
+    if (homeNextAction.target === "profile") {
+      setActiveProfileEditorTab(needsClubTeamSetup ? "team" : "basic");
+      setShowProfileEditor(true);
+      return;
+    }
+    if (homeNextAction.target === "team") {
+      setActiveHubTab("team");
+      return;
+    }
+    if (homeNextAction.target === "events") {
+      setActiveHubTab("events");
     }
   }
 
@@ -9084,7 +9343,8 @@ export default function PlayerHubPage({
         </form>
       ) : null}
 
-      <section style={playerHubStyles.playerHomeGrid}>
+      {showHubHome ? (
+      <section style={playerHubStyles.homeDashboardGrid}>
         <section style={playerHubStyles.playerHeroCard}>
           {hasProfilePreview ? (
             <article style={playerHubStyles.profilePreviewCard}>
@@ -9111,9 +9371,9 @@ export default function PlayerHubPage({
                     ) : null}
                   </div>
                 </div>
-                {profileBadges.length ? (
+                {homeSummaryBadges.length ? (
                   <div style={playerHubStyles.chipRow}>
-                    {profileBadges.map((badge) => (
+                    {homeSummaryBadges.map((badge) => (
                       <span key={badge} style={playerHubStyles.chip}>
                         {badge}
                       </span>
@@ -9446,6 +9706,17 @@ export default function PlayerHubPage({
             </div>
           </form>
 
+          <section style={playerHubStyles.homeQuickStatsGrid} aria-label="Quick stats">
+            {homeQuickStats.map(([label, value]) => (
+              <article key={label} style={playerHubStyles.homeQuickStatCard}>
+                <strong style={playerHubStyles.homeQuickStatValue}>
+                  {value}
+                </strong>
+                <span style={playerHubStyles.homeQuickStatLabel}>{label}</span>
+              </article>
+            ))}
+          </section>
+
           <details style={playerHubStyles.accountDetails}>
             <summary style={playerHubStyles.accountSummary}>
               Account & access
@@ -9616,10 +9887,153 @@ export default function PlayerHubPage({
           </details>
         </section>
 
-        {showPlayerEventArea && primaryPlayerEvent
-          ? renderPlayerEventCard(primaryPlayerEvent, true)
-          : null}
+        <section style={playerHubStyles.homeActionStack}>
+          <article style={playerHubStyles.homeNextActionCard}>
+            <div style={playerHubStyles.homeCardHeader}>
+              <div style={playerHubStyles.profileMeta}>
+                <span style={playerHubStyles.homeKicker}>Next action</span>
+                <strong style={playerHubStyles.homeNextActionTitle}>
+                  {homeNextAction.title}
+                </strong>
+              </div>
+              <span
+                style={{
+                  ...playerHubStyles.accessStatusChip,
+                  ...(homeNextAction.title === "No urgent actions" ||
+                  homeNextAction.title === "View roster"
+                    ? playerHubStyles.accessStatusApproved
+                    : homeNextAction.title === "Continue captain checklist"
+                      ? captainChecklistStatusStyle(captainHomeNextTask?.status)
+                      : playerHubStyles.accessStatusPending),
+                }}
+              >
+                {homeNextAction.status}
+              </span>
+            </div>
+            <span style={playerHubStyles.homeNextActionText}>
+              {homeNextAction.detail}
+            </span>
+            <button
+              type="button"
+              style={playerHubStyles.homePrimaryButton}
+              onClick={handleHomeNextAction}
+            >
+              {homeNextAction.button}
+            </button>
+          </article>
+
+          {canManageTeamProfile ? (
+            <article style={playerHubStyles.homePreviewCard}>
+              <div style={playerHubStyles.homeCardHeader}>
+                <div style={playerHubStyles.profileMeta}>
+                  <div style={playerHubStyles.sectionTitle}>Captain tasks</div>
+                  <div style={playerHubStyles.cardText}>
+                    Current captain flow.
+                  </div>
+                </div>
+                <span style={playerHubStyles.chip}>
+                  {captainHomeOpenTasks.length}
+                </span>
+              </div>
+              {captainHomeOpenTasks.length ? (
+                <div style={playerHubStyles.homePreviewList}>
+                  {captainHomeOpenTasks.slice(0, 2).map((task) => (
+                    <article key={task.id} style={playerHubStyles.homeCaptainTaskRow}>
+                      <div style={playerHubStyles.homeCardHeader}>
+                        <strong style={playerHubStyles.previewTitle}>
+                          {task.label}
+                        </strong>
+                        <span
+                          style={{
+                            ...playerHubStyles.accessStatusChip,
+                            ...captainChecklistStatusStyle(task.status),
+                          }}
+                        >
+                          {captainChecklistStatusLabel(task.status)}
+                        </span>
+                      </div>
+                      <span style={playerHubStyles.previewSubtitle}>
+                        {task.detail}
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div style={playerHubStyles.emptyPreview}>
+                  All captain tasks are clear.
+                </div>
+              )}
+              <div style={playerHubStyles.homeCardActions}>
+                <button
+                  type="button"
+                  style={playerHubStyles.homeSecondaryButton}
+                  onClick={() => setActiveHubTab("team")}
+                >
+                  Open Team
+                </button>
+              </div>
+            </article>
+          ) : null}
+
+          <article style={playerHubStyles.homePreviewCard}>
+            <div style={playerHubStyles.homeCardHeader}>
+              <div style={playerHubStyles.profileMeta}>
+                <div style={playerHubStyles.sectionTitle}>Recent activity</div>
+                <div style={playerHubStyles.cardText}>
+                  Team events and roster updates.
+                </div>
+              </div>
+              <span style={playerHubStyles.chip}>
+                {homeRecentActivityItems.length}
+              </span>
+            </div>
+            {homeRecentActivityItems.length ? (
+              <div style={playerHubStyles.homePreviewList}>
+                {homeRecentActivityItems.map((activity) => (
+                  <article key={activity.key} style={playerHubStyles.homePreviewRow}>
+                    <div style={playerHubStyles.profileMeta}>
+                      <strong style={playerHubStyles.previewTitle}>
+                        {activity.tournamentName}
+                      </strong>
+                      <span style={playerHubStyles.previewSubtitle}>
+                        {[activity.teamName, activity.note]
+                          .filter(Boolean)
+                          .join(" / ")}
+                      </span>
+                    </div>
+                    <span
+                      style={{
+                        ...playerHubStyles.accessStatusChip,
+                        ...passportStatusStyle(activity.status),
+                      }}
+                    >
+                      {activity.status}
+                    </span>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div style={playerHubStyles.emptyPreview}>
+                No event or roster activity yet.
+              </div>
+            )}
+            <div style={playerHubStyles.homeCardActions}>
+              <button
+                type="button"
+                style={playerHubStyles.homeSecondaryButton}
+                onClick={() => setActiveHubTab("events")}
+              >
+                More in Events
+              </button>
+            </div>
+          </article>
+        </section>
       </section>
+      ) : null}
+
+      {showPlayerEventArea && primaryPlayerEvent
+        ? renderPlayerEventCard(primaryPlayerEvent, true)
+        : null}
 
       {showPlayerEventArea && secondaryPlayerEvents.length ? (
         <section style={playerHubStyles.feedPanel}>
