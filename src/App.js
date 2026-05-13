@@ -14128,6 +14128,10 @@ const savedRound = readStorageWithTtl(
       activeTournament,
       visibleSeriesClasses
     );
+    const allSeriesSections = getTournamentSeriesRenderSections(
+      activeTournament,
+      tournamentSeriesClasses
+    );
     const selectedSetupStandings =
       selectedSetupTournament?.format === "group-stage"
         ? computeTournamentStandings(selectedSetupTournament)
@@ -14392,6 +14396,463 @@ const savedRound = readStorageWithTtl(
         accent: "#ea580c",
       },
     ];
+
+    const tournamentDateLabel = activeTournament
+      ? formatPublicTournamentDate(activeTournament)
+      : "-";
+    const tournamentLocationLabel =
+      [
+        activeTournament?.locationName,
+        activeTournament?.city,
+        activeTournament?.country,
+      ]
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .join(", ") || "Location not set";
+    const rosterDeadlineLabel = (value) => {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      const parsed = new Date(raw);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toLocaleString(
+          language === "no" ? "nb-NO" : language === "dk" ? "da-DK" : "en-US",
+          {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          }
+        );
+      }
+      return raw.replace("T", " ").slice(0, 16);
+    };
+    const defaultRosterDeadline = rosterDeadlineLabel(activeRosterLock.deadlineIso);
+    const hasAnyRosterDeadline = Boolean(
+      activeRosterLock.deadlineIso ||
+        Object.values(activeRosterLock.appliesToSeries || {}).some(Boolean)
+    );
+    const getSeriesRosterDeadline = (series) =>
+      rosterDeadlineLabel(
+        activeRosterLock.appliesToSeries?.[series.id] ||
+          activeRosterLock.deadlineIso
+      );
+    const getSeriesSection = (series) =>
+      allSeriesSections.find(
+        (section) => String(section.series.id) === String(series.id)
+      ) || null;
+    const getSeriesFilledSlots = (section) =>
+      (section?.groups || []).reduce(
+        (sum, group) =>
+          sum +
+          (group.teams || []).filter((team) => String(team.name || "").trim())
+            .length,
+        0
+      );
+    const getSeriesSlotCount = (section) =>
+      (section?.groups || []).reduce(
+        (sum, group) => sum + (group.teams || []).length,
+        0
+      );
+    const getSeriesSetupStatus = (series) => {
+      const section = getSeriesSection(series);
+      const filled = getSeriesFilledSlots(section);
+      const slots = getSeriesSlotCount(section) || Number(series.totalTeams || 0);
+      if (!filled) return "Missing";
+      if (slots && filled >= slots) return "Done";
+      return "Next";
+    };
+    const setupSteps = [
+      {
+        label: "Basic info",
+        status: !String(activeTournament?.name || "").trim()
+          ? "Missing"
+          : activeTournament?.startDate || activeTournament?.locationName
+            ? "Done"
+            : "Next",
+        detail:
+          activeTournament?.startDate || activeTournament?.locationName
+            ? tournamentDateLabel
+            : "Add date or venue",
+      },
+      {
+        label: "Series",
+        status: tournamentSeriesClasses.length ? "Done" : "Missing",
+        detail: `${tournamentSeriesClasses.length || 0} active`,
+      },
+      {
+        label: "Teams",
+        status:
+          overviewFilledSlotCount >= overviewConfiguredTotalTeams
+            ? "Done"
+            : overviewFilledSlotCount > 0
+              ? "Next"
+              : "Missing",
+        detail: `${overviewFilledSlotCount}/${overviewConfiguredTotalTeams}`,
+      },
+      {
+        label: "Groups",
+        status: visibleGroups.length ? "Done" : "Missing",
+        detail: `${visibleGroups.length} groups`,
+      },
+      {
+        label: "Schedule",
+        status: tournamentMatches.length
+          ? "Done"
+          : visibleGroups.length
+            ? "Next"
+            : "Missing",
+        detail: `${tournamentMatches.length} matches`,
+      },
+      {
+        label: "Roster lock",
+        status: activeRosterLock.enabled
+          ? hasAnyRosterDeadline
+            ? "Done"
+            : "Missing"
+          : "Optional",
+        detail: activeRosterLock.enabled
+          ? defaultRosterDeadline || "Deadline missing"
+          : "Not enabled",
+      },
+      {
+        label: "Publish",
+        status: isBackendPublished
+          ? "Done"
+          : tournamentMatches.length
+            ? "Next"
+            : "Missing",
+        detail: isBackendPublished ? "Live link active" : "Draft",
+      },
+    ];
+    const groupHealthWarnings = allSeriesSections.flatMap((section) => {
+      const groups = section.groups || [];
+      if (!groups.length) {
+        return [
+          {
+            series: getSeriesDisplayName(section.series),
+            text: "No groups built yet",
+          },
+        ];
+      }
+
+      const filledCounts = groups.map(
+        (group) =>
+          (group.teams || []).filter((team) => String(team.name || "").trim())
+            .length
+      );
+      const warnings = [];
+      if (filledCounts.some((count) => count < 2)) {
+        warnings.push({
+          series: getSeriesDisplayName(section.series),
+          text: "Too few teams in a group",
+        });
+      }
+      if (new Set(filledCounts).size > 1) {
+        warnings.push({
+          series: getSeriesDisplayName(section.series),
+          text: "Uneven groups",
+        });
+      }
+      return warnings;
+    });
+    const getSetupStatusStyle = (status) => ({
+      ...styles.tournamentSetupStatusChipV2,
+      ...(status === "Done" ? styles.tournamentSetupStatusDoneV2 : {}),
+      ...(status === "Next" ? styles.tournamentSetupStatusNextV2 : {}),
+      ...(status === "Missing" ? styles.tournamentSetupStatusMissingV2 : {}),
+      ...(status === "Optional" ? styles.tournamentSetupStatusOptionalV2 : {}),
+    });
+    const renderTournamentSetupProgress = () => (
+      <div style={styles.tournamentSetupProgressCardV2}>
+        <div style={styles.tournamentSectionHeader}>
+          <div>
+            <div style={styles.tournamentEyebrow}>Setup flow</div>
+            <div style={styles.tournamentSectionTitle}>Tournament builder</div>
+          </div>
+          <span style={styles.tournamentStatusBadge}>
+            {setupSteps.filter((step) => step.status === "Done").length}/
+            {setupSteps.length}
+          </span>
+        </div>
+        <div style={styles.tournamentSetupStepListV2}>
+          {setupSteps.map((step, index) => (
+            <div key={step.label} style={styles.tournamentSetupStepRowV2}>
+              <span style={styles.tournamentSetupStepNumberV2}>{index + 1}</span>
+              <span style={styles.tournamentSetupStepTextV2}>
+                <strong>{step.label}</strong>
+                <small>{step.detail}</small>
+              </span>
+              <span style={getSetupStatusStyle(step.status)}>{step.status}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+    const renderTournamentOrganizerHeader = () => (
+      <div style={styles.tournamentOrganizerHeaderV2}>
+        <div style={styles.tournamentOrganizerHeaderMainV2}>
+          <div style={styles.tournamentEyebrow}>Organizer control center</div>
+          <h2 style={styles.tournamentOrganizerTitleV2}>
+            {activeTournament.name}
+          </h2>
+          <div style={styles.tournamentOrganizerMetaV2}>
+            <span>{tournamentDateLabel}</span>
+            <span>{tournamentLocationLabel}</span>
+          </div>
+          <div style={styles.tournamentOrganizerChipRowV2}>
+            <span style={styles.tournamentOrganizerStatusChipV2}>
+              {formatLabel}
+            </span>
+            <span
+              style={{
+                ...styles.tournamentOrganizerStatusChipV2,
+                ...(isPublished ? styles.tournamentOrganizerStatusLiveV2 : {}),
+              }}
+            >
+              {isPublished ? tournamentText.published : tournamentText.unpublished}
+            </span>
+            <span
+              style={{
+                ...styles.tournamentOrganizerStatusChipV2,
+                ...(isBackendPublished
+                  ? styles.tournamentOrganizerStatusLiveV2
+                  : {}),
+              }}
+            >
+              {isBackendPublished ? "Public live" : "Public draft"}
+            </span>
+            <span
+              style={{
+                ...styles.tournamentOrganizerStatusChipV2,
+                ...(activeRosterLock.enabled
+                  ? styles.tournamentOrganizerStatusWarnV2
+                  : {}),
+              }}
+            >
+              {activeRosterLock.enabled
+                ? `Roster lock ${defaultRosterDeadline || "enabled"}`
+                : "Roster lock optional"}
+            </span>
+            <span
+              style={{
+                ...styles.tournamentOrganizerStatusChipV2,
+                ...(tournamentSyncStatus === "error"
+                  ? styles.tournamentSetupStatusMissingV2
+                  : {}),
+              }}
+              title={tournamentSyncMessage}
+            >
+              {tournamentSyncLabel}
+            </span>
+          </div>
+        </div>
+        <div style={styles.tournamentOrganizerSeriesChipsV2}>
+          {tournamentSeriesClasses.map((series) => (
+            <button
+              key={`header-series-${series.id}`}
+              type="button"
+              style={styles.tournamentOrganizerSeriesChipV2}
+              onClick={() => {
+                setActiveTournamentSeriesFilter(series.id);
+                setActiveTournamentSetupSeriesId(series.id);
+                setActiveTournamentView("groups");
+              }}
+            >
+              {getSeriesShortLabel(series)}
+            </button>
+          ))}
+        </div>
+        <div style={styles.tournamentHeroActions}>
+          <button
+            style={styles.tournamentLightButton}
+            onClick={() => setShowTournamentSetupPanel((prev) => !prev)}
+          >
+            {shouldShowTournamentSetupPanel
+              ? tournamentText.hideSetup
+              : tournamentText.editSetup}
+          </button>
+          {isBackendPublished ? (
+            <button
+              style={styles.primaryButtonSmall}
+              onClick={openActiveTournamentPublicPreview}
+            >
+              {tournamentText.openLivePreview}
+            </button>
+          ) : (
+            <button style={styles.primaryButtonSmall} onClick={publishTournament}>
+              {tournamentText.publishLiveView}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+    const renderTournamentSeriesSetupCards = () => (
+      <div style={styles.tournamentOrganizerCardV2}>
+        <div style={styles.tournamentSectionHeader}>
+          <div>
+            <div style={styles.tournamentEyebrow}>Series</div>
+            <div style={styles.tournamentSectionTitle}>Class setup</div>
+          </div>
+          <span style={styles.tournamentStatusBadge}>
+            {tournamentSeriesClasses.length} active
+          </span>
+        </div>
+        <div style={styles.tournamentSeriesSetupGridV2}>
+          {tournamentSeriesClasses.map((series) => {
+            const section = getSeriesSection(series);
+            const filled = getSeriesFilledSlots(section);
+            const slots =
+              getSeriesSlotCount(section) || Number(series.totalTeams || 0);
+            const status = getSeriesSetupStatus(series);
+            const deadline = getSeriesRosterDeadline(series);
+            const isHidden = series.publicStatus === "hidden";
+
+            return (
+              <div key={`series-card-${series.id}`} style={styles.tournamentSeriesSetupCardV2}>
+                <div style={styles.tournamentSeriesSetupTopV2}>
+                  <div>
+                    <div style={styles.tournamentMiniTitle}>
+                      {getSeriesDisplayName(series)}
+                    </div>
+                    <div style={styles.tournamentMutedText}>
+                      {getSeriesPlayersPerTeam(series) || "-"} players per team
+                    </div>
+                  </div>
+                  <span style={getSetupStatusStyle(status)}>{status}</span>
+                </div>
+                <div style={styles.tournamentSeriesMetricGridV2}>
+                  <span>
+                    <strong>{filled}/{slots || series.totalTeams || 0}</strong>
+                    Teams
+                  </span>
+                  <span>
+                    <strong>{section?.groups?.length || series.groupCount || 0}</strong>
+                    Groups
+                  </span>
+                  <span>
+                    <strong>{deadline || "Off"}</strong>
+                    Roster lock
+                  </span>
+                </div>
+                <div style={styles.tournamentInlineActions}>
+                  <button
+                    type="button"
+                    style={styles.secondaryButtonCompact}
+                    onClick={() => {
+                      setShowTournamentSetupPanel(true);
+                      setActiveTournamentSetupSeriesId(series.id);
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    style={styles.secondaryButtonCompact}
+                    onClick={() => {
+                      setActiveTournamentSeriesFilter(series.id);
+                      setActiveTournamentSetupSeriesId(series.id);
+                      setActiveTournamentView("groups");
+                    }}
+                  >
+                    Open
+                  </button>
+                  {hasExplicitTournamentSeries(activeTournament) && (
+                    <button
+                      type="button"
+                      style={styles.secondaryButtonCompact}
+                      onClick={() =>
+                        updateTournamentSeriesPublicStatus(
+                          series.id,
+                          isHidden ? "live" : "hidden"
+                        )
+                      }
+                    >
+                      {isHidden ? "Show" : "Hide"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+    const renderTournamentFormatHelper = () => (
+      <div style={styles.tournamentOrganizerCardV2}>
+        <div style={styles.tournamentSectionHeader}>
+          <div>
+            <div style={styles.tournamentEyebrow}>Format</div>
+            <div style={styles.tournamentSectionTitle}>How the flow works</div>
+          </div>
+        </div>
+        <div style={styles.tournamentFormatHelperGridV2}>
+          {[
+            ["Group stage", "All teams meet in group"],
+            ["Advancement", "Winner/runner-up"],
+            ["Knockout", "Semifinals/final"],
+            ["3rd place", activeTournament?.thirdPlaceMatch ? "Enabled" : "Optional"],
+          ].map(([title, text]) => (
+            <div key={title} style={styles.tournamentFormatHelperItemV2}>
+              <strong>{title}</strong>
+              <span>{text}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+    const renderTournamentRosterLockSummary = () => (
+      <div style={styles.tournamentStatusRailNote}>
+        <strong>Roster lock</strong>
+        <span>
+          {activeRosterLock.enabled
+            ? defaultRosterDeadline || "Enabled, deadline missing"
+            : "Disabled"}
+        </span>
+        <small>
+          Changes after deadline require organizer/admin approval.
+        </small>
+        {tournamentSeriesClasses.length > 1 && (
+          <div style={styles.tournamentRosterLockSeriesListV2}>
+            {tournamentSeriesClasses.map((series) => (
+              <span key={`rail-lock-${series.id}`}>
+                {getSeriesShortLabel(series)}: {getSeriesRosterDeadline(series) || "default"}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+    const renderTournamentPublicControls = () => (
+      <div style={styles.tournamentStatusRailNote}>
+        <strong>{tournamentText.publicLinkTitle}</strong>
+        <span>
+          {isBackendPublished
+            ? tournamentText.publicLinkActive
+            : tournamentText.publicLinkUnavailable}
+        </span>
+        <div style={styles.tournamentOrganizerChipRowV2}>
+          <span
+            style={{
+              ...styles.tournamentOrganizerStatusChipV2,
+              ...(isPromotionListed ? styles.tournamentOrganizerStatusLiveV2 : {}),
+            }}
+          >
+            {isPromotionListed ? "Listed" : "Unlisted"}
+          </span>
+          <span
+            style={{
+              ...styles.tournamentOrganizerStatusChipV2,
+              ...(isBackendPublished ? styles.tournamentOrganizerStatusLiveV2 : {}),
+            }}
+          >
+            {isBackendPublished ? "Follow live ready" : "Draft link"}
+          </span>
+        </div>
+        {isBackendPublished && publicUrl && (
+          <span style={styles.tournamentPublicUrlTextV2}>{publicUrl}</span>
+        )}
+      </div>
+    );
 
     const findKnockoutMatch = (label, knockoutOverride = displayKnockout) => {
       const knockout = knockoutOverride || {};
@@ -14992,6 +15453,8 @@ const savedRound = readStorageWithTtl(
                   </button>
                 )}
               </div>
+
+              {activeTournament && renderTournamentSetupProgress()}
 
               {activeTournament && (
                 <>
@@ -15827,51 +16290,11 @@ const savedRound = readStorageWithTtl(
             <main style={styles.tournamentMainPanel}>
               {activeTournament ? (
                 <>
-                  <div style={styles.tournamentHero}>
-                    <div style={styles.tournamentHeroText}>
-                      <h2 style={styles.tournamentHeroTitle}>
-                        {activeTournament.name}
-                      </h2>
-                      <div style={styles.tournamentHeroMeta}>
-                        <span style={styles.tournamentHeroChip}>{formatLabel}</span>
-                        <span style={styles.tournamentHeroBadge}>
-                          {isPublished
-                            ? tournamentText.published
-                            : tournamentText.unpublished}
-                        </span>
-                        <span
-                          style={{
-                            ...styles.tournamentSyncBadge,
-                            ...(tournamentSyncStatus === "error"
-                              ? styles.tournamentSyncBadgeError
-                              : {}),
-                            ...(tournamentSyncStatus === "local"
-                              ? styles.tournamentSyncBadgeLocal
-                              : {}),
-                          }}
-                          title={tournamentSyncMessage}
-                        >
-                          {tournamentSyncLabel}
-                        </span>
-                      </div>
-                      {String(activeTournament.rules || "").trim() && (
-                        <p style={styles.tournamentHeroRules}>
-                          {activeTournament.rules}
-                        </p>
-                      )}
-                    </div>
-                    <div style={styles.tournamentHeroActions}>
-                      <button
-                        style={styles.tournamentLightButton}
-                        onClick={() =>
-                          setShowTournamentSetupPanel((prev) => !prev)
-                        }
-                      >
-                        {shouldShowTournamentSetupPanel
-                          ? tournamentText.hideSetup
-                          : tournamentText.editSetup}
-                      </button>
-                    </div>
+                  {renderTournamentOrganizerHeader()}
+
+                  <div style={styles.tournamentOrganizerOverviewGridV2}>
+                    {renderTournamentSeriesSetupCards()}
+                    {renderTournamentFormatHelper()}
                   </div>
 
                   <div
@@ -15977,6 +16400,19 @@ const savedRound = readStorageWithTtl(
                             </div>
                           </div>
 
+                          {groupHealthWarnings.length > 0 && (
+                            <div style={styles.tournamentWarningListV2}>
+                              {groupHealthWarnings.slice(0, 3).map((warning) => (
+                                <span
+                                  key={`${warning.series}-${warning.text}`}
+                                  style={styles.tournamentWarningChipV2}
+                                >
+                                  {warning.series}: {warning.text}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
                           {visibleGroups.length > 0 ? (
                             <div style={styles.tournamentOverviewSeriesList}>
                               {visibleSeriesSections
@@ -16033,6 +16469,26 @@ const savedRound = readStorageWithTtl(
                                             {(group.teams || []).length}{" "}
                                             {tournamentText.slotsLabel}
                                           </div>
+                                          {filledTeams.length < 2 ? (
+                                            <span
+                                              style={getSetupStatusStyle("Missing")}
+                                            >
+                                              Too few teams
+                                            </span>
+                                          ) : filledTeams.length <
+                                            (group.teams || []).length ? (
+                                            <span
+                                              style={getSetupStatusStyle("Next")}
+                                            >
+                                              Open slots
+                                            </span>
+                                          ) : (
+                                            <span
+                                              style={getSetupStatusStyle("Done")}
+                                            >
+                                              Ready
+                                            </span>
+                                          )}
                                           <div style={styles.tournamentSnapshotList}>
                                             {(group.teams || []).map(
                                               (team, index) => (
@@ -17724,14 +18180,8 @@ const savedRound = readStorageWithTtl(
                   )}
                 </div>
 
-                <div style={styles.tournamentStatusRailNote}>
-                  <strong>{tournamentText.publicLinkTitle}</strong>
-                  <span>
-                    {isBackendPublished
-                      ? tournamentText.publicLinkActive
-                      : tournamentText.publicLinkUnavailable}
-                  </span>
-                </div>
+                {renderTournamentPublicControls()}
+                {renderTournamentRosterLockSummary()}
               </aside>
             ) : null}
           </div>
@@ -26936,6 +27386,287 @@ Object.assign(styles, {
     minWidth: 0,
     overflowWrap: "break-word",
     wordBreak: "normal",
+  },
+});
+
+Object.assign(styles, {
+  tournamentDashboardShell: {
+    ...styles.tournamentDashboardShell,
+    gridTemplateColumns:
+      "minmax(280px, 340px) minmax(0, 1fr) minmax(250px, 300px)",
+    alignItems: "start",
+  },
+  tournamentDashboardShellCollapsed: {
+    ...styles.tournamentDashboardShellCollapsed,
+    gridTemplateColumns: "minmax(0, 1fr) minmax(250px, 300px)",
+  },
+  tournamentDashboardShellMobile: {
+    ...styles.tournamentDashboardShellMobile,
+    gridTemplateColumns: "minmax(0, 1fr)",
+  },
+  tournamentSetupProgressCardV2: {
+    background:
+      "linear-gradient(145deg, rgba(15,23,42,0.66), rgba(8,47,73,0.34))",
+    border: "1px solid rgba(125,211,252,0.14)",
+    boxShadow: "0 16px 44px rgba(2,6,23,0.24)",
+    backdropFilter: "blur(16px)",
+    borderRadius: "20px",
+    padding: "13px",
+    display: "grid",
+    gap: "12px",
+    minWidth: 0,
+  },
+  tournamentSetupStepListV2: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  tournamentSetupStepRowV2: {
+    background: "rgba(2,6,23,0.36)",
+    border: "1px solid rgba(148,163,184,0.13)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+    display: "grid",
+    gridTemplateColumns: "28px minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: "9px",
+    borderRadius: "14px",
+    padding: "9px",
+    minWidth: 0,
+  },
+  tournamentSetupStepNumberV2: {
+    width: "28px",
+    height: "28px",
+    borderRadius: "999px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(14,165,233,0.15)",
+    border: "1px solid rgba(125,211,252,0.22)",
+    color: "#bae6fd",
+    fontSize: "11px",
+    fontWeight: "950",
+  },
+  tournamentSetupStepTextV2: {
+    display: "grid",
+    gap: "2px",
+    minWidth: 0,
+  },
+  tournamentSetupStatusChipV2: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "24px",
+    borderRadius: "999px",
+    padding: "0 8px",
+    background: "rgba(148,163,184,0.12)",
+    border: "1px solid rgba(148,163,184,0.15)",
+    color: "#cbd5e1",
+    fontSize: "10px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+    whiteSpace: "nowrap",
+  },
+  tournamentSetupStatusDoneV2: {
+    background: "rgba(34,197,94,0.18)",
+    border: "1px solid rgba(52,211,153,0.30)",
+    color: "#bbf7d0",
+  },
+  tournamentSetupStatusNextV2: {
+    background: "rgba(14,165,233,0.18)",
+    border: "1px solid rgba(125,211,252,0.30)",
+    color: "#bae6fd",
+  },
+  tournamentSetupStatusMissingV2: {
+    background: "rgba(244,63,94,0.16)",
+    border: "1px solid rgba(251,113,133,0.28)",
+    color: "#fecdd3",
+  },
+  tournamentSetupStatusOptionalV2: {
+    background: "rgba(148,163,184,0.13)",
+    border: "1px solid rgba(203,213,225,0.18)",
+    color: "#cbd5e1",
+  },
+  tournamentOrganizerHeaderV2: {
+    background:
+      "linear-gradient(145deg, rgba(15,23,42,0.84), rgba(8,47,73,0.54) 58%, rgba(6,78,59,0.26))",
+    border: "1px solid rgba(125,211,252,0.18)",
+    boxShadow:
+      "0 24px 72px rgba(2,6,23,0.34), inset 0 1px 0 rgba(255,255,255,0.06)",
+    backdropFilter: "blur(18px)",
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto auto",
+    gap: "16px",
+    alignItems: "center",
+    borderRadius: "30px",
+    padding: "clamp(17px, 2.2vw, 26px)",
+    minWidth: 0,
+    overflow: "hidden",
+  },
+  tournamentOrganizerHeaderMainV2: {
+    display: "grid",
+    gap: "7px",
+    minWidth: 0,
+  },
+  tournamentOrganizerTitleV2: {
+    margin: 0,
+    color: "#f8fafc",
+    fontSize: "clamp(28px, 3.8vw, 52px)",
+    lineHeight: 0.95,
+    fontWeight: "950",
+    letterSpacing: 0,
+    overflowWrap: "break-word",
+  },
+  tournamentOrganizerMetaV2: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+    color: "#9fb4d0",
+    fontSize: "13px",
+    fontWeight: "850",
+  },
+  tournamentOrganizerChipRowV2: {
+    display: "flex",
+    gap: "7px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  tournamentOrganizerStatusChipV2: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "28px",
+    borderRadius: "999px",
+    padding: "0 10px",
+    background: "rgba(2,6,23,0.36)",
+    border: "1px solid rgba(148,163,184,0.16)",
+    color: "#dbeafe",
+    fontSize: "11px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+  },
+  tournamentOrganizerStatusLiveV2: {
+    background: "rgba(34,197,94,0.18)",
+    border: "1px solid rgba(52,211,153,0.30)",
+    color: "#bbf7d0",
+  },
+  tournamentOrganizerStatusWarnV2: {
+    background: "rgba(245,158,11,0.16)",
+    border: "1px solid rgba(251,191,36,0.26)",
+    color: "#fde68a",
+  },
+  tournamentOrganizerSeriesChipsV2: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    minWidth: 0,
+  },
+  tournamentOrganizerSeriesChipV2: {
+    border: "1px solid rgba(125,211,252,0.24)",
+    borderRadius: "16px",
+    minHeight: "42px",
+    padding: "0 13px",
+    background: "rgba(14,165,233,0.13)",
+    color: "#dff7ff",
+    fontSize: "12px",
+    fontWeight: "950",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  tournamentOrganizerOverviewGridV2: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1.4fr) minmax(260px, 0.8fr)",
+    gap: "clamp(12px, 1.4vw, 18px)",
+    minWidth: 0,
+  },
+  tournamentOrganizerCardV2: {
+    background:
+      "linear-gradient(145deg, rgba(15,23,42,0.66), rgba(8,47,73,0.34))",
+    border: "1px solid rgba(125,211,252,0.14)",
+    boxShadow: "0 16px 44px rgba(2,6,23,0.24)",
+    backdropFilter: "blur(16px)",
+    borderRadius: "24px",
+    padding: "15px",
+    display: "grid",
+    gap: "14px",
+    minWidth: 0,
+  },
+  tournamentSeriesSetupGridV2: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 230px), 1fr))",
+    gap: "10px",
+    minWidth: 0,
+  },
+  tournamentSeriesSetupCardV2: {
+    background: "rgba(2,6,23,0.36)",
+    border: "1px solid rgba(148,163,184,0.13)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+    borderRadius: "18px",
+    padding: "12px",
+    display: "grid",
+    gap: "11px",
+    minWidth: 0,
+  },
+  tournamentSeriesSetupTopV2: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "10px",
+    minWidth: 0,
+  },
+  tournamentSeriesMetricGridV2: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gap: "7px",
+    minWidth: 0,
+  },
+  tournamentFormatHelperGridV2: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  tournamentFormatHelperItemV2: {
+    background: "rgba(2,6,23,0.36)",
+    border: "1px solid rgba(148,163,184,0.13)",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+    borderRadius: "15px",
+    padding: "10px",
+    display: "grid",
+    gap: "3px",
+    minWidth: 0,
+  },
+  tournamentWarningListV2: {
+    display: "flex",
+    gap: "7px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  tournamentWarningChipV2: {
+    borderRadius: "999px",
+    padding: "6px 9px",
+    background: "rgba(245,158,11,0.16)",
+    border: "1px solid rgba(251,191,36,0.26)",
+    color: "#fde68a",
+    fontSize: "11px",
+    fontWeight: "900",
+  },
+  tournamentRosterLockSeriesListV2: {
+    display: "grid",
+    gap: "4px",
+    color: "#cbd5e1",
+    fontSize: "11px",
+    fontWeight: "800",
+  },
+  tournamentPublicUrlTextV2: {
+    display: "block",
+    maxWidth: "100%",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: "#bae6fd",
+    fontSize: "11px",
+    fontWeight: "800",
   },
 });
 
