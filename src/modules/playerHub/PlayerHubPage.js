@@ -2757,19 +2757,22 @@ Object.assign(playerHubStyles, {
   },
   eventGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))",
     gap: "12px",
     minWidth: 0,
   },
   eventCard: {
     ...hubGlassPanel,
     display: "grid",
-    gap: "10px",
-    padding: "13px",
-    borderRadius: "20px",
+    gap: "9px",
+    width: "100%",
+    maxWidth: "560px",
+    padding: "12px",
+    borderRadius: "18px",
     overflow: "hidden",
     background:
       "linear-gradient(160deg, rgba(15,23,42,0.92), rgba(14,116,144,0.20) 52%, rgba(5,150,105,0.14))",
+    boxSizing: "border-box",
   },
   eventCardFeatured: {
     border: "1px solid rgba(56,189,248,0.42)",
@@ -2777,16 +2780,17 @@ Object.assign(playerHubStyles, {
       "0 22px 56px rgba(8,47,73,0.34), inset 0 1px 0 rgba(255,255,255,0.08)",
   },
   eventTopRow: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
-    gap: "12px",
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "10px",
     alignItems: "start",
+    flexWrap: "wrap",
     minWidth: 0,
   },
   eventTitle: {
     color: hubDarkPalette.text,
-    fontSize: "17px",
-    lineHeight: 1.1,
+    fontSize: "16px",
+    lineHeight: 1.15,
     fontWeight: "980",
     overflowWrap: "break-word",
     wordBreak: "normal",
@@ -2801,14 +2805,14 @@ Object.assign(playerHubStyles, {
   eventStats: {
     display: "flex",
     flexWrap: "wrap",
-    gap: "6px",
+    gap: "5px",
     minWidth: 0,
   },
   eventStat: {
     display: "inline-flex",
     alignItems: "center",
-    gap: "5px",
-    padding: "5px 8px",
+    gap: "4px",
+    padding: "4px 7px",
     borderRadius: "999px",
     background: "rgba(2,6,23,0.36)",
     border: "1px solid rgba(148,163,184,0.14)",
@@ -2832,7 +2836,7 @@ Object.assign(playerHubStyles, {
   },
   eventStatValue: {
     color: hubDarkPalette.text,
-    fontSize: "13px",
+    fontSize: "12px",
     fontWeight: "980",
   },
   eventStatLabel: {
@@ -2848,6 +2852,70 @@ Object.assign(playerHubStyles, {
     flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "flex-start",
+    minWidth: 0,
+  },
+  eventResponseActions: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gap: "7px",
+    minWidth: 0,
+  },
+  eventResponseButton: {
+    ...playerHubStyles.adminActionButton,
+    minHeight: "42px",
+    width: "100%",
+    padding: "9px 8px",
+    borderRadius: "14px",
+    fontSize: "12px",
+    background: "rgba(14,165,233,0.10)",
+  },
+  eventResponseButtonActive: {
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    borderColor: "rgba(125,211,252,0.36)",
+    color: "#04111f",
+    boxShadow: "0 10px 24px rgba(14,165,233,0.20)",
+  },
+  eventViewRosterButton: {
+    ...playerHubStyles.saveButton,
+    justifySelf: "start",
+    minHeight: "42px",
+    padding: "10px 14px",
+    borderRadius: "14px",
+    fontSize: "12px",
+  },
+  eventSecondaryActions: {
+    display: "flex",
+    gap: "7px",
+    flexWrap: "wrap",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  eventPreferenceDetails: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  eventPreferenceSummary: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    justifySelf: "start",
+    border: "1px solid rgba(125,211,252,0.18)",
+    borderRadius: "999px",
+    padding: "7px 10px",
+    background: "rgba(14,165,233,0.10)",
+    color: "#bae6fd",
+    fontSize: "11px",
+    fontWeight: "950",
+    cursor: "pointer",
+  },
+  eventsEmptyState: {
+    ...hubGlassPanelSoft,
+    display: "grid",
+    gap: "5px",
+    padding: "16px",
+    borderRadius: "20px",
+    maxWidth: "420px",
     minWidth: 0,
   },
   eventCommentDrawer: {
@@ -5903,12 +5971,44 @@ export default function PlayerHubPage({
 
   function eventMetaText(event) {
     return [
-      event?.clubTeamName || "Team",
+      event?.clubTeamName || event?.teamName || "Team",
+      event?.className || event?.seriesName || event?.seriesLabel || "",
       !isNeutralPlanLabel(event?.squadLabel) ? event.squadLabel : "",
       event?.deadlineAt ? `Deadline ${formatCompactDate(event.deadlineAt)}` : "",
     ]
       .filter(Boolean)
       .join(" / ");
+  }
+
+  function eventShortDateText(event) {
+    const text = passportText(
+      event?.startDate,
+      event?.eventDate,
+      event?.tournamentStartDate,
+      event?.date,
+      event?.deadlineAt
+    );
+    if (!text) return "";
+    return formatCompactDate(text);
+  }
+
+  function responseStatsHaveCounts(stats) {
+    return (
+      Number(stats?.total || 0) > 0 ||
+      Number(stats?.yes || 0) > 0 ||
+      Number(stats?.maybe || 0) > 0 ||
+      Number(stats?.no || 0) > 0 ||
+      Number(stats?.pending || 0) > 0
+    );
+  }
+
+  function openPlayerRosterView() {
+    setActiveHubTab("players");
+  }
+
+  async function openCaptainPlanFromEvents(plan) {
+    setActiveHubTab("team");
+    await toggleTournamentSquadPlanning(plan);
   }
 
   function updateEventCommentDraft(planId, value) {
@@ -5997,6 +6097,8 @@ export default function PlayerHubPage({
   }
 
   function renderEventStats(stats) {
+    if (!responseStatsHaveCounts(stats)) return null;
+
     function eventStatTone(label) {
       const value = String(label || "").toLowerCase();
       if (value === "going") return playerHubStyles.eventStatGoing;
@@ -6108,10 +6210,12 @@ export default function PlayerHubPage({
       ? normalizeRosterStatus(bundle.roster.rosterStatus)
       : "";
     const hasRosterState = rosterStatus && rosterStatus !== "CANCELLED";
+    const rosterIsViewOnly =
+      rosterStatus === "APPROVED" || rosterStatus === "LOCKED";
     const statusLabel = hasRosterState
       ? formatRosterStatus(rosterStatus)
       : availability
-        ? formatPlayerAvailabilityStatus(availabilityStatus)
+        ? eventResponseActionLabel(availabilityStatus)
         : plannedLabel
           ? "Planning"
           : "Open";
@@ -6126,15 +6230,11 @@ export default function PlayerHubPage({
     );
     const eventRosterLockText = rosterLockChipText(event);
     const stats = tournamentPlanStats(event, []);
-    const hasStats =
-      Number(stats.total || 0) > 1 ||
-      Number(stats.yes || 0) +
-        Number(stats.maybe || 0) +
-        Number(stats.no || 0) +
-        Number(stats.pending || 0) >
-        1;
+    const hasStats = responseStatsHaveCounts(stats);
     const cardKey = bundle?.key || eventIdentityKey(event);
     const canComment = Boolean(eventPlanId(event));
+    const canRespond = Boolean(availability) && !rosterIsViewOnly;
+    const dateText = eventShortDateText(event);
     const eventKicker = hasRosterState
       ? rosterStatus === "LOCKED"
         ? "Official roster"
@@ -6151,7 +6251,7 @@ export default function PlayerHubPage({
           ...(featured ? playerHubStyles.eventCardFeatured : {}),
         }}
       >
-        <div style={playerHubStyles.homeCardHeader}>
+        <div style={playerHubStyles.eventTopRow}>
           <div style={playerHubStyles.profileMeta}>
             <span style={playerHubStyles.homeKicker}>{eventKicker}</span>
             <strong style={playerHubStyles.eventTitle}>
@@ -6172,6 +6272,9 @@ export default function PlayerHubPage({
         {hasStats ? renderEventStats(stats) : null}
 
         <div style={playerHubStyles.chipRow}>
+          {dateText ? (
+            <span style={playerHubStyles.chip}>{dateText}</span>
+          ) : null}
           {hasRosterState && availability ? (
             <span
               style={{
@@ -6193,58 +6296,18 @@ export default function PlayerHubPage({
           ) : null}
         </div>
 
-        {isPending ? (
+        {canRespond ? (
           <>
-            <div style={playerHubStyles.profileFormGrid}>
-              <label style={playerHubStyles.profileField}>
-                <span style={playerHubStyles.profileLabel}>Preferred team</span>
-                <select
-                  style={playerHubStyles.profileInput}
-                  value={availabilityDraftValue(
-                    availability,
-                    "preferredSquad",
-                    "NO_PREFERENCE"
-                  )}
-                  onChange={(eventValue) =>
-                    updateTournamentAvailabilityDraft(
-                      availability.availabilityId,
-                      "preferredSquad",
-                      eventValue.target.value
-                    )
-                  }
-                >
-                  <option value="NO_PREFERENCE">No preference</option>
-                  {captainSquadNameSlots.map((squad) => (
-                    <option key={squad} value={squad}>
-                      {squadDisplayName(squad, event)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={playerHubStyles.profileField}>
-                <span style={playerHubStyles.profileLabel}>Note</span>
-                <input
-                  style={playerHubStyles.profileInput}
-                  value={availabilityDraftValue(availability, "playerNote", "")}
-                  onChange={(eventValue) =>
-                    updateTournamentAvailabilityDraft(
-                      availability.availabilityId,
-                      "playerNote",
-                      eventValue.target.value
-                    )
-                  }
-                  placeholder="Optional"
-                />
-              </label>
-            </div>
-            <div style={playerHubStyles.eventActionBar}>
+            <div style={playerHubStyles.eventResponseActions}>
               {["YES", "MAYBE", "NO"].map((status) => (
                 <button
                   key={status}
                   type="button"
                   style={{
-                    ...playerHubStyles.adminActionButton,
-                    ...(status === "YES" ? playerHubStyles.addTeamMemberButton : {}),
+                    ...playerHubStyles.eventResponseButton,
+                    ...(availabilityStatus === status
+                      ? playerHubStyles.eventResponseButtonActive
+                      : {}),
                     ...(tournamentPlanUpdatingId === availability.availabilityId
                       ? playerHubStyles.adminDisabledButton
                       : {}),
@@ -6257,6 +6320,55 @@ export default function PlayerHubPage({
                   {eventResponseActionLabel(status)}
                 </button>
               ))}
+            </div>
+            <div style={playerHubStyles.eventSecondaryActions}>
+              <details style={playerHubStyles.eventPreferenceDetails}>
+                <summary style={playerHubStyles.eventPreferenceSummary}>
+                  Prefs / note
+                </summary>
+                <div style={playerHubStyles.profileFormGrid}>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Preferred team</span>
+                    <select
+                      style={playerHubStyles.profileInput}
+                      value={availabilityDraftValue(
+                        availability,
+                        "preferredSquad",
+                        "NO_PREFERENCE"
+                      )}
+                      onChange={(eventValue) =>
+                        updateTournamentAvailabilityDraft(
+                          availability.availabilityId,
+                          "preferredSquad",
+                          eventValue.target.value
+                        )
+                      }
+                    >
+                      <option value="NO_PREFERENCE">No preference</option>
+                      {captainSquadNameSlots.map((squad) => (
+                        <option key={squad} value={squad}>
+                          {squadDisplayName(squad, event)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={playerHubStyles.profileField}>
+                    <span style={playerHubStyles.profileLabel}>Note</span>
+                    <input
+                      style={playerHubStyles.profileInput}
+                      value={availabilityDraftValue(availability, "playerNote", "")}
+                      onChange={(eventValue) =>
+                        updateTournamentAvailabilityDraft(
+                          availability.availabilityId,
+                          "playerNote",
+                          eventValue.target.value
+                        )
+                      }
+                      placeholder="Optional"
+                    />
+                  </label>
+                </div>
+              </details>
               {canComment ? (
                 <button
                   type="button"
@@ -6270,6 +6382,27 @@ export default function PlayerHubPage({
               ) : null}
             </div>
           </>
+        ) : rosterIsViewOnly ? (
+          <div style={playerHubStyles.eventActionBar}>
+            <button
+              type="button"
+              style={playerHubStyles.eventViewRosterButton}
+              onClick={openPlayerRosterView}
+            >
+              View roster
+            </button>
+            {canComment ? (
+              <button
+                type="button"
+                style={playerHubStyles.feedTinyAction}
+                onClick={() => toggleEventComments(event)}
+              >
+                {expandedEventCommentPlanId === eventPlanId(event)
+                  ? "Hide comments"
+                  : "Comment"}
+              </button>
+            ) : null}
+          </div>
         ) : (
           <div style={playerHubStyles.eventActionBar}>
             {availability?.playerNote ? (
@@ -6294,11 +6427,16 @@ export default function PlayerHubPage({
     );
   }
 
-  function renderCaptainEventCard(plan, availability = []) {
+  function renderCaptainEventCard(plan, availability = [], options = {}) {
+    const compact = Boolean(options.compact);
     const stats = tournamentPlanStats(plan, availability);
     const planMeta = compactPlanMeta(plan);
     const contextLabel = eventContextLabel(plan);
     const rosterLockText = rosterLockChipText(plan);
+    const roster = eventRosterForPlanId(eventPlanId(plan));
+    const rosterStatus = normalizeRosterStatus(roster?.rosterStatus);
+    const rosterIsViewOnly = rosterStatus === "APPROVED" || rosterStatus === "LOCKED";
+    const dateText = eventShortDateText(plan);
     const visibleAvailability =
       expandedTournamentPlanId === plan.planId ? availability : [];
     const groups = ["YES", "MAYBE", "PENDING", "NO"].map((status) => ({
@@ -6334,6 +6472,9 @@ export default function PlayerHubPage({
         {renderEventStats(stats)}
 
         <div style={playerHubStyles.chipRow}>
+          {dateText ? (
+            <span style={playerHubStyles.chip}>{dateText}</span>
+          ) : null}
           <span style={playerHubStyles.chip}>Availability asked</span>
           {planMeta ? (
             <span style={playerHubStyles.chip}>{planMeta}</span>
@@ -6346,10 +6487,14 @@ export default function PlayerHubPage({
         <div style={playerHubStyles.eventActionBar}>
           <button
             type="button"
-            style={playerHubStyles.adminActionButton}
+            style={compact ? playerHubStyles.eventViewRosterButton : playerHubStyles.adminActionButton}
             onClick={() => toggleTournamentPlanResponses(plan)}
           >
-            {expandedTournamentPlanId === plan.planId ? "Refresh" : "Responses"}
+            {expandedTournamentPlanId === plan.planId
+              ? "Refresh"
+              : compact
+                ? "Review responses"
+                : "Responses"}
           </button>
           {expandedTournamentPlanId === plan.planId ? (
             <button
@@ -6363,9 +6508,17 @@ export default function PlayerHubPage({
           <button
             type="button"
             style={playerHubStyles.adminActionButton}
-            onClick={() => toggleTournamentSquadPlanning(plan)}
+            onClick={() =>
+              compact
+                ? openCaptainPlanFromEvents(plan)
+                : toggleTournamentSquadPlanning(plan)
+            }
           >
-            {expandedSquadPlanId === plan.planId ? "Refresh teams" : "Plan teams"}
+            {rosterIsViewOnly
+              ? "View roster"
+              : expandedSquadPlanId === plan.planId
+                ? "Refresh teams"
+                : "Plan squads"}
           </button>
           <button
             type="button"
@@ -6376,7 +6529,7 @@ export default function PlayerHubPage({
               ? "Hide comments"
               : "Comment"}
           </button>
-          {plan.planStatus !== "READY" ? (
+          {!compact && plan.planStatus !== "READY" ? (
             <button
               type="button"
               style={playerHubStyles.adminActionButton}
@@ -6385,7 +6538,7 @@ export default function PlayerHubPage({
               Ready
             </button>
           ) : null}
-          {plan.planStatus !== "CANCELLED" ? (
+          {!compact && plan.planStatus !== "CANCELLED" ? (
             <button
               type="button"
               style={{
@@ -8870,8 +9023,6 @@ export default function PlayerHubPage({
     plannedTeamItems,
     playerTournamentRosterStatus
   );
-  const primaryPlayerEvent = playerDashboardEvents[0] || null;
-  const secondaryPlayerEvents = playerDashboardEvents.slice(1);
   const passportStats = calculatePlayerPassportStats({
     confirmedTeams,
     playerTournamentAvailability,
@@ -10031,22 +10182,47 @@ export default function PlayerHubPage({
       </section>
       ) : null}
 
-      {showPlayerEventArea && primaryPlayerEvent
-        ? renderPlayerEventCard(primaryPlayerEvent, true)
-        : null}
-
-      {showPlayerEventArea && secondaryPlayerEvents.length ? (
+      {showPlayerEventArea && playerDashboardEvents.length ? (
         <section style={playerHubStyles.feedPanel}>
           <div style={playerHubStyles.feedHeader}>
             <div style={playerHubStyles.profileMeta}>
-              <div style={playerHubStyles.sectionTitle}>Team events</div>
+              <div style={playerHubStyles.sectionTitle}>My responses</div>
             </div>
-            <span style={playerHubStyles.chip}>{secondaryPlayerEvents.length}</span>
+            <span style={playerHubStyles.chip}>{playerDashboardEvents.length}</span>
           </div>
           <div style={playerHubStyles.eventGrid}>
-            {secondaryPlayerEvents
-              .slice(0, 3)
-              .map((eventBundle) => renderPlayerEventCard(eventBundle))}
+            {playerDashboardEvents.map((eventBundle) =>
+              renderPlayerEventCard(eventBundle)
+            )}
+          </div>
+        </section>
+      ) : null}
+
+      {showPlayerEventArea && canManageTeamProfile && dedupedTournamentPlans.length ? (
+        <section style={playerHubStyles.feedPanel}>
+          <div style={playerHubStyles.feedHeader}>
+            <div style={playerHubStyles.profileMeta}>
+              <div style={playerHubStyles.sectionTitle}>Captain events</div>
+            </div>
+            <span style={playerHubStyles.chip}>{dedupedTournamentPlans.length}</span>
+          </div>
+          <div style={playerHubStyles.eventGrid}>
+            {dedupedTournamentPlans.map((plan) => {
+              const availability = captainAvailabilityByPlanId[plan.planId] || [];
+              return renderCaptainEventCard(plan, availability, { compact: true });
+            })}
+          </div>
+        </section>
+      ) : null}
+
+      {showPlayerEventArea &&
+      !playerDashboardEvents.length &&
+      !(canManageTeamProfile && dedupedTournamentPlans.length) ? (
+        <section style={playerHubStyles.eventsEmptyState}>
+          <div style={playerHubStyles.sectionTitle}>No team events yet</div>
+          <div style={playerHubStyles.cardText}>
+            Events will appear here when a captain asks for availability or a
+            roster is ready.
           </div>
         </section>
       ) : null}
