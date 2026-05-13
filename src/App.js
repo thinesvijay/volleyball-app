@@ -2400,6 +2400,10 @@ export default function App() {
     useState("all");
   const [activeTournamentSetupSeriesId, setActiveTournamentSetupSeriesId] =
     useState("");
+  const [activeMatchControlFilter, setActiveMatchControlFilter] =
+    useState("all");
+  const [activeMatchControlCourt, setActiveMatchControlCourt] =
+    useState("all");
   const [matchFinishWarnings, setMatchFinishWarnings] = useState({});
   const tournamentAutosaveTimerRef = useRef(null);
   const manualGroupEditingRef = useRef(false);
@@ -14463,9 +14467,6 @@ const savedRound = readStorageWithTtl(
         : tournamentMatches;
     const visibleCompletedMatchesCount =
       visibleTournamentMatches.filter(isMatchCompleted).length;
-    const visibleStartedMatchesCount = visibleTournamentMatches.filter(
-      (match) => getMatchDisplayStatus(match).status === "in_progress"
-    ).length;
     const visibleScheduledMatchesCount = visibleTournamentMatches.filter(
       (match) => getMatchDisplayStatus(match).status === "scheduled"
     ).length;
@@ -16653,6 +16654,465 @@ const savedRound = readStorageWithTtl(
     );
     const courtBlockSummaries = getCourtBlockSummaries(activeTournament);
     const unplacedScheduleMatches = getUnplacedScheduleMatches(activeTournament);
+    const matchControlItems = displayHallScheduleBatches
+      .flatMap((batch, batchIndex) =>
+        (batch.items || []).map((item, courtIndex) =>
+          item
+            ? {
+                ...item,
+                controlBatchId: batch.id,
+                controlBatchNumber: batch.number,
+                controlBatchIndex: batchIndex,
+                controlCourt:
+                  item.scheduleCourt || item.court || courtIndex + 1,
+                controlCourtIndex: courtIndex,
+                controlTime:
+                  item.scheduleTime || item.startTime || batch.time || "",
+                controlDuration: item.durationMin || batch.duration || "",
+                controlOrder:
+                  Number.isFinite(Number(item.scheduleOrder))
+                    ? Number(item.scheduleOrder)
+                    : batchIndex * scheduleCourtCount + courtIndex,
+              }
+            : null
+        )
+      )
+      .filter(Boolean);
+    const matchControlStatusItems = matchControlItems.map((match) => {
+      const displayStatus = getMatchDisplayStatus(match);
+      const hasAnyScore =
+        hasScoreValue(match.scoreA) || hasScoreValue(match.scoreB);
+      const hasBothScores =
+        hasScoreValue(match.scoreA) && hasScoreValue(match.scoreB);
+      const missingScore = Boolean(
+        matchFinishWarnings[match.id] ||
+          ((displayStatus.status === "completed" ||
+            displayStatus.status === "in_progress" ||
+            hasAnyScore ||
+            match.scoreTouched) &&
+            !hasBothScores)
+      );
+
+      return {
+        ...match,
+        controlStatus: displayStatus.status,
+        controlStatusLabel: displayStatus.label,
+        controlMissingScore: missingScore,
+      };
+    });
+    const matchControlNextItems = matchControlStatusItems
+      .filter((match) => match.controlStatus === "scheduled")
+      .slice(0, 3);
+    const matchControlMissingScoreItems = matchControlStatusItems.filter(
+      (match) => match.controlMissingScore
+    );
+    const matchControlAvailableCourts = Array.from(
+      new Set(
+        matchControlStatusItems
+          .map((match) => Number(match.controlCourt || 0))
+          .filter((court) => Number.isFinite(court) && court > 0)
+      )
+    ).sort((a, b) => a - b);
+    const activeMatchControlSeriesLabel =
+      hasExplicitTournamentSeries(activeTournament)
+        ? activeTournamentSeriesFilter === "all"
+          ? tournamentText.allClassesLabel
+          : getSeriesDisplayName(
+              tournamentSeriesClasses.find(
+                (series) =>
+                  String(series.id) === String(activeTournamentSeriesFilter)
+              ) || activeTournamentSeriesFilter
+            )
+        : getSeriesDisplayName(selectedSetupSeries);
+    const matchControlFilterOptions = [
+      { id: "all", label: "All" },
+      { id: "live", label: "Live" },
+      { id: "next", label: "Next" },
+      { id: "scheduled", label: tournamentText.matchStatusScheduled },
+      { id: "finished", label: tournamentText.matchStatusCompleted },
+      { id: "missing", label: "Missing score" },
+    ];
+    const filteredMatchControlItems = matchControlStatusItems.filter((match) => {
+      const courtMatches =
+        activeMatchControlCourt === "all" ||
+        String(match.controlCourt || "") === String(activeMatchControlCourt);
+      if (!courtMatches) return false;
+
+      if (activeMatchControlFilter === "live") {
+        return match.controlStatus === "in_progress";
+      }
+      if (activeMatchControlFilter === "next") {
+        return matchControlNextItems.some((item) => item.id === match.id);
+      }
+      if (activeMatchControlFilter === "scheduled") {
+        return match.controlStatus === "scheduled";
+      }
+      if (activeMatchControlFilter === "finished") {
+        return match.controlStatus === "completed";
+      }
+      if (activeMatchControlFilter === "missing") {
+        return match.controlMissingScore;
+      }
+
+      return true;
+    });
+    const getMatchControlWinnerLabel = (match) => {
+      if (!isMatchCompleted(match)) return "";
+      const winnerId = String(match.winnerTeamId || "");
+      const teamAId = String(match.teamAId || match.teamA || "");
+      const teamBId = String(match.teamBId || match.teamB || "");
+      if (winnerId && winnerId === teamAId) return match.teamA || "";
+      if (winnerId && winnerId === teamBId) return match.teamB || "";
+
+      const scoreA = parseMatchScore(match.scoreA);
+      const scoreB = parseMatchScore(match.scoreB);
+      if (scoreA === null || scoreB === null) return "";
+      if (scoreA === scoreB) return language === "no" ? "Uavgjort" : "Draw";
+      return scoreA > scoreB ? match.teamA || "" : match.teamB || "";
+    };
+    const getMatchControlStageLabel = (match) => {
+      const phase = String(match.phase || match.stage || "").toLowerCase();
+      if (phase === "semifinal" || phase === "semifinals") return "Semi-final";
+      if (phase === "final") return tournamentText.final;
+      if (phase === "thirdplace" || phase === "third_place") {
+        return "3rd place";
+      }
+      if (isKnockoutMatch(match)) {
+        return match.round || tournamentText.knockoutLabel;
+      }
+      return match.groupName || match.round || tournamentText.groupsTab;
+    };
+    const getMatchControlStatusStyle = (status) => ({
+      ...styles.tournamentMatchControlStatusChipV2,
+      ...(status === "completed"
+        ? styles.tournamentMatchControlStatusDoneV2
+        : {}),
+      ...(status === "in_progress"
+        ? styles.tournamentMatchControlStatusLiveV2
+        : {}),
+    });
+    const renderMatchControlScore = (match, side) => {
+      const isSideA = side === "A";
+      const teamLabel = isSideA ? match.teamA : match.teamB;
+      const scoreValue = String(match?.[isSideA ? "scoreA" : "scoreB"] ?? "");
+
+      return (
+        <div style={styles.tournamentMatchControlScoreLineV2}>
+          <span>{teamLabel || "-"}</span>
+          <div style={styles.tournamentMatchControlScoreBoxV2}>
+            <button
+              type="button"
+              style={styles.tournamentMatchControlScoreButtonV2}
+              onClick={() => incrementMatchScore(match.id, side, -1)}
+              aria-label={`${teamLabel} decrease score`}
+            >
+              <SvgIcon type="minus" size={12} strokeWidth={2.6} />
+            </button>
+            <input
+              style={styles.tournamentMatchControlScoreInputV2}
+              inputMode="numeric"
+              value={scoreValue}
+              onChange={(event) =>
+                updateMatchScore(match.id, side, event.target.value)
+              }
+              placeholder="0"
+            />
+            <button
+              type="button"
+              style={styles.tournamentMatchControlScoreButtonV2}
+              onClick={() => incrementMatchScore(match.id, side, 1)}
+              aria-label={`${teamLabel} increase score`}
+            >
+              <SvgIcon type="plus" size={12} strokeWidth={2.6} />
+            </button>
+          </div>
+        </div>
+      );
+    };
+    const renderMatchControlCard = (match) => {
+      const isLive = match.controlStatus === "in_progress";
+      const isFinished = match.controlStatus === "completed";
+      const winnerLabel = getMatchControlWinnerLabel(match);
+      const stageLabel = getMatchControlStageLabel(match);
+
+      return (
+        <article
+          key={`match-control-${match.id}`}
+          style={{
+            ...styles.tournamentMatchControlCardV2,
+            ...(isLive ? styles.tournamentMatchControlCardLiveV2 : {}),
+          }}
+        >
+          <div style={styles.tournamentMatchControlCardTopV2}>
+            <div style={styles.tournamentMatchControlMetaV2}>
+              <span style={styles.tournamentMatchControlCourtChipV2}>
+                {tournamentText.courtLabel} {match.controlCourt || "-"}
+              </span>
+              <span>{match.controlTime || "-"}</span>
+              <span>{stageLabel}</span>
+              {match.seriesName && (
+                <span>{getSeriesShortLabel(match.seriesName)}</span>
+              )}
+            </div>
+            <span style={getMatchControlStatusStyle(match.controlStatus)}>
+              {isLive ? "Live" : match.controlStatusLabel}
+            </span>
+          </div>
+
+          {(isKnockoutMatch(match) || match.phase || match.stage === "knockout") && (
+            <div style={styles.tournamentMatchControlStageRowV2}>
+              {["semifinal", "final", "thirdPlace", "third_place"].some((stage) =>
+                String(match.phase || match.stage || "").includes(stage)
+              )
+                ? stageLabel
+                : tournamentText.knockoutLabel}
+            </div>
+          )}
+
+          <div
+            style={{
+              ...styles.tournamentMatchControlScoreGridV2,
+              ...(isLive ? styles.tournamentMatchControlScoreGridLiveV2 : {}),
+            }}
+          >
+            {renderMatchControlScore(match, "A")}
+            {renderMatchControlScore(match, "B")}
+          </div>
+
+          {(winnerLabel || match.controlMissingScore) && (
+            <div style={styles.tournamentMatchControlResultRowV2}>
+              {winnerLabel && (
+                <span style={styles.tournamentMatchControlWinnerChipV2}>
+                  {tournamentText.winnerLabel}: {winnerLabel}
+                </span>
+              )}
+              {match.controlMissingScore && (
+                <span style={styles.tournamentMatchControlWarningChipV2}>
+                  Missing score
+                </span>
+              )}
+            </div>
+          )}
+
+          <div style={styles.tournamentMatchControlActionsV2}>
+            {!isFinished && (
+              <button
+                type="button"
+                style={styles.teamBuilderActionButtonPrimaryV2}
+                onClick={() => confirmMatchCompleted(match.id)}
+              >
+                {tournamentText.markFinished}
+              </button>
+            )}
+            <button
+              type="button"
+              style={styles.teamBuilderActionButtonV2}
+              onClick={() =>
+                setActiveScheduleEditMatchId((current) =>
+                  current === match.id ? "" : match.id
+                )
+              }
+            >
+              Open match
+            </button>
+            <button
+              type="button"
+              style={styles.teamBuilderActionButtonV2}
+              onClick={() => startScheduleMoveMode(match.id, "swap")}
+            >
+              {language === "no" ? "Flytt" : "Move"}
+            </button>
+            {(isFinished || hasScoreValue(match.scoreA) || hasScoreValue(match.scoreB)) && (
+              <button
+                type="button"
+                style={styles.teamBuilderActionButtonDangerV2}
+                onClick={() => clearMatchResult(match.id)}
+              >
+                {tournamentText.clearResult}
+              </button>
+            )}
+          </div>
+        </article>
+      );
+    };
+    const renderMatchControlNextItem = (match) => (
+      <button
+        key={`next-up-${match.id}`}
+        type="button"
+        style={styles.tournamentMatchControlNextItemV2}
+        onClick={() => {
+          setActiveMatchControlFilter("next");
+          setActiveMatchControlCourt("all");
+          setActiveScheduleEditMatchId(match.id);
+        }}
+      >
+        <span>
+          {match.controlTime || "-"} / {tournamentText.courtLabel}{" "}
+          {match.controlCourt || "-"}
+        </span>
+        <strong>
+          {match.teamA || match.sourceA || "-"} {tournamentText.vsLabel}{" "}
+          {match.teamB || match.sourceB || "-"}
+        </strong>
+      </button>
+    );
+    const renderTournamentMatchControlRoom = () => (
+      <div style={styles.tournamentMatchControlShellV2}>
+        <div style={styles.tournamentMatchControlHeaderV2}>
+          <div>
+            <div style={styles.tournamentEyebrow}>Match control</div>
+            <div style={styles.tournamentSectionTitle}>Control room</div>
+          </div>
+          <button
+            style={styles.primaryButtonSmall}
+            onClick={generateTournamentMatches}
+          >
+            {tournamentText.generateBasicMatches}
+          </button>
+        </div>
+
+        <div style={styles.tournamentMatchControlSummaryGridV2}>
+          {[
+            ["Total", matchControlStatusItems.length],
+            [
+              "Live",
+              matchControlStatusItems.filter(
+                (match) => match.controlStatus === "in_progress"
+              ).length,
+            ],
+            ["Next", matchControlNextItems.length],
+            [
+              tournamentText.matchStatusCompleted,
+              matchControlStatusItems.filter(
+                (match) => match.controlStatus === "completed"
+              ).length,
+            ],
+            ["Missing scores", matchControlMissingScoreItems.length],
+            ["Class", activeMatchControlSeriesLabel || "-"],
+          ].map(([label, value]) => (
+            <div key={`match-control-summary-${label}`} style={styles.tournamentInfoTile}>
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+
+        <div style={styles.tournamentMatchControlFilterRowV2}>
+          {matchControlFilterOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              style={{
+                ...styles.tournamentMatchControlFilterButtonV2,
+                ...(activeMatchControlFilter === option.id
+                  ? styles.tournamentMatchControlFilterButtonActiveV2
+                  : {}),
+              }}
+              onClick={() => setActiveMatchControlFilter(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+          {matchControlAvailableCourts.length > 1 && (
+            <select
+              style={styles.tournamentMatchControlCourtSelectV2}
+              value={activeMatchControlCourt}
+              onChange={(event) => setActiveMatchControlCourt(event.target.value)}
+              aria-label="Filter by court"
+            >
+              <option value="all">{tournamentText.courtsLabel}: All</option>
+              {matchControlAvailableCourts.map((court) => (
+                <option key={`match-control-court-${court}`} value={court}>
+                  {tournamentText.courtLabel} {court}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <div
+          style={{
+            ...styles.tournamentMatchControlLayoutV2,
+            ...(isMobile ? styles.tournamentMatchControlLayoutMobileV2 : {}),
+          }}
+        >
+          <div style={styles.tournamentMatchControlListV2}>
+            {filteredMatchControlItems.length ? (
+              filteredMatchControlItems.map(renderMatchControlCard)
+            ) : (
+              <div style={styles.tournamentMutedPanel}>
+                {tournamentText.noMatchesYet}
+              </div>
+            )}
+          </div>
+
+          <aside style={styles.tournamentMatchControlRailV2}>
+            <div style={styles.tournamentMatchControlRailCardV2}>
+              <div style={styles.tournamentMiniTitle}>
+                {tournamentText.nextMatchesTitle}
+              </div>
+              {matchControlNextItems.length ? (
+                <div style={styles.tournamentSnapshotList}>
+                  {matchControlNextItems.map(renderMatchControlNextItem)}
+                </div>
+              ) : (
+                <div style={styles.tournamentMutedText}>
+                  {tournamentText.noMatchesYet}
+                </div>
+              )}
+            </div>
+
+            <div style={styles.tournamentMatchControlRailCardV2}>
+              <div style={styles.tournamentMiniTitle}>Warnings</div>
+              {matchControlMissingScoreItems.length ? (
+                <div style={styles.tournamentWarningListV2}>
+                  {matchControlMissingScoreItems.slice(0, 4).map((match) => (
+                    <span
+                      key={`missing-score-${match.id}`}
+                      style={styles.tournamentWarningChipV2}
+                    >
+                      {match.controlTime || "-"} / {match.teamA}{" "}
+                      {tournamentText.vsLabel} {match.teamB}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div style={styles.tournamentMutedText}>
+                  No missing scores.
+                </div>
+              )}
+            </div>
+
+            <div style={styles.tournamentMatchControlRailCardV2}>
+              <div style={styles.tournamentMiniTitle}>Public live</div>
+              <div style={styles.tournamentMutedText}>
+                {isBackendPublished
+                  ? "Live view is available for spectators."
+                  : "Publish to enable the spectator live view."}
+              </div>
+              <div style={styles.tournamentInlineActions}>
+                <button
+                  type="button"
+                  style={styles.secondaryButtonCompact}
+                  onClick={openActiveTournamentPublicPreview}
+                  disabled={!publicUrl}
+                >
+                  Follow live
+                </button>
+                <button
+                  type="button"
+                  style={styles.secondaryButtonCompact}
+                  onClick={copyActiveTournamentPublicUrl}
+                  disabled={!publicUrl}
+                >
+                  Copy link
+                </button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    );
 
     const renderHallSchedulePreview = (limit = 12) => {
       return renderTournamentHallScheduleGrid({
@@ -17911,13 +18371,13 @@ const savedRound = readStorageWithTtl(
                               {tournamentText.matchesTitle}
                             </div>
                           </div>
-                          <button
-                            style={styles.primaryButtonSmall}
-                            onClick={generateTournamentMatches}
-                          >
-                            {tournamentText.generateBasicMatches}
-                          </button>
+                          <div style={styles.tournamentStatusBadge}>
+                            {matchControlStatusItems.length}{" "}
+                            {tournamentText.matchesTitle}
+                          </div>
                         </div>
+
+                        {renderTournamentMatchControlRoom()}
 
                         <div style={styles.tournamentSchedulePanel}>
                           <div style={styles.tournamentSectionHeader}>
@@ -18218,27 +18678,6 @@ const savedRound = readStorageWithTtl(
                           )}
                           {renderHallSchedulePreview(18)}
                         </div>
-
-                        {visibleTournamentMatches.length > 0 ? (
-                          <div style={styles.tournamentMatchSummaryGrid}>
-                            <div style={styles.tournamentInfoTile}>
-                              <span>{tournamentText.matchStatusCompleted}</span>
-                              <strong>{visibleCompletedMatchesCount}</strong>
-                            </div>
-                            <div style={styles.tournamentInfoTile}>
-                              <span>{tournamentText.matchStatusStarted}</span>
-                              <strong>{visibleStartedMatchesCount}</strong>
-                            </div>
-                            <div style={styles.tournamentInfoTile}>
-                              <span>{tournamentText.matchStatusScheduled}</span>
-                              <strong>{visibleScheduledMatchesCount}</strong>
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={styles.tournamentMutedPanel}>
-                            {tournamentText.noMatchesYet}
-                          </div>
-                        )}
                       </div>
                     )}
 
@@ -29189,6 +29628,259 @@ Object.assign(styles, {
     ...styles.tournamentSchedulePanel,
     ...sportsGlassSoftV3,
     borderRadius: "24px",
+  },
+  tournamentMatchControlShellV2: {
+    ...sportsGlassV3,
+    display: "grid",
+    gap: "14px",
+    borderRadius: "24px",
+    padding: "14px",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  tournamentMatchControlHeaderV2: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: "12px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  tournamentMatchControlSummaryGridV2: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 132px), 1fr))",
+    gap: "9px",
+    minWidth: 0,
+  },
+  tournamentMatchControlFilterRowV2: {
+    display: "flex",
+    alignItems: "center",
+    gap: "7px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  tournamentMatchControlFilterButtonV2: {
+    minHeight: "36px",
+    borderRadius: "999px",
+    border: "1px solid rgba(125,211,252,0.18)",
+    background: "rgba(14,165,233,0.10)",
+    color: "#cbd5e1",
+    fontSize: "11px",
+    fontWeight: "950",
+    padding: "0 10px",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  },
+  tournamentMatchControlFilterButtonActiveV2: {
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    border: "1px solid rgba(186,230,253,0.42)",
+    color: "#03111f",
+    boxShadow: "0 12px 28px rgba(14,165,233,0.20)",
+  },
+  tournamentMatchControlCourtSelectV2: {
+    minHeight: "36px",
+    borderRadius: "999px",
+    border: "1px solid rgba(125,211,252,0.18)",
+    background: "rgba(2,6,23,0.44)",
+    color: "#dff7ff",
+    fontSize: "11px",
+    fontWeight: "900",
+    padding: "0 10px",
+    colorScheme: "dark",
+  },
+  tournamentMatchControlLayoutV2: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(260px, 0.36fr)",
+    gap: "14px",
+    alignItems: "start",
+    minWidth: 0,
+  },
+  tournamentMatchControlLayoutMobileV2: {
+    gridTemplateColumns: "minmax(0, 1fr)",
+  },
+  tournamentMatchControlListV2: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
+    gap: "10px",
+    minWidth: 0,
+  },
+  tournamentMatchControlCardV2: {
+    ...sportsRowV3,
+    display: "grid",
+    gap: "10px",
+    borderRadius: "20px",
+    padding: "12px",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  tournamentMatchControlCardLiveV2: {
+    border: "1px solid rgba(34,197,94,0.46)",
+    boxShadow:
+      "0 0 0 1px rgba(34,197,94,0.16), 0 18px 44px rgba(34,197,94,0.12)",
+    background:
+      "linear-gradient(145deg, rgba(6,78,59,0.42), rgba(15,23,42,0.72))",
+  },
+  tournamentMatchControlCardTopV2: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "8px",
+    minWidth: 0,
+  },
+  tournamentMatchControlMetaV2: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    flexWrap: "wrap",
+    color: "#9fb4d0",
+    fontSize: "10px",
+    fontWeight: "900",
+    minWidth: 0,
+  },
+  tournamentMatchControlCourtChipV2: {
+    borderRadius: "999px",
+    padding: "4px 7px",
+    background: "rgba(14,165,233,0.16)",
+    border: "1px solid rgba(125,211,252,0.22)",
+    color: "#bae6fd",
+    whiteSpace: "nowrap",
+  },
+  tournamentMatchControlStatusChipV2: {
+    borderRadius: "999px",
+    padding: "5px 8px",
+    background: "rgba(148,163,184,0.13)",
+    border: "1px solid rgba(148,163,184,0.16)",
+    color: "#cbd5e1",
+    fontSize: "10px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+    whiteSpace: "nowrap",
+  },
+  tournamentMatchControlStatusLiveV2: {
+    background: "rgba(34,197,94,0.20)",
+    border: "1px solid rgba(52,211,153,0.34)",
+    color: "#bbf7d0",
+  },
+  tournamentMatchControlStatusDoneV2: {
+    background: "rgba(99,102,241,0.18)",
+    border: "1px solid rgba(129,140,248,0.28)",
+    color: "#c7d2fe",
+  },
+  tournamentMatchControlStageRowV2: {
+    justifySelf: "start",
+    borderRadius: "999px",
+    padding: "4px 8px",
+    background: "rgba(245,158,11,0.14)",
+    border: "1px solid rgba(251,191,36,0.22)",
+    color: "#fde68a",
+    fontSize: "10px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+  },
+  tournamentMatchControlScoreGridV2: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  tournamentMatchControlScoreGridLiveV2: {
+    gap: "10px",
+  },
+  tournamentMatchControlScoreLineV2: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: "10px",
+    minHeight: "42px",
+    color: "#ecfeff",
+    fontSize: "13px",
+    fontWeight: "950",
+    minWidth: 0,
+  },
+  tournamentMatchControlScoreBoxV2: {
+    display: "grid",
+    gridTemplateColumns: "34px 46px 34px",
+    alignItems: "center",
+    gap: "4px",
+  },
+  tournamentMatchControlScoreButtonV2: {
+    width: "34px",
+    height: "34px",
+    borderRadius: "12px",
+    border: "1px solid rgba(125,211,252,0.18)",
+    background: "rgba(14,165,233,0.14)",
+    color: "#dff7ff",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+  },
+  tournamentMatchControlScoreInputV2: {
+    width: "46px",
+    height: "34px",
+    borderRadius: "12px",
+    border: "1px solid rgba(125,211,252,0.18)",
+    background: "rgba(2,6,23,0.44)",
+    color: "#ecfeff",
+    fontSize: "16px",
+    fontWeight: "950",
+    textAlign: "center",
+    outline: "none",
+  },
+  tournamentMatchControlResultRowV2: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    minWidth: 0,
+  },
+  tournamentMatchControlWinnerChipV2: {
+    borderRadius: "999px",
+    padding: "5px 8px",
+    background: "rgba(34,197,94,0.16)",
+    border: "1px solid rgba(52,211,153,0.26)",
+    color: "#bbf7d0",
+    fontSize: "10px",
+    fontWeight: "950",
+  },
+  tournamentMatchControlWarningChipV2: {
+    borderRadius: "999px",
+    padding: "5px 8px",
+    background: "rgba(245,158,11,0.16)",
+    border: "1px solid rgba(251,191,36,0.26)",
+    color: "#fde68a",
+    fontSize: "10px",
+    fontWeight: "950",
+  },
+  tournamentMatchControlActionsV2: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "7px",
+    minWidth: 0,
+  },
+  tournamentMatchControlRailV2: {
+    display: "grid",
+    gap: "10px",
+    alignContent: "start",
+    minWidth: 0,
+  },
+  tournamentMatchControlRailCardV2: {
+    ...sportsRowV3,
+    display: "grid",
+    gap: "10px",
+    borderRadius: "18px",
+    padding: "12px",
+    minWidth: 0,
+  },
+  tournamentMatchControlNextItemV2: {
+    ...sportsRowV3,
+    borderRadius: "15px",
+    padding: "10px",
+    display: "grid",
+    gap: "5px",
+    textAlign: "left",
+    color: "#dff7ff",
+    cursor: "pointer",
+    minWidth: 0,
   },
   tournamentScheduleCourt: {
     ...styles.tournamentScheduleCourt,
