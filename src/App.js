@@ -13085,20 +13085,36 @@ const savedRound = readStorageWithTtl(
             live: "Live",
             next: "Neste",
             finished: "Ferdig",
+            completed: "Ferdige",
             scheduled: "Planlagt",
-            main: "Live og neste",
-            queue: "Kø",
-            latest: "Siste resultater",
+            activeClass: "Klasse",
+            liveMatches: "Live kamper",
+            nextMatches: "Neste kamper",
+            completedMatches: "Ferdige kamper",
+            liveFocus: "Live kamp",
+            nextFocus: "Neste kamp",
+            resultFocus: "Siste resultat",
+            main: "Scoreboard",
+            queue: "Neste 3",
+            latest: "Resultater",
             noMatches: "Ingen kamper publisert ennå.",
           }
         : {
             live: "Live",
             next: "Next",
             finished: "Finished",
+            completed: "Completed",
             scheduled: "Scheduled",
-            main: "Live and next",
-            queue: "Queue",
-            latest: "Latest results",
+            main: "Scoreboard",
+            activeClass: "Class",
+            liveMatches: "Live matches",
+            nextMatches: "Next matches",
+            completedMatches: "Completed",
+            liveFocus: "Live match",
+            nextFocus: "Next match",
+            resultFocus: "Latest result",
+            queue: "Next 3",
+            latest: "Results",
             noMatches: "No matches published yet.",
           };
     const publicMatchCards = publicSchedule.batches.flatMap((batch, batchIndex) =>
@@ -13175,19 +13191,16 @@ const savedRound = readStorageWithTtl(
     const publicScheduledMatches = publicMatchCards.filter(
       (match) => match.publicStatusKey === "scheduled"
     );
-    const publicNextMatches = publicScheduledMatches.slice(0, 5);
+    const publicNextMatches = publicScheduledMatches.slice(0, 3);
     const publicNextMatchIds = new Set(
       publicNextMatches.map((match) => match.publicCardId)
     );
-    const publicFeaturedMatches = publicLiveMatches.length
-      ? publicLiveMatches
-      : publicNextMatches.length
-        ? publicNextMatches.slice(0, 2)
-        : publicFinishedMatches.slice(0, 2);
-    const publicRailUpcoming = publicNextMatches.slice(
-      publicFeaturedMatches.length && !publicLiveMatches.length ? 2 : 0,
-      6
-    );
+    const publicRecentFinishedMatches = publicFinishedMatches.slice(0, 5);
+    const publicScoreboardFocusMatch =
+      publicLiveMatches[0] || publicNextMatches[0] || publicFinishedMatches[0] || null;
+    const publicSecondaryLiveMatches = publicLiveMatches.slice(1, 4);
+    const hasPublicLiveRail =
+      standings.length > 0 || publicRecentFinishedMatches.length > 0;
     const publicLiveLogoUrl = getTournamentPublicLiveLogoUrl(safeTournament);
     const publicLiveBackgroundUrl =
       getTournamentPublicLiveBackgroundUrl(safeTournament);
@@ -13255,6 +13268,28 @@ const savedRound = readStorageWithTtl(
             .map((series) => `${getSeriesDisplayName(series)} ${tournamentText.classLiveNowSuffix}`)
             .join(". ")}.`
         : "";
+    const publicHeroStats = [
+      [
+        publicLiveLabels.activeClass,
+        selectedPublicSeries ? getSeriesDisplayName(selectedPublicSeries) : "",
+        publicHeroStatusLabel,
+      ],
+      [
+        publicLiveLabels.liveMatches,
+        publicLiveMatches.length,
+        publicLiveMatches.length ? publicLiveLabels.live : publicLiveLabels.scheduled,
+      ],
+      [
+        publicLiveLabels.nextMatches,
+        publicScheduledMatches.length,
+        publicLiveLabels.next,
+      ],
+      [
+        publicLiveLabels.completedMatches,
+        publicFinishedMatches.length,
+        publicLiveLabels.finished,
+      ],
+    ].filter(([, value]) => String(value ?? "").trim());
     const publicSectionStyle = {
       ...styles.publicTournamentSection,
       background: publicTheme.surface,
@@ -13414,6 +13449,7 @@ const savedRound = readStorageWithTtl(
     const renderPublicMatchCard = (match, options = {}) => {
       const prominent = Boolean(options.prominent);
       const compact = Boolean(options.compact);
+      const focus = Boolean(options.focus);
       const isLive = match.publicStatusKey === "live";
       const isFinished = match.publicStatusKey === "finished";
       const isNext =
@@ -13433,10 +13469,14 @@ const savedRound = readStorageWithTtl(
       const scoreB = match.publicScoreB || "-";
       const teamNameStyle = compact
         ? { ...styles.publicLiveTeamName, fontSize: "15px" }
-        : styles.publicLiveTeamName;
+        : focus
+          ? { ...styles.publicLiveTeamName, ...styles.publicLiveTeamNameFocus }
+          : styles.publicLiveTeamName;
       const scoreStyle = compact
         ? { ...styles.publicLiveScore, minWidth: "34px", fontSize: "24px" }
-        : styles.publicLiveScore;
+        : focus
+          ? { ...styles.publicLiveScore, ...styles.publicLiveScoreFocus }
+          : styles.publicLiveScore;
 
       return (
         <article
@@ -13444,6 +13484,7 @@ const savedRound = readStorageWithTtl(
           style={{
             ...styles.publicLiveMatchCard,
             ...(prominent ? styles.publicLiveMatchCardProminent : {}),
+            ...(focus ? styles.publicLiveMatchCardFocus : {}),
             ...(compact ? styles.publicLiveMatchCardCompact : {}),
             ...(isLive ? styles.publicLiveMatchCardLive : {}),
             ...(isFinished ? styles.publicLiveMatchCardFinished : {}),
@@ -13637,6 +13678,40 @@ const savedRound = readStorageWithTtl(
                   </span>
                 </div>
 
+                <div style={styles.publicLiveHeroStatGrid}>
+                  {publicHeroStats.map(([label, value, meta]) => (
+                    <div
+                      key={`public-live-hero-stat-${label}`}
+                      style={{
+                        ...styles.publicLiveHeroStat,
+                        background: publicTheme.panel,
+                        borderColor: publicTheme.border,
+                        color: publicTheme.text,
+                      }}
+                    >
+                      <span
+                        style={{
+                          ...styles.publicLiveHeroStatLabel,
+                          color: publicTheme.mutedText,
+                        }}
+                      >
+                        {label}
+                      </span>
+                      <strong style={styles.publicLiveHeroStatValue}>
+                        {value}
+                      </strong>
+                      <span
+                        style={{
+                          ...styles.publicLiveHeroStatMeta,
+                          color: publicTheme.primary,
+                        }}
+                      >
+                        {meta}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
                 <div style={styles.publicTournamentSummaryGrid}>
                   {[
                     [tournamentText.dateLabel, formatPublicTournamentDate(safeTournament)],
@@ -13738,6 +13813,7 @@ const savedRound = readStorageWithTtl(
                 <section
                   style={{
                     ...styles.publicLiveWorkspace,
+                    ...(!hasPublicLiveRail ? styles.publicLiveWorkspaceSolo : {}),
                     ...(isMobile ? styles.publicLiveWorkspaceMobile : {}),
                   }}
                 >
@@ -13750,139 +13826,137 @@ const savedRound = readStorageWithTtl(
                       color: publicTheme.text,
                     }}
                   >
-                    <div style={publicSectionHeaderStyle}>
-                      <span>{publicLiveLabels.main}</span>
-                      <strong>
-                        {publicLiveMatches.length
-                          ? `${publicLiveMatches.length} ${publicLiveLabels.live}`
-                          : publicNextMatches.length
-                            ? publicLiveLabels.next
-                            : publicLiveLabels.latest}
-                      </strong>
+                    <div style={styles.publicLiveSectionHeaderV3}>
+                      <div>
+                        <span>{publicLiveLabels.main}</span>
+                        <strong>
+                          {selectedPublicSeries
+                            ? getSeriesDisplayName(selectedPublicSeries)
+                            : publicHeroStatusLabel}
+                        </strong>
+                      </div>
+                      <span
+                        style={{
+                          ...styles.publicLiveStatusChip,
+                          background: publicLiveMatches.length
+                            ? hexToRgba(publicTheme.primary, 0.20)
+                            : hexToRgba(publicTheme.accent, 0.14),
+                          borderColor: publicLiveMatches.length
+                            ? hexToRgba(publicTheme.primary, 0.42)
+                            : hexToRgba(publicTheme.accent, 0.28),
+                          color: publicLiveMatches.length
+                            ? publicTheme.primary
+                            : publicTheme.accent,
+                        }}
+                      >
+                        {publicHeroStatusLabel}
+                      </span>
                     </div>
-                    <div style={styles.publicLiveFeaturedGrid}>
-                      {publicFeaturedMatches.map((match) =>
-                        renderPublicMatchCard(match, {
+
+                    {publicScoreboardFocusMatch && (
+                      <div style={styles.publicLiveFocusBlock}>
+                        <div style={styles.publicLiveRailTitle}>
+                          {publicScoreboardFocusMatch.publicStatusKey === "live"
+                            ? publicLiveLabels.liveFocus
+                            : publicScoreboardFocusMatch.publicStatusKey === "scheduled"
+                              ? publicLiveLabels.nextFocus
+                              : publicLiveLabels.resultFocus}
+                        </div>
+                        {renderPublicMatchCard(publicScoreboardFocusMatch, {
                           prominent: true,
-                          keyPrefix: "public-featured",
-                        })
-                      )}
-                    </div>
-                    {publicScheduledMatches.length > 0 && (
+                          focus: true,
+                          keyPrefix: "public-focus",
+                        })}
+                      </div>
+                    )}
+
+                    {publicSecondaryLiveMatches.length > 0 && (
+                      <div style={styles.publicLiveInlineBlock}>
+                        <div style={styles.publicLiveRailTitle}>
+                          {publicLiveLabels.liveMatches}
+                        </div>
+                        <div style={styles.publicLiveMiniGrid}>
+                          {publicSecondaryLiveMatches.map((match) =>
+                            renderPublicMatchCard(match, {
+                              compact: true,
+                              keyPrefix: "public-extra-live",
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {publicNextMatches.length > 0 && (
                       <div style={styles.publicLiveInlineBlock}>
                         <div style={styles.publicLiveRailTitle}>
                           {publicLiveLabels.queue}
                         </div>
                         <div style={styles.publicLiveMiniGrid}>
-                          {publicScheduledMatches
-                            .slice(
-                              publicFeaturedMatches.length &&
-                                !publicLiveMatches.length
-                                ? 2
-                                : 0,
-                              6
-                            )
-                            .map((match) =>
-                              renderPublicMatchCard(match, {
-                                compact: true,
-                                keyPrefix: "public-queue",
-                              })
-                            )}
+                          {publicNextMatches.map((match) =>
+                            renderPublicMatchCard(match, {
+                              compact: true,
+                              keyPrefix: "public-next-up",
+                            })
+                          )}
                         </div>
                       </div>
                     )}
                   </div>
 
-                  <aside
-                    style={{
-                      ...styles.publicLiveRail,
-                      ...(isMobile ? styles.publicLiveRailMobile : {}),
-                      background: publicTheme.surface,
-                      borderColor: publicTheme.border,
-                      color: publicTheme.text,
-                    }}
-                  >
-                    {standings.length > 0 && (
-                      <div style={styles.publicLiveRailBlock}>
-                        <div style={styles.publicLiveRailTitle}>
-                          {tournamentText.standingsTitle}
-                        </div>
-                        <div style={styles.publicLiveRailList}>
-                          {standings.slice(0, 2).map((group) => (
-                            <div
-                              key={`public-rail-standing-${group.groupId}`}
-                              style={styles.publicLiveRailCard}
-                            >
-                              <strong>{group.groupName || group.groupId}</strong>
-                              {(group.rows || []).slice(0, 4).map((row) => (
-                                <div
-                                  key={`${group.groupId}-${row.teamId || row.teamName}`}
-                                  style={styles.publicLiveStandingRow}
-                                >
-                                  <span>{row.teamName}</span>
-                                  <strong>{row.points}</strong>
-                                </div>
-                              ))}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {(publicRailUpcoming.length > 0 ||
-                      publicScheduledMatches.length > 0) && (
-                      <div style={styles.publicLiveRailBlock}>
-                        <div style={styles.publicLiveRailTitle}>
-                          {publicLiveLabels.queue}
-                        </div>
-                        <div style={styles.publicLiveRailList}>
-                          {(publicRailUpcoming.length
-                            ? publicRailUpcoming
-                            : publicScheduledMatches
-                          )
-                            .slice(0, 5)
-                            .map((match) => (
+                  {hasPublicLiveRail && (
+                    <aside
+                      style={{
+                        ...styles.publicLiveRail,
+                        ...(isMobile ? styles.publicLiveRailMobile : {}),
+                        background: publicTheme.surface,
+                        borderColor: publicTheme.border,
+                        color: publicTheme.text,
+                      }}
+                    >
+                      {standings.length > 0 && (
+                        <div style={styles.publicLiveRailBlock}>
+                          <div style={styles.publicLiveRailTitle}>
+                            {tournamentText.standingsTitle}
+                          </div>
+                          <div style={styles.publicLiveRailList}>
+                            {standings.slice(0, 2).map((group) => (
                               <div
-                                key={`public-rail-next-${match.publicCardId}`}
-                                style={styles.publicLiveRailMatch}
+                                key={`public-rail-standing-${group.groupId}`}
+                                style={styles.publicLiveRailCard}
                               >
-                                <span>
-                                  {[match.publicCourt, match.publicTime]
-                                    .filter(Boolean)
-                                    .join(" / ")}
-                                </span>
-                                <strong>
-                                  {match.teamA || "-"} vs {match.teamB || "-"}
-                                </strong>
+                                <strong>{group.groupName || group.groupId}</strong>
+                                {(group.rows || []).slice(0, 4).map((row) => (
+                                  <div
+                                    key={`${group.groupId}-${row.teamId || row.teamName}`}
+                                    style={styles.publicLiveStandingRow}
+                                  >
+                                    <span>{row.teamName}</span>
+                                    <strong>{row.points}</strong>
+                                  </div>
+                                ))}
                               </div>
                             ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {publicFinishedMatches.length > 0 && (
-                      <div style={styles.publicLiveRailBlock}>
-                        <div style={styles.publicLiveRailTitle}>
-                          {publicLiveLabels.latest}
+                      {publicRecentFinishedMatches.length > 0 && (
+                        <div style={styles.publicLiveRailBlock}>
+                          <div style={styles.publicLiveRailTitle}>
+                            {publicLiveLabels.latest}
+                          </div>
+                          <div style={styles.publicLiveRailList}>
+                            {publicRecentFinishedMatches.map((match) => (
+                              renderPublicMatchCard(match, {
+                                compact: true,
+                                keyPrefix: "public-results",
+                              })
+                            ))}
+                          </div>
                         </div>
-                        <div style={styles.publicLiveRailList}>
-                          {publicFinishedMatches.slice(0, 5).map((match) => (
-                            <div
-                              key={`public-rail-finished-${match.publicCardId}`}
-                              style={styles.publicLiveRailMatch}
-                            >
-                              <span>{match.publicRound || match.publicCourt}</span>
-                              <strong>
-                                {match.teamA || "-"} {match.publicScoreA || "-"}
-                                {" - "}
-                                {match.publicScoreB || "-"} {match.teamB || "-"}
-                              </strong>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </aside>
+                      )}
+                    </aside>
+                  )}
                 </section>
               ) : (
                 <section style={publicSectionStyle}>
@@ -28545,12 +28619,64 @@ Object.assign(styles, {
     borderRadius: "28px",
     boxShadow: "0 22px 58px rgba(2,6,23,0.28)",
   },
+  publicLiveHeroStatGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))",
+    gap: "10px",
+    minWidth: 0,
+  },
+  publicLiveHeroStat: {
+    display: "grid",
+    gap: "4px",
+    minHeight: "72px",
+    padding: "12px 14px",
+    borderRadius: "18px",
+    border: "1px solid rgba(125,211,252,0.18)",
+    background: "rgba(2,6,23,0.38)",
+    backdropFilter: "blur(16px)",
+    minWidth: 0,
+  },
+  publicLiveHeroStatLabel: {
+    fontSize: "11px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+    letterSpacing: 0,
+  },
+  publicLiveHeroStatValue: {
+    color: "#f8fafc",
+    fontSize: "clamp(22px, 3.4vw, 34px)",
+    lineHeight: 1,
+    fontWeight: "950",
+    overflowWrap: "break-word",
+    minWidth: 0,
+  },
+  publicLiveHeroStatMeta: {
+    fontSize: "11px",
+    fontWeight: "900",
+    lineHeight: 1.2,
+  },
+  publicLiveSectionHeaderV3: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    flexWrap: "wrap",
+    minWidth: 0,
+  },
+  publicLiveFocusBlock: {
+    display: "grid",
+    gap: "10px",
+    minWidth: 0,
+  },
   publicLiveWorkspace: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1.7fr) minmax(320px, 0.85fr)",
     gap: "16px",
     alignItems: "start",
     minWidth: 0,
+  },
+  publicLiveWorkspaceSolo: {
+    gridTemplateColumns: "minmax(0, 1fr)",
   },
   publicLiveWorkspaceMobile: {
     gridTemplateColumns: "1fr",
@@ -28601,6 +28727,13 @@ Object.assign(styles, {
   publicLiveMatchCardProminent: {
     padding: "clamp(16px, 2.4vw, 26px)",
     borderRadius: "28px",
+  },
+  publicLiveMatchCardFocus: {
+    gap: "14px",
+    padding: "clamp(18px, 3vw, 32px)",
+    borderRadius: "32px",
+    background:
+      "radial-gradient(circle at 92% 0%, rgba(56,189,248,0.20), transparent 34%), radial-gradient(circle at 12% 100%, rgba(34,197,94,0.18), transparent 32%), linear-gradient(145deg, rgba(15,23,42,0.96), rgba(6,78,59,0.58))",
   },
   publicLiveMatchCardCompact: {
     borderRadius: "18px",
@@ -28664,8 +28797,13 @@ Object.assign(styles, {
     fontSize: "clamp(20px, 3vw, 38px)",
     lineHeight: 1.05,
     fontWeight: "950",
-    overflowWrap: "anywhere",
+    overflowWrap: "break-word",
+    wordBreak: "normal",
     minWidth: 0,
+  },
+  publicLiveTeamNameFocus: {
+    fontSize: "clamp(24px, 5vw, 56px)",
+    letterSpacing: 0,
   },
   publicLiveScore: {
     minWidth: "58px",
@@ -28675,6 +28813,10 @@ Object.assign(styles, {
     lineHeight: 1,
     fontWeight: "950",
     fontVariantNumeric: "tabular-nums",
+  },
+  publicLiveScoreFocus: {
+    minWidth: "72px",
+    fontSize: "clamp(40px, 8vw, 80px)",
   },
   publicLiveWinnerLine: {
     color: "rgba(187,247,208,0.92)",
