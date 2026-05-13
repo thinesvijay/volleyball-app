@@ -4745,74 +4745,6 @@ export default function App() {
     setTournamentActionMessage(tournamentText.buildUpdateSlots);
   }
 
-  function updateManualGroupSlot(groupIndex, slotIndex, value) {
-    if (!activeTournament) return;
-
-    markManualGroupEditing();
-
-    setTournaments((prev) =>
-      prev.map((tournament) =>
-        tournament.id !== activeTournament.id
-          ? tournament
-          : (() => {
-              const selectedSeries = getTournamentSeriesById(
-                tournament,
-                activeTournamentSetupSeriesId,
-                language
-              );
-              const sourceGroups =
-                hasExplicitTournamentSeries(tournament) && selectedSeries
-                  ? selectedSeries.groups
-                  : tournament.groups;
-              const existingGroups = Array.isArray(sourceGroups)
-                ? sourceGroups
-                : [];
-              if (!existingGroups[groupIndex]) return tournament;
-
-              const groups = existingGroups.map((group, currentGroupIndex) => {
-                if (currentGroupIndex !== groupIndex) return group;
-
-                const existingTeams = Array.isArray(group.teams)
-                  ? group.teams
-                  : [];
-                if (!existingTeams[slotIndex]) return group;
-
-                return {
-                  ...group,
-                  teams: existingTeams.map((team, currentSlotIndex) =>
-                    currentSlotIndex === slotIndex
-                      ? {
-                          ...team,
-                          name: value,
-                        }
-                      : team
-                  ),
-                };
-              });
-
-              if (hasExplicitTournamentSeries(tournament) && selectedSeries) {
-                return {
-                  ...tournament,
-                  series: (tournament.series || []).map((series) =>
-                    String(series.id) !== String(selectedSeries.id)
-                      ? series
-                      : {
-                          ...series,
-                          groups,
-                        }
-                  ),
-                };
-              }
-
-              return {
-                ...tournament,
-                groups,
-              };
-            })()
-      )
-    );
-  }
-
   function addTournamentSeries(preset = {}) {
     if (!activeTournament) return;
 
@@ -14370,6 +14302,394 @@ const savedRound = readStorageWithTtl(
         ? `Fortsett til ${getSeriesDisplayName(nextSetupSeries)}`
         : `Continue to ${getSeriesDisplayName(nextSetupSeries)}`
       : "";
+    const getDrawTeamName = (team) =>
+      String(team?.name || team?.teamName || team?.TeamName || "").trim();
+    const getDrawTeamMeta = (team) =>
+      [
+        team?.club,
+        team?.teamClub,
+        team?.country,
+        team?.Country,
+      ]
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .filter((item, index, items) => items.indexOf(item) === index)
+        .join(" / ");
+    const getDrawTeamId = (team) =>
+      String(
+        team?.sourceTeamId ||
+          team?.teamId ||
+          team?.TeamId ||
+          team?.id ||
+          ""
+      ).trim();
+    const getDrawTeamNameKey = (team) =>
+      getDrawTeamName(team).toLowerCase();
+    const getDrawTeamKey = (team) => {
+      const teamId = getDrawTeamId(team);
+      if (teamId) return `id:${teamId.toLowerCase()}`;
+      return `name:${getDrawTeamNameKey(team)}`;
+    };
+    const isDrawTeamFilled = (team) => Boolean(getDrawTeamName(team));
+    const getDrawTeamStatus = (team) => {
+      const rawStatus = String(
+        team?.drawStatus ||
+          team?.readinessStatus ||
+          team?.rosterStatus ||
+          team?.interestStatus ||
+          team?.status ||
+          ""
+      )
+        .trim()
+        .toLowerCase();
+
+      if (team?.locked || rawStatus.includes("locked")) return "Locked";
+      if (
+        team?.confirmed ||
+        team?.approved ||
+        rawStatus.includes("confirmed") ||
+        rawStatus.includes("approved")
+      ) {
+        return "Confirmed";
+      }
+      if (
+        team?.submitted ||
+        team?.rosterSubmitted ||
+        rawStatus.includes("submitted")
+      ) {
+        return "Submitted";
+      }
+      if (
+        team?.interested ||
+        rawStatus.includes("interested") ||
+        rawStatus.includes("interest")
+      ) {
+        return "Interested";
+      }
+
+      return "";
+    };
+    const getDrawSlotCode = (group, slotIndex) =>
+      `${group?.code || getTournamentGroupCode(0)}${slotIndex + 1}`;
+    const getEmptyDrawSlot = (group, slotIndex, slot = {}) => ({
+      id:
+        slot.id ||
+        `${group?.id || group?.code || "group"}-slot-${getDrawSlotCode(
+          group,
+          slotIndex
+        )}`,
+      slot: slot.slot || getDrawSlotCode(group, slotIndex),
+      seriesId: group?.seriesId || slot.seriesId || "",
+      seriesName: group?.seriesName || slot.seriesName || "",
+      name: "",
+      club: "",
+    });
+    const createDrawSlotTeam = (team, group, slotIndex, slot = {}) => {
+      const teamId = getDrawTeamId(team);
+      return {
+        ...getEmptyDrawSlot(group, slotIndex, slot),
+        id:
+          teamId ||
+          slot.id ||
+          `${group?.id || group?.code || "group"}-slot-${getDrawSlotCode(
+            group,
+            slotIndex
+          )}`,
+        sourceTeamId: teamId,
+        teamId,
+        name: getDrawTeamName(team),
+        club: String(team?.club || team?.teamClub || "").trim(),
+        country: String(team?.country || team?.Country || "").trim(),
+        status: team?.status || "",
+        readinessStatus: team?.readinessStatus || "",
+        rosterStatus: team?.rosterStatus || "",
+        interestStatus: team?.interestStatus || "",
+        submitted: Boolean(team?.submitted),
+        rosterSubmitted: Boolean(team?.rosterSubmitted),
+        confirmed: Boolean(team?.confirmed),
+        approved: Boolean(team?.approved),
+        interested: Boolean(team?.interested),
+        locked: Boolean(team?.locked),
+      };
+    };
+    const drawTeamMatches = (left, right) => {
+      const leftKey = getDrawTeamKey(left);
+      const rightKey = getDrawTeamKey(right);
+      const leftName = getDrawTeamNameKey(left);
+      const rightName = getDrawTeamNameKey(right);
+
+      return Boolean(
+        (leftKey && rightKey && leftKey === rightKey) ||
+          (leftName && rightName && leftName === rightName)
+      );
+    };
+    const clearDrawTeamSlot = (group, team, slotIndex) =>
+      getEmptyDrawSlot(group, slotIndex, team);
+    const removeTeamFromDrawGroups = (groups, targetTeam) =>
+      groups.map((group) => ({
+        ...group,
+        teams: (group.teams || []).map((team, slotIndex) =>
+          drawTeamMatches(team, targetTeam)
+            ? clearDrawTeamSlot(group, team, slotIndex)
+            : team
+        ),
+      }));
+    const getFilledDrawTeams = (groups = manualPreviewGroups) =>
+      groups.flatMap((group) =>
+        (group.teams || [])
+          .filter(isDrawTeamFilled)
+          .map((team, slotIndex) => ({
+            ...team,
+            groupId: group.id,
+            groupCode: group.code || getTournamentGroupCode(0),
+            groupName: group.name,
+            slotIndex,
+          }))
+      );
+    const getUnassignedDrawTeams = (groups = manualPreviewGroups) => {
+      const assigned = getFilledDrawTeams(groups);
+      const assignedKeys = new Set(assigned.map(getDrawTeamKey));
+      const assignedNames = new Set(assigned.map(getDrawTeamNameKey));
+
+      return tournamentTeams.filter((team) => {
+        const teamName = getDrawTeamNameKey(team);
+        return (
+          getDrawTeamName(team) &&
+          !assignedKeys.has(getDrawTeamKey(team)) &&
+          !assignedNames.has(teamName)
+        );
+      });
+    };
+    const getDrawPool = (groups = manualPreviewGroups) => {
+      const pool = [];
+      const seenKeys = new Set();
+      const seenNames = new Set();
+      const addTeam = (team) => {
+        const name = getDrawTeamName(team);
+        if (!name) return;
+        const key = getDrawTeamKey(team);
+        const nameKey = getDrawTeamNameKey(team);
+        if (seenKeys.has(key) || seenNames.has(nameKey)) return;
+        seenKeys.add(key);
+        seenNames.add(nameKey);
+        pool.push(team);
+      };
+
+      tournamentTeams.forEach(addTeam);
+      getFilledDrawTeams(groups).forEach(addTeam);
+      return pool;
+    };
+    const getDrawGroupCount = (group) =>
+      (group.teams || []).filter(isDrawTeamFilled).length;
+    const drawUnassignedTeams = getUnassignedDrawTeams();
+    const drawGroupCounts = manualPreviewGroups.map(getDrawGroupCount);
+    const drawAssignedTeamCount = drawGroupCounts.reduce(
+      (sum, count) => sum + count,
+      0
+    );
+    const drawMinGroupCount = drawGroupCounts.length
+      ? Math.min(...drawGroupCounts)
+      : 0;
+    const drawMaxGroupCount = drawGroupCounts.length
+      ? Math.max(...drawGroupCounts)
+      : 0;
+    const drawHasUnevenGroups =
+      drawGroupCounts.length > 1 && drawMaxGroupCount - drawMinGroupCount > 1;
+    const drawWarnings = [
+      !manualPreviewGroups.length ? "No groups built yet" : "",
+      manualPreviewGroups.some((group) => getDrawGroupCount(group) === 0)
+        ? "No teams assigned"
+        : "",
+      manualPreviewGroups.some((group) => {
+        const count = getDrawGroupCount(group);
+        return count > 0 && count < Math.min(2, configuredTeamsPerGroup);
+      })
+        ? "Group has too few teams"
+        : "",
+      drawHasUnevenGroups ? "Groups are uneven" : "",
+      drawUnassignedTeams.length ? "Unassigned teams remain" : "",
+    ].filter(Boolean);
+    const getCurrentDrawContext = (tournament = activeTournament) => {
+      const series = getTournamentSeriesById(
+        tournament,
+        activeTournamentSetupSeriesId,
+        language
+      );
+      const sourceGroups =
+        hasExplicitTournamentSeries(tournament) && series
+          ? series.groups
+          : tournament?.groups;
+      const groups = Array.isArray(sourceGroups) && sourceGroups.length
+        ? sourceGroups
+        : buildManualGroups(tournament, series);
+
+      return { series, groups };
+    };
+    const applyTournamentDrawGroups = (nextGroups, message) => {
+      if (!activeTournament) return;
+      markManualGroupEditing();
+
+      setTournaments((prev) =>
+        prev.map((tournament) => {
+          if (tournament.id !== activeTournament.id) return tournament;
+
+          const selectedSeries = getTournamentSeriesById(
+            tournament,
+            activeTournamentSetupSeriesId,
+            language
+          );
+
+          if (hasExplicitTournamentSeries(tournament) && selectedSeries) {
+            return {
+              ...tournament,
+              series: (tournament.series || []).map((series) =>
+                String(series.id) !== String(selectedSeries.id)
+                  ? series
+                  : {
+                      ...series,
+                      groups: nextGroups,
+                    }
+              ),
+            };
+          }
+
+          return {
+            ...tournament,
+            groups: nextGroups,
+          };
+        })
+      );
+      setTournamentActionMessage(message);
+    };
+    const placeDrawTeamInGroup = (groups, team, targetGroupId) => {
+      const groupsWithoutTeam = removeTeamFromDrawGroups(groups, team);
+      const targetIndex = groupsWithoutTeam.findIndex(
+        (group) => String(group.id) === String(targetGroupId)
+      );
+      if (targetIndex === -1) return { groups, placed: false };
+
+      const targetGroup = groupsWithoutTeam[targetIndex];
+      const targetTeams = Array.isArray(targetGroup.teams)
+        ? [...targetGroup.teams]
+        : [];
+      let slotIndex = targetTeams.findIndex((slot) => !isDrawTeamFilled(slot));
+      if (slotIndex === -1) {
+        slotIndex = targetTeams.length;
+        targetTeams.push(getEmptyDrawSlot(targetGroup, slotIndex));
+      }
+
+      targetTeams[slotIndex] = createDrawSlotTeam(
+        team,
+        targetGroup,
+        slotIndex,
+        targetTeams[slotIndex]
+      );
+
+      return {
+        placed: true,
+        groups: groupsWithoutTeam.map((group, groupIndex) =>
+          groupIndex === targetIndex
+            ? {
+                ...group,
+                teams: targetTeams,
+              }
+            : group
+        ),
+      };
+    };
+    const assignDrawTeamToGroup = (team, targetGroupId) => {
+      const { groups } = getCurrentDrawContext();
+      const result = placeDrawTeamInGroup(groups, team, targetGroupId);
+      applyTournamentDrawGroups(
+        result.groups,
+        result.placed
+          ? `Assigned ${getDrawTeamName(team)}.`
+          : "Could not assign team."
+      );
+    };
+    const removeDrawTeamFromGroup = (team) => {
+      const { groups } = getCurrentDrawContext();
+      applyTournamentDrawGroups(
+        removeTeamFromDrawGroups(groups, team),
+        `Removed ${getDrawTeamName(team)} from the draw.`
+      );
+    };
+    const findLowestDrawGroupId = (groups) => {
+      if (!groups.length) return "";
+      return [...groups]
+        .sort((a, b) => {
+          const countDelta = getDrawGroupCount(a) - getDrawGroupCount(b);
+          return countDelta || String(a.code || "").localeCompare(b.code || "");
+        })[0]?.id;
+    };
+    const drawNextTournamentTeam = () => {
+      const { groups } = getCurrentDrawContext();
+      const unassigned = getUnassignedDrawTeams(groups);
+      if (!groups.length) {
+        setTournamentActionMessage("Build groups before drawing teams.");
+        return;
+      }
+      if (!unassigned.length) {
+        setTournamentActionMessage("No unassigned teams left.");
+        return;
+      }
+
+      const randomTeam =
+        unassigned[Math.floor(Math.random() * unassigned.length)];
+      const targetGroupId = findLowestDrawGroupId(groups);
+      const result = placeDrawTeamInGroup(groups, randomTeam, targetGroupId);
+      applyTournamentDrawGroups(
+        result.groups,
+        result.placed
+          ? `Drew ${getDrawTeamName(randomTeam)}.`
+          : "Could not draw team."
+      );
+    };
+    const autoBalanceTournamentDraw = () => {
+      const { groups } = getCurrentDrawContext();
+      const pool = getDrawPool(groups);
+      if (!groups.length) {
+        setTournamentActionMessage("Build groups before balancing teams.");
+        return;
+      }
+      if (!pool.length) {
+        setTournamentActionMessage("No teams to balance.");
+        return;
+      }
+
+      const clearedGroups = groups.map((group) => ({
+        ...group,
+        teams: (group.teams || []).map((team, slotIndex) =>
+          clearDrawTeamSlot(group, team, slotIndex)
+        ),
+      }));
+      let balancedGroups = clearedGroups;
+
+      pool.forEach((team) => {
+        const targetGroupId = findLowestDrawGroupId(balancedGroups);
+        const result = placeDrawTeamInGroup(
+          balancedGroups,
+          team,
+          targetGroupId
+        );
+        balancedGroups = result.groups;
+      });
+
+      applyTournamentDrawGroups(balancedGroups, "Groups auto-balanced.");
+    };
+    const clearTournamentDraw = () => {
+      if (!window.confirm("Clear all group assignments for this class?")) return;
+      const { groups } = getCurrentDrawContext();
+      applyTournamentDrawGroups(
+        groups.map((group) => ({
+          ...group,
+          teams: (group.teams || []).map((team, slotIndex) =>
+            clearDrawTeamSlot(group, team, slotIndex)
+          ),
+        })),
+        "Group draw cleared."
+      );
+    };
     const statCards = [
       {
         label: tournamentText.slotsLabel,
@@ -14851,6 +15171,339 @@ const savedRound = readStorageWithTtl(
         {isBackendPublished && publicUrl && (
           <span style={styles.tournamentPublicUrlTextV2}>{publicUrl}</span>
         )}
+      </div>
+    );
+    const renderTournamentDrawWarnings = () =>
+      drawWarnings.length ? (
+        <div style={styles.tournamentWarningListV2}>
+          {drawWarnings.map((warning) => (
+            <span key={`draw-warning-${warning}`} style={styles.tournamentWarningChipV2}>
+              {warning}
+            </span>
+          ))}
+        </div>
+      ) : null;
+    const renderTournamentDrawClassTabs = () =>
+      tournamentSeriesClasses.length > 1 ? (
+        <div style={styles.tournamentSubTabs}>
+          {tournamentSeriesClasses.map((series) => (
+            <button
+              key={`draw-series-${series.id}`}
+              type="button"
+              style={{
+                ...styles.tournamentSubTab,
+                ...(String(selectedSetupSeries?.id || "") === String(series.id)
+                  ? styles.tournamentSubTabActive
+                  : {}),
+              }}
+              onClick={() => {
+                setActiveTournamentSetupSeriesId(series.id);
+                setActiveTournamentSeriesFilter(series.id);
+              }}
+            >
+              {getSeriesDisplayName(series)}
+            </button>
+          ))}
+        </div>
+      ) : null;
+    const renderTournamentDrawMetricGrid = () => (
+      <div style={styles.tournamentDrawMetricGridV1}>
+        {[
+          ["Series", selectedSetupSeries ? getSeriesShortLabel(selectedSetupSeries) : "-"],
+          ["Teams", drawAssignedTeamCount || tournamentTeams.length],
+          ["Groups", manualPreviewGroups.length],
+          ["Per group", configuredTeamsPerGroup],
+          ["Unassigned", drawUnassignedTeams.length],
+        ].map(([label, value]) => (
+          <div key={`draw-metric-${label}`} style={styles.tournamentDrawMetricV1}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </div>
+    );
+    const renderTournamentDrawSetupCard = ({ compact = false } = {}) => (
+      <div
+        style={
+          compact
+            ? styles.tournamentDrawSetupCardCompactV1
+            : styles.tournamentDrawSetupCardV1
+        }
+      >
+        <div style={styles.tournamentSectionHeader}>
+          <div>
+            <div style={styles.tournamentEyebrow}>Group draw</div>
+            <div style={styles.tournamentSectionTitle}>
+              {selectedSetupSeries
+                ? getSeriesDisplayName(selectedSetupSeries)
+                : tournamentText.groupsTab}
+            </div>
+          </div>
+          <span
+            style={{
+              ...styles.tournamentOrganizerStatusChipV2,
+              ...(drawHasUnevenGroups ? styles.tournamentOrganizerStatusWarnV2 : {}),
+            }}
+          >
+            {drawHasUnevenGroups ? "Uneven" : "Ready"}
+          </span>
+        </div>
+
+        {renderTournamentDrawClassTabs()}
+        {renderTournamentDrawMetricGrid()}
+        {renderTournamentDrawWarnings()}
+
+        <div style={styles.tournamentDrawActionRowV1}>
+          <button
+            type="button"
+            style={styles.primaryButtonSmall}
+            onClick={drawNextTournamentTeam}
+            disabled={!drawUnassignedTeams.length || !manualPreviewGroups.length}
+          >
+            Draw next team
+          </button>
+          <button
+            type="button"
+            style={styles.secondaryButtonCompact}
+            onClick={autoBalanceTournamentDraw}
+          >
+            Auto-balance
+          </button>
+          <button
+            type="button"
+            style={styles.secondaryButtonCompact}
+            onClick={() => {
+              setActiveTournamentSeriesFilter(
+                selectedSetupSeries?.id || activeTournamentSeriesFilter
+              );
+              setActiveTournamentView("groups");
+            }}
+          >
+            Open draw
+          </button>
+          <button
+            type="button"
+            style={styles.dangerButtonCompact}
+            onClick={clearTournamentDraw}
+          >
+            Clear draw
+          </button>
+        </div>
+
+        {manualSlotsComplete && selectedSetupSeries && compact && (
+          <div style={styles.tournamentDrawActionRowV1}>
+            <button
+              type="button"
+              style={styles.primaryButtonSmall}
+              onClick={() =>
+                setTournamentActionMessage(doneWithSelectedClassLabel)
+              }
+            >
+              {doneWithSelectedClassLabel}
+            </button>
+            {nextSetupSeries && (
+              <button
+                type="button"
+                style={styles.secondaryButtonCompact}
+                onClick={() => {
+                  setActiveTournamentSetupSeriesId(nextSetupSeries.id);
+                  setActiveTournamentSeriesFilter(nextSetupSeries.id);
+                }}
+              >
+                {continueToNextClassLabel}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+    const renderTournamentDrawTeamChip = (team, options = {}) => {
+      const { group = null, unassigned = false } = options;
+      const status = getDrawTeamStatus(team);
+      const meta = getDrawTeamMeta(team);
+      const currentGroupId = group?.id || team?.groupId || "";
+      const targetGroups = manualPreviewGroups.filter(
+        (item) => String(item.id) !== String(currentGroupId)
+      );
+
+      return (
+        <div
+          key={`${unassigned ? "unassigned" : currentGroupId}-${
+            getDrawTeamKey(team) || getDrawTeamName(team)
+          }`}
+          style={styles.tournamentDrawTeamChipV1}
+        >
+          <div style={styles.tournamentDrawTeamMainV1}>
+            <strong>{getDrawTeamName(team) || "-"}</strong>
+            {meta && <span>{meta}</span>}
+          </div>
+          {status && (
+            <span
+              style={{
+                ...styles.tournamentDrawTeamStatusV1,
+                ...(status === "Locked"
+                  ? styles.tournamentDrawTeamStatusLockedV1
+                  : {}),
+                ...(status === "Confirmed"
+                  ? styles.tournamentDrawTeamStatusConfirmedV1
+                  : {}),
+                ...(status === "Submitted"
+                  ? styles.tournamentDrawTeamStatusSubmittedV1
+                  : {}),
+              }}
+            >
+              {status}
+            </span>
+          )}
+          <div style={styles.tournamentDrawTeamActionsV1}>
+            {unassigned ? (
+              manualPreviewGroups.map((targetGroup) => (
+                <button
+                  key={`assign-${getDrawTeamKey(team)}-${targetGroup.id}`}
+                  type="button"
+                  style={styles.tournamentDrawGroupButtonV1}
+                  onClick={() => assignDrawTeamToGroup(team, targetGroup.id)}
+                  aria-label={`Assign ${getDrawTeamName(team)} to ${
+                    targetGroup.name
+                  }`}
+                >
+                  {targetGroup.code || targetGroup.name}
+                </button>
+              ))
+            ) : (
+              <>
+                {targetGroups.map((targetGroup) => (
+                  <button
+                    key={`move-${getDrawTeamKey(team)}-${targetGroup.id}`}
+                    type="button"
+                    style={styles.tournamentDrawGroupButtonV1}
+                    onClick={() => assignDrawTeamToGroup(team, targetGroup.id)}
+                    aria-label={`Move ${getDrawTeamName(team)} to ${
+                      targetGroup.name
+                    }`}
+                  >
+                    {targetGroup.code || targetGroup.name}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  style={{
+                    ...styles.tournamentDrawGroupButtonV1,
+                    ...styles.tournamentDrawRemoveButtonV1,
+                  }}
+                  onClick={() => removeDrawTeamFromGroup(team)}
+                >
+                  Remove
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      );
+    };
+    const renderTournamentDrawBoard = () => (
+      <div style={styles.tournamentSurface}>
+        {renderTournamentDrawSetupCard()}
+
+        <div
+          style={{
+            ...styles.tournamentDrawBoardV1,
+            ...(isMobile ? styles.tournamentDrawBoardMobileV1 : {}),
+          }}
+        >
+          <section style={styles.tournamentDrawUnassignedPanelV1}>
+            <div style={styles.tournamentDrawPanelHeaderV1}>
+              <div>
+                <div style={styles.tournamentEyebrow}>Unassigned</div>
+                <div style={styles.tournamentMiniTitle}>Team pool</div>
+              </div>
+              <span style={styles.tournamentStatusBadge}>
+                {drawUnassignedTeams.length}
+              </span>
+            </div>
+            <div style={styles.tournamentDrawTeamListV1}>
+              {drawUnassignedTeams.length ? (
+                drawUnassignedTeams.map((team) =>
+                  renderTournamentDrawTeamChip(team, { unassigned: true })
+                )
+              ) : (
+                <div style={styles.tournamentMutedPanel}>
+                  All registered teams are assigned.
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section style={styles.tournamentDrawGroupsPanelV1}>
+            {manualPreviewGroups.map((group, groupIndex) => {
+              const groupCode = group.code || getTournamentGroupCode(groupIndex);
+              const groupColor = getTournamentGroupColor(groupCode);
+              const filledTeams = (group.teams || []).filter(isDrawTeamFilled);
+              const groupWarning =
+                filledTeams.length === 0
+                  ? "No teams assigned"
+                  : filledTeams.length < Math.min(2, configuredTeamsPerGroup)
+                    ? "Too few teams"
+                    : drawHasUnevenGroups
+                      ? "Check balance"
+                      : "Round robin ready";
+
+              return (
+                <div
+                  key={`draw-group-${group.id}`}
+                  style={{
+                    ...styles.tournamentDrawGroupCardV1,
+                    background: groupColor.soft,
+                    borderColor: groupColor.border,
+                  }}
+                >
+                  <div style={styles.tournamentGroupHeader}>
+                    <div>
+                      <div style={styles.tournamentMiniTitle}>{group.name}</div>
+                      <div style={styles.tournamentMutedText}>
+                        {filledTeams.length}/{(group.teams || []).length} teams
+                      </div>
+                    </div>
+                    <span
+                      style={{
+                        ...styles.tournamentTeamSeed,
+                        background: groupColor.soft,
+                        borderColor: groupColor.border,
+                        color: groupColor.text,
+                      }}
+                    >
+                      {groupCode}
+                    </span>
+                  </div>
+
+                  <span
+                    style={
+                      groupWarning === "Round robin ready"
+                        ? getSetupStatusStyle("Done")
+                        : groupWarning === "Check balance"
+                          ? getSetupStatusStyle("Next")
+                          : getSetupStatusStyle("Missing")
+                    }
+                  >
+                    {groupWarning}
+                  </span>
+
+                  <div style={styles.tournamentDrawTeamListV1}>
+                    {filledTeams.length ? (
+                      filledTeams.map((team) =>
+                        renderTournamentDrawTeamChip(team, { group })
+                      )
+                    ) : (
+                      <div style={styles.tournamentMutedText}>
+                        No teams assigned
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </section>
+        </div>
       </div>
     );
 
@@ -15997,122 +16650,7 @@ const savedRound = readStorageWithTtl(
                     </div>
                   </div>
 
-                  <div style={styles.tournamentSetupBlock}>
-                    <div style={styles.tournamentSectionHeader}>
-                      <div>
-                        <div style={styles.tournamentBlockTitle}>
-                          {tournamentText.manualGroupEntryTitle}
-                        </div>
-                        <div style={styles.tournamentSidebarNote}>
-                          {tournamentText.manualGroupEntryHint}
-                        </div>
-                      </div>
-                      <div style={styles.tournamentStatusBadge}>
-                        {filledSlotCount}/{configuredTotalTeams}
-                      </div>
-                    </div>
-
-                    <div style={styles.tournamentSubTabs}>
-                      {tournamentSeriesClasses.map((series) => (
-                        <button
-                          key={`manual-series-${series.id}`}
-                          type="button"
-                          style={{
-                            ...styles.tournamentSubTab,
-                            ...(String(selectedSetupSeries?.id || "") ===
-                            String(series.id)
-                              ? styles.tournamentSubTabActive
-                              : {}),
-                          }}
-                          onClick={() =>
-                            setActiveTournamentSetupSeriesId(series.id)
-                          }
-                        >
-                          {getSeriesDisplayName(series)}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div style={styles.tournamentSidebarSlotList}>
-                      {manualPreviewGroups.map((group, groupIndex) => {
-                        const groupColor = getTournamentGroupColor(group.code);
-
-                        return (
-                          <div
-                            key={`sidebar-${group.id}`}
-                            style={{
-                              ...styles.tournamentSidebarGroup,
-                              background: groupColor.soft,
-                              borderColor: groupColor.border,
-                            }}
-                          >
-                            <div style={styles.tournamentSidebarGroupHeader}>
-                              <strong>{group.name}</strong>
-                              <span>
-                                {(group.teams || []).length}{" "}
-                                {tournamentText.slotsLabel}
-                              </span>
-                            </div>
-                            {(group.teams || []).map((team, slotIndex) => (
-                              <div
-                                key={`${activeTournament.id}-sidebar-${groupIndex}-${slotIndex}`}
-                                style={styles.tournamentSidebarSlotRow}
-                              >
-                                <span
-                                  style={{
-                                    ...styles.tournamentTeamSeed,
-                                    background: groupColor.soft,
-                                    borderColor: groupColor.border,
-                                    color: groupColor.text,
-                                  }}
-                                >
-                                  {team.slot || `${group.code}${slotIndex + 1}`}
-                                </span>
-                                <input
-                                  style={styles.tournamentSlotInput}
-                                  value={team.name || ""}
-                                  onChange={(e) =>
-                                    updateManualGroupSlot(
-                                      groupIndex,
-                                      slotIndex,
-                                      e.target.value
-                                    )
-                                  }
-                                  placeholder=""
-                                  aria-label={team.slot || `${group.code}${slotIndex + 1}`}
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {manualSlotsComplete && selectedSetupSeries && (
-                      <div style={styles.tournamentInlineActions}>
-                        <button
-                          type="button"
-                          style={styles.primaryButtonSmall}
-                          onClick={() =>
-                            setTournamentActionMessage(doneWithSelectedClassLabel)
-                          }
-                        >
-                          {doneWithSelectedClassLabel}
-                        </button>
-                        {nextSetupSeries && (
-                          <button
-                            type="button"
-                            style={styles.secondaryButtonCompact}
-                            onClick={() =>
-                              setActiveTournamentSetupSeriesId(nextSetupSeries.id)
-                            }
-                          >
-                            {continueToNextClassLabel}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </div>
+                  {renderTournamentDrawSetupCard({ compact: true })}
 
                   <button
                     style={styles.tournamentRegistrationToggle}
@@ -16665,115 +17203,8 @@ const savedRound = readStorageWithTtl(
                       </div>
                     )}
 
-                    {activeTournamentView === "groups" && (
-                      <div style={styles.tournamentSurface}>
-                        <div style={styles.tournamentSectionHeader}>
-                          <div>
-                            <div style={styles.tournamentEyebrow}>
-                              {tournamentText.groupsTab}
-                            </div>
-                            <div style={styles.tournamentSectionTitle}>
-                              {tournamentText.groupStagePreview}
-                            </div>
-                          </div>
-                          <div style={styles.tournamentStatusBadge}>
-                            {visibleFilledSlotCount}/
-                            {visibleConfiguredTotalTeams || configuredTotalTeams}
-                          </div>
-                        </div>
-
-                        {visibleGroups.length > 0 ? (
-                          <div
-                            style={{
-                              ...styles.tournamentGroupGrid,
-                              ...(isMobile ? styles.tournamentGroupGridMobile : {}),
-                            }}
-                        >
-                          {visibleGroups.map((group, groupIndex) => {
-                              const groupColor = getTournamentGroupColor(group.code);
-
-                              return (
-                                <div
-                                  key={group.id}
-                                  style={{
-                                    ...styles.tournamentGroupCard,
-                                    background: groupColor.soft,
-                                    borderColor: groupColor.border,
-                                  }}
-                                >
-                                  <div style={styles.tournamentGroupHeader}>
-                                    <div>
-                                      <div style={styles.tournamentMiniTitle}>
-                                        {group.name}
-                                      </div>
-                                      <div style={styles.tournamentMutedText}>
-                                        {tournamentText.manualPaperOrderLabel}
-                                      </div>
-                                    </div>
-                                    <div
-                                      style={{
-                                        ...styles.tournamentGroupCount,
-                                        background: groupColor.accent,
-                                      }}
-                                    >
-                                      {Array.isArray(group.teams)
-                                        ? group.teams.length
-                                        : 0}
-                                    </div>
-                                  </div>
-                                  {Array.isArray(group.teams) &&
-                                  group.teams.length > 0 ? (
-                                    <div style={styles.tournamentSnapshotList}>
-                                      {group.teams.map((team, slotIndex) => (
-                                        <div
-                                          key={`${activeTournament.id}-group-${groupIndex}-${slotIndex}`}
-                                          style={styles.tournamentGroupTeamRow}
-                                        >
-                                          <span
-                                            style={{
-                                              ...styles.tournamentTeamSeed,
-                                              background: groupColor.soft,
-                                              borderColor: groupColor.border,
-                                              color: groupColor.text,
-                                            }}
-                                          >
-                                            {team.slot || `${group.code}${slotIndex + 1}`}
-                                          </span>
-                                          <input
-                                            style={styles.tournamentSlotInput}
-                                            value={team.name || ""}
-                                            onChange={(e) =>
-                                              updateManualGroupSlot(
-                                                groupIndex,
-                                                slotIndex,
-                                                e.target.value
-                                              )
-                                            }
-                                            placeholder=""
-                                            aria-label={
-                                              team.slot || `${group.code}${slotIndex + 1}`
-                                            }
-                                          />
-                                          <strong>{team.club || "-"}</strong>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : (
-                                    <div style={styles.tournamentMutedText}>
-                                      {tournamentText.noTeamsYet}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <div style={styles.tournamentMutedPanel}>
-                            {tournamentText.noGroupsYet}
-                          </div>
-                        )}
-                      </div>
-                    )}
+                    {activeTournamentView === "groups" &&
+                      renderTournamentDrawBoard()}
 
                     {activeTournamentView === "bracket" && (
                       <div style={styles.tournamentSurface}>
@@ -27667,6 +28098,178 @@ Object.assign(styles, {
     color: "#bae6fd",
     fontSize: "11px",
     fontWeight: "800",
+  },
+  tournamentDrawSetupCardV1: {
+    background:
+      "linear-gradient(145deg, rgba(15,23,42,0.72), rgba(8,47,73,0.42))",
+    border: "1px solid rgba(125,211,252,0.16)",
+    boxShadow: "0 18px 48px rgba(2,6,23,0.24)",
+    backdropFilter: "blur(16px)",
+    borderRadius: "24px",
+    padding: "15px",
+    display: "grid",
+    gap: "13px",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  tournamentDrawSetupCardCompactV1: {
+    background:
+      "linear-gradient(145deg, rgba(15,23,42,0.66), rgba(8,47,73,0.34))",
+    border: "1px solid rgba(125,211,252,0.14)",
+    boxShadow: "0 16px 44px rgba(2,6,23,0.22)",
+    backdropFilter: "blur(16px)",
+    borderRadius: "20px",
+    padding: "13px",
+    display: "grid",
+    gap: "12px",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  tournamentDrawMetricGridV1: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 92px), 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+  tournamentDrawMetricV1: {
+    display: "grid",
+    gap: "3px",
+    minHeight: "52px",
+    padding: "9px",
+    borderRadius: "14px",
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(148,163,184,0.13)",
+    color: "#cbd5e1",
+    fontSize: "10px",
+    fontWeight: "900",
+    minWidth: 0,
+  },
+  tournamentDrawActionRowV1: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "8px",
+    alignItems: "center",
+    minWidth: 0,
+  },
+  tournamentDrawBoardV1: {
+    display: "grid",
+    gridTemplateColumns: "minmax(230px, 0.65fr) minmax(0, 1.35fr)",
+    gap: "14px",
+    alignItems: "start",
+    minWidth: 0,
+  },
+  tournamentDrawBoardMobileV1: {
+    gridTemplateColumns: "minmax(0, 1fr)",
+  },
+  tournamentDrawUnassignedPanelV1: {
+    display: "grid",
+    gap: "10px",
+    padding: "12px",
+    borderRadius: "20px",
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(125,211,252,0.14)",
+    minWidth: 0,
+  },
+  tournamentDrawGroupsPanelV1: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 230px), 1fr))",
+    gap: "12px",
+    minWidth: 0,
+  },
+  tournamentDrawGroupCardV1: {
+    display: "grid",
+    gap: "11px",
+    padding: "13px",
+    borderRadius: "20px",
+    border: "1px solid rgba(125,211,252,0.14)",
+    background: "rgba(15,23,42,0.44)",
+    boxShadow: "0 14px 34px rgba(2,6,23,0.18)",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  tournamentDrawPanelHeaderV1: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "10px",
+    minWidth: 0,
+  },
+  tournamentDrawTeamListV1: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  tournamentDrawTeamChipV1: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "8px",
+    alignItems: "center",
+    padding: "10px",
+    borderRadius: "15px",
+    background: "rgba(2,6,23,0.42)",
+    border: "1px solid rgba(148,163,184,0.13)",
+    color: "#e5f3ff",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  tournamentDrawTeamMainV1: {
+    display: "grid",
+    gap: "2px",
+    minWidth: 0,
+    overflowWrap: "break-word",
+    wordBreak: "normal",
+  },
+  tournamentDrawTeamStatusV1: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: "24px",
+    borderRadius: "999px",
+    padding: "0 8px",
+    background: "rgba(14,165,233,0.16)",
+    border: "1px solid rgba(125,211,252,0.24)",
+    color: "#bae6fd",
+    fontSize: "10px",
+    fontWeight: "950",
+    whiteSpace: "nowrap",
+  },
+  tournamentDrawTeamStatusLockedV1: {
+    background: "rgba(245,158,11,0.16)",
+    border: "1px solid rgba(251,191,36,0.26)",
+    color: "#fde68a",
+  },
+  tournamentDrawTeamStatusConfirmedV1: {
+    background: "rgba(34,197,94,0.18)",
+    border: "1px solid rgba(52,211,153,0.30)",
+    color: "#bbf7d0",
+  },
+  tournamentDrawTeamStatusSubmittedV1: {
+    background: "rgba(99,102,241,0.18)",
+    border: "1px solid rgba(129,140,248,0.28)",
+    color: "#c7d2fe",
+  },
+  tournamentDrawTeamActionsV1: {
+    gridColumn: "1 / -1",
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    minWidth: 0,
+  },
+  tournamentDrawGroupButtonV1: {
+    border: "1px solid rgba(125,211,252,0.20)",
+    borderRadius: "12px",
+    minHeight: "34px",
+    padding: "0 10px",
+    background: "rgba(14,165,233,0.13)",
+    color: "#dff7ff",
+    fontSize: "11px",
+    fontWeight: "950",
+    cursor: "pointer",
+  },
+  tournamentDrawRemoveButtonV1: {
+    background: "rgba(244,63,94,0.14)",
+    border: "1px solid rgba(251,113,133,0.24)",
+    color: "#fecdd3",
   },
 });
 
