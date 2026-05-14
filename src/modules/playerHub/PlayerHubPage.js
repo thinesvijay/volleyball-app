@@ -4340,6 +4340,11 @@ Object.assign(playerHubStyles, {
     ...playerHubStyles.teamRosterCard,
     ...hubRowV3,
   },
+  teamRosterEmpty: {
+    ...playerHubStyles.passportEmpty,
+    display: "grid",
+    gap: "5px",
+  },
   teamCompactRow: {
     ...playerHubStyles.teamCompactRow,
     ...hubRowV3,
@@ -11517,7 +11522,7 @@ export default function PlayerHubPage({
             ))}
           </div>
         ) : (
-          <div style={playerHubStyles.passportEmpty}>
+          <div style={playerHubStyles.teamRosterEmpty}>
             <strong>No approved rosters visible yet.</strong>
             <span>
               Roster names appear here after teams are submitted and approved.
