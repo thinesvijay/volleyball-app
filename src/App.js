@@ -55,6 +55,8 @@ const MATCH_METHOD_KEY = "volleyball-match-method";
 const PLAYER_SORT_KEY = "volleyball-player-sort";
 const TOURNAMENTS_STORAGE_KEY = "volleyball-tournaments-v1";
 const ACTIVE_TOURNAMENT_STORAGE_KEY_PREFIX = "volleyball-active-tournament-id:";
+const TEAM_BUILDER_PLAYERS_CACHE_PREFIX =
+  "makeTeamsPro.teamBuilder.players.v1";
 const CURRENT_ROUND_TTL_MS = 60 * 60 * 1000;
 const SAVED_ROUND_TTL_MS = 6 * 60 * 60 * 1000;
 const APP_PERF_DEV = process.env.NODE_ENV !== "production";
@@ -414,6 +416,71 @@ function normalizeUserWithAccess(user = {}) {
     canUseTournaments: access.tournaments,
     isAdmin: access.admin,
   };
+}
+
+function getFrontendAccessKey(user = {}) {
+  const safeUser = normalizeUserWithAccess(user);
+  return [
+    `role:${String(safeUser.role || "guest").toLowerCase()}`,
+    `tb:${safeUser.canUseTeamBuilder ? 1 : 0}`,
+    `tour:${safeUser.canUseTournaments ? 1 : 0}`,
+    `admin:${safeUser.isAdmin ? 1 : 0}`,
+  ].join("|");
+}
+
+function getTeamBuilderPlayersCacheKey(username, accessKey = "") {
+  return [
+    TEAM_BUILDER_PLAYERS_CACHE_PREFIX,
+    encodeURIComponent(getUserAccessStorageUsername(username) || "guest"),
+    encodeURIComponent(String(accessKey || "default")),
+  ].join(":");
+}
+
+function readTeamBuilderPlayersCache(cacheKey) {
+  if (typeof window === "undefined" || !cacheKey) return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(cacheKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return {
+      players: Array.isArray(parsed?.players) ? parsed.players : [],
+      archivedPlayers: Array.isArray(parsed?.archivedPlayers)
+        ? parsed.archivedPlayers
+        : [],
+      cachedAt: Number(parsed?.cachedAt) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeTeamBuilderPlayersCache(cacheKey, players, archivedPlayers) {
+  if (typeof window === "undefined" || !cacheKey) return;
+
+  try {
+    window.sessionStorage.setItem(
+      cacheKey,
+      JSON.stringify({
+        players: Array.isArray(players) ? players : [],
+        archivedPlayers: Array.isArray(archivedPlayers) ? archivedPlayers : [],
+        cachedAt: Date.now(),
+      })
+    );
+  } catch {
+    // Cache is best-effort only.
+  }
+}
+
+function areUserSettingsEqual(a, b) {
+  return Boolean(
+    a &&
+      b &&
+      getUserAccessStorageUsername(a.username) ===
+        getUserAccessStorageUsername(b.username) &&
+      String(a.skillView || "") === String(b.skillView || "") &&
+      Number(a.skillScale) === Number(b.skillScale)
+  );
 }
 
 function createRoundRobinSchedule(teamNames) {
@@ -2720,6 +2787,21 @@ export default function App() {
   });
 
   const skillOptions = useMemo(() => getSkillOptions(skillScale), [skillScale]);
+  const teamBuilderAccessKey = useMemo(
+    () => getFrontendAccessKey(currentUser),
+    [currentUser]
+  );
+  const teamBuilderPlayersInFlightRef = useRef(new Map());
+  const teamBuilderPlayersLastLoadedRef = useRef(null);
+  const lastSavedUserSettingsRef = useRef(
+    auth.loggedIn
+      ? {
+          username: auth.username,
+          skillView,
+          skillScale: Number(skillScale),
+        }
+      : null
+  );
 
   const scrollLandingShowcaseTo = useCallback((index) => {
     const safeIndex = Math.max(0, Number(index) || 0);
@@ -2884,12 +2966,53 @@ export default function App() {
 
   const loadPlayers = useCallback(
     async (authOverride) => {
-      const payload = authOverride || getAuthPayload();
+      const rawPayload = authOverride || getAuthPayload();
+      const payload = {
+        username: rawPayload.username,
+        password: rawPayload.password,
+      };
+      const requestAccessKey = rawPayload.accessKey || teamBuilderAccessKey;
 
       if (!payload.username || !payload.password) {
         setPlayers([]);
         setArchivedPlayers([]);
         return;
+      }
+
+      const cacheKey = getTeamBuilderPlayersCacheKey(
+        payload.username,
+        requestAccessKey
+      );
+      const cached = readTeamBuilderPlayersCache(cacheKey);
+      let cacheApplied = false;
+
+      if (cached) {
+        const cacheTimer = startAppPerf("Team Builder players cache hit", {
+          kind: "load",
+          layer: "sessionStorage",
+          action: "getPlayers",
+        });
+        setPlayers(cached.players);
+        setArchivedPlayers(cached.archivedPlayers);
+        cacheApplied = true;
+        endAppPerf(cacheTimer, {
+          status: "ok",
+          count: cached.players.length,
+          archivedCount: cached.archivedPlayers.length,
+          ageMs: Date.now() - cached.cachedAt,
+        });
+      }
+
+      const inFlightRequest =
+        teamBuilderPlayersInFlightRef.current.get(cacheKey);
+      if (inFlightRequest) {
+        const duplicateTimer = startAppPerf("Team Builder load players deduped", {
+          kind: "load",
+          layer: "frontend",
+          action: "getPlayers",
+        });
+        endAppPerf(duplicateTimer, { status: "in-flight", cacheApplied });
+        return inFlightRequest;
       }
 
       const timer = startAppPerf("Team Builder load players", {
@@ -2898,7 +3021,7 @@ export default function App() {
         action: "getPlayers",
       });
 
-      try {
+      const request = (async () => {
         const queryString = buildQueryString({
           action: "getPlayers",
           includeArchived: 1,
@@ -2916,6 +3039,11 @@ export default function App() {
         if (Array.isArray(data)) {
           setPlayers(data);
           setArchivedPlayers([]);
+          writeTeamBuilderPlayersCache(cacheKey, data, []);
+          teamBuilderPlayersLastLoadedRef.current = {
+            cacheKey,
+            finishedAt: appPerfNow(),
+          };
           endAppPerf(timer, { status: "ok", count: data.length });
           return;
         }
@@ -2924,34 +3052,57 @@ export default function App() {
           Array.isArray(data?.players) ||
           Array.isArray(data?.archivedPlayers)
         ) {
-          setPlayers(Array.isArray(data.players) ? data.players : []);
-          setArchivedPlayers(
-            Array.isArray(data.archivedPlayers) ? data.archivedPlayers : []
+          const nextPlayers = Array.isArray(data.players) ? data.players : [];
+          const nextArchivedPlayers = Array.isArray(data.archivedPlayers)
+            ? data.archivedPlayers
+            : [];
+          setPlayers(nextPlayers);
+          setArchivedPlayers(nextArchivedPlayers);
+          writeTeamBuilderPlayersCache(
+            cacheKey,
+            nextPlayers,
+            nextArchivedPlayers
           );
+          teamBuilderPlayersLastLoadedRef.current = {
+            cacheKey,
+            finishedAt: appPerfNow(),
+          };
           endAppPerf(timer, {
             status: "ok",
-            count: Array.isArray(data.players) ? data.players.length : 0,
-            archivedCount: Array.isArray(data.archivedPlayers)
-              ? data.archivedPlayers.length
-              : 0,
+            count: nextPlayers.length,
+            archivedCount: nextArchivedPlayers.length,
           });
           return;
         }
 
-        setPlayers([]);
-        setArchivedPlayers([]);
+        if (!cacheApplied) {
+          setPlayers([]);
+          setArchivedPlayers([]);
+        }
         endAppPerf(timer, { status: "empty" });
-      } catch (error) {
-        console.error("Could not load players:", error);
-        setPlayers([]);
-        setArchivedPlayers([]);
-        endAppPerf(timer, {
-          status: "error",
-          error: String(error?.message || error),
+      })()
+        .catch((error) => {
+          console.error("Could not load players:", error);
+          if (!cacheApplied) {
+            setPlayers([]);
+            setArchivedPlayers([]);
+          }
+          endAppPerf(timer, {
+            status: "error",
+            cacheApplied,
+            error: String(error?.message || error),
+          });
+        })
+        .finally(() => {
+          if (teamBuilderPlayersInFlightRef.current.get(cacheKey) === request) {
+            teamBuilderPlayersInFlightRef.current.delete(cacheKey);
+          }
         });
-      }
+
+      teamBuilderPlayersInFlightRef.current.set(cacheKey, request);
+      return request;
     },
-    [getAuthPayload]
+    [getAuthPayload, teamBuilderAccessKey]
   );
 
   const loadTrainerUsers = useCallback(async () => {
@@ -3003,7 +3154,7 @@ export default function App() {
 
   const saveUserSettingsToBackend = useCallback(
     async (nextSkillView, nextSkillScale) => {
-      if (!auth.loggedIn || !auth.username || !auth.password) return;
+      if (!auth.loggedIn || !auth.username || !auth.password) return false;
 
       const timer = startAppPerf("User settings save", {
         kind: "api",
@@ -3027,12 +3178,14 @@ export default function App() {
           }),
         });
         endAppPerf(timer, { status: "ok" });
+        return true;
       } catch (error) {
         console.error("Could not save user settings:", error);
         endAppPerf(timer, {
           status: "error",
           error: String(error?.message || error),
         });
+        return false;
       }
     },
     [auth.loggedIn, auth.password, auth.username]
@@ -8816,6 +8969,12 @@ export default function App() {
         isAdmin: profile?.isAdmin,
         admin: profile?.admin,
       });
+      const nextSkillView = data?.profile?.settings?.skillView || "numbers";
+      lastSavedUserSettingsRef.current = {
+        username,
+        skillView: nextSkillView,
+        skillScale: nextSkillScale,
+      };
 
       window.clearTimeout(tournamentAutosaveTimerRef.current);
       window.clearTimeout(manualGroupEditingTimerRef.current);
@@ -8836,7 +8995,7 @@ export default function App() {
       lastTournamentBackendJsonRef.current = "[]";
       clearRoundState();
       setAuth(nextAuth);
-      setSkillView(data?.profile?.settings?.skillView || "numbers");
+      setSkillView(nextSkillView);
       setSkillScale(nextSkillScale);
       setLoginUsername("");
       setLoginPassword("");
@@ -8850,6 +9009,7 @@ export default function App() {
         await loadPlayers({
           username,
           password,
+          accessKey: getFrontendAccessKey(nextAuth),
         });
       }
       endAppPerf(loginTimer, {
@@ -8872,6 +9032,9 @@ export default function App() {
   }
 
   async function handleLogout() {
+    teamBuilderPlayersInFlightRef.current.clear();
+    teamBuilderPlayersLastLoadedRef.current = null;
+    lastSavedUserSettingsRef.current = null;
     setAuth(getDefaultAuth());
     setLoginUsername("");
     setLoginPassword("");
@@ -9587,6 +9750,24 @@ export default function App() {
       return;
     }
 
+    const cacheKey = getTeamBuilderPlayersCacheKey(
+      auth.username,
+      teamBuilderAccessKey
+    );
+    const lastLoaded = teamBuilderPlayersLastLoadedRef.current;
+    if (
+      lastLoaded?.cacheKey === cacheKey &&
+      appPerfNow() - Number(lastLoaded.finishedAt || 0) < 15_000
+    ) {
+      const timer = startAppPerf("Team Builder automatic load skipped", {
+        kind: "load",
+        layer: "frontend",
+        action: "getPlayers",
+      });
+      endAppPerf(timer, { status: "recently-loaded" });
+      return;
+    }
+
     loadPlayers();
   }, [
     auth.loggedIn,
@@ -9594,6 +9775,7 @@ export default function App() {
     auth.username,
     hasTeamBuilderAccess,
     loadPlayers,
+    teamBuilderAccessKey,
   ]);
 
   useEffect(() => {
@@ -9822,8 +10004,40 @@ const savedRound = readStorageWithTtl(
 
   useEffect(() => {
     if (!auth.loggedIn) return;
-    saveUserSettingsToBackend(skillView, skillScale);
-  }, [auth.loggedIn, saveUserSettingsToBackend, skillView, skillScale]);
+
+    const nextSettings = {
+      username: auth.username,
+      skillView,
+      skillScale: Number(skillScale),
+    };
+
+    if (areUserSettingsEqual(lastSavedUserSettingsRef.current, nextSettings)) {
+      const timer = startAppPerf("User settings save skipped", {
+        kind: "load",
+        layer: "frontend",
+        action: "saveUserSettings",
+      });
+      endAppPerf(timer, { status: "unchanged" });
+      return;
+    }
+
+    let cancelled = false;
+    saveUserSettingsToBackend(skillView, skillScale).then((saved) => {
+      if (!cancelled && saved) {
+        lastSavedUserSettingsRef.current = nextSettings;
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    auth.loggedIn,
+    auth.username,
+    saveUserSettingsToBackend,
+    skillView,
+    skillScale,
+  ]);
 
   useEffect(() => {
     if (!skillOptions.includes(newPlayerSkill)) {

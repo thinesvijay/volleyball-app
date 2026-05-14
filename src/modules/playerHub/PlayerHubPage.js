@@ -16,6 +16,8 @@ const playerHubCopy = {
 };
 
 const isPlayerHubDev = process.env.NODE_ENV !== "production";
+const PLAYER_HUB_SNAPSHOT_TIMEOUT_MS = 4500;
+const playerHubSnapshotCachePrefix = "makeTeamsPro.playerHub.snapshot.v1";
 
 function playerHubNow() {
   if (typeof performance !== "undefined" && performance.now) {
@@ -62,6 +64,49 @@ function isUsablePlayerHubSnapshot(snapshot) {
       Array.isArray(snapshot.myTeams) &&
       Array.isArray(snapshot.tournamentAvailability)
   );
+}
+
+function getPlayerHubSnapshotCacheKey(username) {
+  return `${playerHubSnapshotCachePrefix}:${encodeURIComponent(
+    String(username || "").trim().toLowerCase() || "guest"
+  )}`;
+}
+
+function readPlayerHubSnapshotCache(username) {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(
+      getPlayerHubSnapshotCacheKey(username)
+    );
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!isUsablePlayerHubSnapshot(parsed?.snapshot)) return null;
+    return {
+      snapshot: parsed.snapshot,
+      cachedAt: Number(parsed.cachedAt) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writePlayerHubSnapshotCache(username, snapshot) {
+  if (typeof window === "undefined" || !isUsablePlayerHubSnapshot(snapshot)) {
+    return;
+  }
+
+  try {
+    window.sessionStorage.setItem(
+      getPlayerHubSnapshotCacheKey(username),
+      JSON.stringify({
+        snapshot,
+        cachedAt: Date.now(),
+      })
+    );
+  } catch {
+    // Session cache is a read-only bootstrap, so storage failure is harmless.
+  }
 }
 
 function passportArray(value) {
@@ -945,13 +990,6 @@ const playerHubStyles = {
       "linear-gradient(135deg, rgba(240,253,244,0.88), rgba(239,246,255,0.82))",
     border: "1px solid rgba(34,197,94,0.18)",
     boxShadow: "0 10px 22px rgba(34,197,94,0.06)",
-    minWidth: 0,
-  },
-  teamSetupControls: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
-    gap: "8px",
-    alignItems: "center",
     minWidth: 0,
   },
   editorSection: {
@@ -3342,10 +3380,6 @@ Object.assign(playerHubStyles, {
 });
 
 Object.assign(playerHubStyles, {
-  teamSetupControls: {
-    ...playerHubStyles.teamSetupControls,
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))",
-  },
   heroActions: {
     ...playerHubStyles.heroActions,
     alignItems: "stretch",
@@ -4537,7 +4571,7 @@ export default function PlayerHubPage({
   const [adminPasswordDrafts, setAdminPasswordDrafts] = useState({});
   const [clubTeams, setClubTeams] = useState([]);
   const [clubTeamsStatus, setClubTeamsStatus] = useState("idle");
-  const [clubTeamsMessage, setClubTeamsMessage] = useState("");
+  const [, setClubTeamsMessage] = useState("");
   const [adminClubTeams, setAdminClubTeams] = useState([]);
   const [adminClubTeamsStatus, setAdminClubTeamsStatus] = useState("idle");
   const [adminClubTeamsMessage, setAdminClubTeamsMessage] = useState("");
@@ -5742,28 +5776,17 @@ export default function PlayerHubPage({
 
   useEffect(() => {
     let cancelled = false;
+    let fallbackStarted = false;
 
-    async function loadInitialPlayerHub() {
-      if (loadPlayerHubSnapshot) {
-        const snapshotStartedAt = startPlayerHubTimer();
-        try {
-          const snapshot = await loadPlayerHubSnapshot();
-          if (cancelled) return;
-          if (!isUsablePlayerHubSnapshot(snapshot)) {
-            throw new Error("Incomplete Player Hub snapshot");
-          }
-          logPlayerHubTiming("snapshot request", snapshotStartedAt);
-          applyPlayerHubSnapshot(snapshot);
-          logPlayerHubAfterPaint("paint after snapshot", snapshotStartedAt);
-          return;
-        } catch (error) {
-          logPlayerHubTiming("snapshot failed", snapshotStartedAt);
-        }
-      }
-
-      if (cancelled) return;
+    function startFallbackLoad(reason) {
+      if (cancelled || fallbackStarted) return;
+      fallbackStarted = true;
       setSnapshotInitialLoadComplete(false);
       const fallbackStartedAt = startPlayerHubTimer();
+      if (reason) {
+        logPlayerHubTiming(`fallback started (${reason})`, fallbackStartedAt);
+      }
+
       Promise.allSettled([
         loadPlayerProfile(),
         loadActiveClubTeams(),
@@ -5782,6 +5805,56 @@ export default function PlayerHubPage({
           logPlayerHubAfterPaint("paint after fallback", fallbackStartedAt);
         }
       });
+    }
+
+    async function loadInitialPlayerHub() {
+      const cachedSnapshot = readPlayerHubSnapshotCache(username);
+      if (cachedSnapshot) {
+        const cacheStartedAt = startPlayerHubTimer();
+        applyPlayerHubSnapshot(cachedSnapshot.snapshot);
+        logPlayerHubTiming("snapshot cache hit", cacheStartedAt);
+        logPlayerHubAfterPaint("paint after snapshot cache", cacheStartedAt);
+      }
+
+      if (!loadPlayerHubSnapshot) {
+        if (!cachedSnapshot) startFallbackLoad("no snapshot loader");
+        return;
+      }
+
+      const snapshotStartedAt = startPlayerHubTimer();
+      let snapshotFinished = false;
+      const snapshotRequest = loadPlayerHubSnapshot()
+        .then((snapshot) => {
+          if (cancelled) return null;
+          if (!isUsablePlayerHubSnapshot(snapshot)) {
+            throw new Error("Incomplete Player Hub snapshot");
+          }
+          writePlayerHubSnapshotCache(username, snapshot);
+          logPlayerHubTiming("snapshot request", snapshotStartedAt);
+          applyPlayerHubSnapshot(snapshot);
+          logPlayerHubAfterPaint("paint after snapshot", snapshotStartedAt);
+          return snapshot;
+        })
+        .catch((error) => {
+          if (cancelled) return null;
+          logPlayerHubTiming("snapshot failed", snapshotStartedAt);
+          if (!cachedSnapshot) startFallbackLoad("snapshot failed");
+          return null;
+        })
+        .finally(() => {
+          snapshotFinished = true;
+        });
+
+      const timeout = new Promise((resolve) => {
+        setTimeout(resolve, PLAYER_HUB_SNAPSHOT_TIMEOUT_MS);
+      }).then(() => {
+        if (cancelled || snapshotFinished) return null;
+        logPlayerHubTiming("snapshot timeout", snapshotStartedAt);
+        if (!cachedSnapshot) startFallbackLoad("snapshot timeout");
+        return null;
+      });
+
+      await Promise.race([snapshotRequest, timeout]);
     }
 
     loadInitialPlayerHub();
@@ -5803,6 +5876,7 @@ export default function PlayerHubPage({
     loadTeamMembershipRequests,
     loadTeamNeeds,
     loadTeamProfile,
+    username,
   ]);
 
   useEffect(() => {
@@ -6232,35 +6306,6 @@ export default function PlayerHubPage({
         await refreshMembershipAfterProfileSave(normalizedProfile);
       } catch {
         setProfileMessage(copy.profileSaved);
-      }
-    } catch (error) {
-      setProfileStatus("error");
-      setProfileMessage(cleanPlayerHubError(error, copy.profileSaveFailed));
-    }
-  }
-
-  async function handleSaveTeamSetup(event) {
-    event.preventDefault();
-    if (!saveMyPlayerProfile || profileStatus === "saving") return;
-
-    setProfileStatus("saving");
-    setProfileMessage("Saving club/team...");
-
-    try {
-      const savedProfile = await saveMyPlayerProfile(myProfile);
-      const normalizedProfile = normalizePlayerHubProfile({
-        ...myProfile,
-        ...(savedProfile || {}),
-        username,
-      });
-      setMyProfile(normalizedProfile);
-      setSavedProfilePreview(normalizedProfile);
-      setProfileStatus("ready");
-      setProfileMessage("Club/team saved.");
-      try {
-        await refreshMembershipAfterProfileSave(normalizedProfile);
-      } catch {
-        setProfileMessage("Club/team saved.");
       }
     } catch (error) {
       setProfileStatus("error");
@@ -11156,6 +11201,12 @@ export default function PlayerHubPage({
     }
   }
 
+  function openProfileCompletionFlow() {
+    setActiveHubTab("home");
+    setActiveProfileEditorTab(needsClubTeamSetup ? "team" : "basic");
+    setShowProfileEditor(true);
+  }
+
   function openCaptainPlanAction() {
     if (captainHomeFlow?.plan) {
       toggleTournamentSquadPlanning(captainHomeFlow.plan);
@@ -11659,50 +11710,26 @@ export default function PlayerHubPage({
       </nav>
 
       {showTeamOverviewArea && needsClubTeamSetup ? (
-        <form
-          onSubmit={handleSaveTeamSetup}
-          style={playerHubStyles.teamSetupCard}
-        >
+        <section style={playerHubStyles.teamSetupCard}>
           <div style={playerHubStyles.profileMeta}>
             <div style={playerHubStyles.sectionTitle}>
-              Choose your club/team
+              Complete your profile to use Team.
             </div>
             <div style={playerHubStyles.cardText}>
-              Captain confirmation comes later.
+              Club/team selection lives in your profile so there is one clear
+              place to keep it updated.
             </div>
           </div>
-          <div style={playerHubStyles.teamSetupControls}>
-            <select
-              style={playerHubStyles.profileInput}
-              value={myProfile.freeAgent ? "" : myProfile.clubTeamId || ""}
-              onChange={(event) => handleClubTeamSelection(event.target.value)}
-            >
-              <option value="">No fixed club/team</option>
-              {clubTeams.map((team) => (
-                <option key={team.teamId} value={team.teamId}>
-                  {clubTeamDisplayName(team)}
-                </option>
-              ))}
-            </select>
+          <div style={playerHubStyles.profileActions}>
             <button
-              type="submit"
-              style={{
-                ...playerHubStyles.saveButton,
-                ...(profileStatus === "saving" || profileStatus === "loading"
-                  ? playerHubStyles.saveButtonDisabled
-                  : {}),
-              }}
-              disabled={profileStatus === "saving" || profileStatus === "loading"}
+              type="button"
+              style={playerHubStyles.saveButton}
+              onClick={openProfileCompletionFlow}
             >
-              Save
+              Complete profile
             </button>
           </div>
-          {clubTeamsStatus === "error" && clubTeamsMessage ? (
-            <span style={playerHubStyles.profileMessage}>
-              {clubTeamsMessage}
-            </span>
-          ) : null}
-        </form>
+        </section>
       ) : null}
 
       {showHubHome ? (
@@ -12438,7 +12465,7 @@ export default function PlayerHubPage({
         </section>
       ) : null}
 
-      {showTeamOverviewArea ? (
+      {showTeamOverviewArea && !needsClubTeamSetup ? (
       <section style={playerHubStyles.compactHomeGrid}>
         {homeTeamCard || canManageTeamProfile || selectedProfileTeamName ? (
           <section style={playerHubStyles.teamSummaryCard}>
@@ -12523,7 +12550,7 @@ export default function PlayerHubPage({
 
       </section>
       ) : null}
-      {showTeamControlArea ? (
+      {showTeamControlArea && !needsClubTeamSetup ? (
       <section style={playerHubStyles.teamDashboardShell} data-testid="team-control">
         <div style={playerHubStyles.profileHeader}>
           <div style={playerHubStyles.profileMeta}>
