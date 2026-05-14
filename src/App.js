@@ -2471,6 +2471,10 @@ export default function App() {
     useState("all");
   const [activeTeamInterestFilter, setActiveTeamInterestFilter] =
     useState("all");
+  const [activeRegistrationBoardFilter, setActiveRegistrationBoardFilter] =
+    useState("all");
+  const [selectedRegistrationBoardId, setSelectedRegistrationBoardId] =
+    useState("");
   const [matchFinishWarnings, setMatchFinishWarnings] = useState({});
   const tournamentAutosaveTimerRef = useRef(null);
   const manualGroupEditingRef = useRef(false);
@@ -8222,6 +8226,8 @@ export default function App() {
     setActiveTournamentSeriesFilter("all");
     setActiveTournamentSetupSeriesId("");
     setActiveTeamInterestFilter("all");
+    setActiveRegistrationBoardFilter("all");
+    setSelectedRegistrationBoardId("");
   }, [activeTournamentId]);
 
   useEffect(() => {
@@ -14973,9 +14979,10 @@ const savedRound = readStorageWithTtl(
       Asking: 2,
       Submitted: 3,
       "Change requested": 4,
-      Approved: 5,
-      Locked: 6,
-      Late: 7,
+      "Needs review": 5,
+      Approved: 6,
+      Locked: 7,
+      Late: 8,
     };
     const teamInterestAggregateSource =
       activeTournament?.teamInterestCounts ||
@@ -15014,6 +15021,12 @@ const savedRound = readStorageWithTtl(
       locked: safeTeamInterestNumber(
         teamInterestAggregateSource.locked,
         teamInterestAggregateSource.lockedTeams
+      ),
+      needsReview: safeTeamInterestNumber(
+        teamInterestAggregateSource.needsReview,
+        teamInterestAggregateSource.needsReviewTeams,
+        teamInterestAggregateSource.pendingReview,
+        teamInterestAggregateSource.pendingReviewTeams
       ),
       late: safeTeamInterestNumber(
         teamInterestAggregateSource.late,
@@ -15054,6 +15067,16 @@ const savedRound = readStorageWithTtl(
         rawStatus.includes("rejected")
       ) {
         return "Change requested";
+      }
+      if (
+        source.needsReview ||
+        source.requiresReview ||
+        source.pendingReview ||
+        rawStatus.includes("needs review") ||
+        rawStatus.includes("pending review") ||
+        rawStatus.includes("review")
+      ) {
+        return "Needs review";
       }
       if (source.locked || rawStatus.includes("locked")) return "Locked";
       if (
@@ -15133,6 +15156,10 @@ const savedRound = readStorageWithTtl(
       }
       return raw.replace("T", " ").slice(0, 16);
     };
+    const getTeamInterestTimestamp = (source = {}, keys = []) =>
+      formatTeamInterestTimestamp(
+        keys.map((key) => source?.[key]).find(Boolean) || ""
+      );
     const getTeamInterestPlayerCount = (source = {}) => {
       const explicitCount = [
         source.playerCount,
@@ -15147,11 +15174,71 @@ const savedRound = readStorageWithTtl(
       const playerList = [
         source.players,
         source.rosterPlayers,
+        source.playerNames,
+        source.rosterPlayerNames,
         source.roster,
         source.members,
       ].find((value) => Array.isArray(value));
       return Array.isArray(playerList) ? playerList.length : null;
     };
+    const getTeamRosterPlayers = (source = {}) => {
+      const list = [
+        source.rosterPlayers,
+        source.roster,
+        source.players,
+        source.playerNames,
+        source.rosterPlayerNames,
+        source.members,
+      ].find((value) => Array.isArray(value));
+
+      return (Array.isArray(list) ? list : [])
+        .map((player, index) => {
+          if (typeof player === "string") {
+            return {
+              id: `${player}-${index}`,
+              name: player,
+              status: "",
+            };
+          }
+
+          const name = String(
+            player?.displayName ||
+              player?.playerName ||
+              player?.name ||
+              player?.username ||
+              player?.fullName ||
+              ""
+          ).trim();
+          if (!name) return null;
+
+          return {
+            id: String(player?.playerId || player?.username || name || index),
+            name,
+            status: String(
+              player?.status || player?.responseStatus || player?.availabilityStatus || ""
+            ).trim(),
+          };
+        })
+        .filter(Boolean);
+    };
+    const getSourceDuplicateWarnings = (source = {}) =>
+      [
+        source.duplicateWarnings,
+        source.duplicates,
+        source.warnings,
+        source.rosterWarnings,
+      ]
+        .flatMap((value) => {
+          if (Array.isArray(value)) return value;
+          if (typeof value === "string" && value.trim()) return [value];
+          return [];
+        })
+        .map((item) =>
+          typeof item === "string"
+            ? item
+            : String(item?.message || item?.warning || item?.name || "").trim()
+        )
+        .filter(Boolean);
     const normalizeTeamInterestEntry = (
       source = {},
       origin = "team",
@@ -15193,6 +15280,13 @@ const savedRound = readStorageWithTtl(
         source.updatedAt ||
         source.createdAt ||
         "";
+      const reviewedAt = getTeamInterestTimestamp(source, [
+        "reviewedAt",
+        "approvedAt",
+        "rejectedAt",
+        "changeRequestedAt",
+      ]);
+      const lockedAt = getTeamInterestTimestamp(source, ["lockedAt"]);
       const captainLabel = String(
         source.captainName ||
           source.captainUsername ||
@@ -15201,34 +15295,79 @@ const savedRound = readStorageWithTtl(
           source.registeredBy ||
           ""
       ).trim();
+      const rawDeadline = series
+        ? activeRosterLock.appliesToSeries?.[series.id] ||
+          activeRosterLock.deadlineIso
+        : activeRosterLock.deadlineIso;
       const deadline = series
         ? getSeriesRosterDeadline(series)
         : activeRosterLock.enabled
           ? defaultRosterDeadline
           : "";
+      const submittedTimeMs = Date.parse(
+        source.changedAt ||
+          source.lastChangedAt ||
+          source.updatedAt ||
+          submittedAt ||
+          ""
+      );
+      const deadlineTimeMs = Date.parse(rawDeadline || "");
+      const lateByDeadline = Boolean(
+        activeRosterLock.enabled &&
+          deadlineTimeMs &&
+          submittedTimeMs &&
+          !Number.isNaN(deadlineTimeMs) &&
+          !Number.isNaN(submittedTimeMs) &&
+          submittedTimeMs > deadlineTimeMs
+      );
+      const displayStatus =
+        lateByDeadline && !["Approved", "Locked"].includes(status)
+          ? "Late"
+          : status;
 
       return {
         id:
           teamId ||
           `${seriesId || seriesName || "series"}-${name}`.toLowerCase(),
         name,
-        status,
+        status: displayStatus,
         origin,
         seriesId: series?.id || seriesId,
         seriesName: series ? getSeriesDisplayName(series) : seriesName,
         playerCount: getTeamInterestPlayerCount(source),
+        rosterPlayers: getTeamRosterPlayers(source),
         submittedAt: formatTeamInterestTimestamp(submittedAt),
+        submittedBy: String(source.submittedBy || source.createdBy || "").trim(),
+        reviewedAt,
+        reviewedBy: String(
+          source.reviewedBy || source.approvedBy || source.rejectedBy || ""
+        ).trim(),
+        lockedAt,
+        lockedBy: String(source.lockedBy || "").trim(),
+        lockReason: String(source.lockReason || source.lockedReason || "").trim(),
+        duplicateWarnings: getSourceDuplicateWarnings(source),
+        source,
         captainLabel,
         deadline,
+        rawDeadline,
+        lateByDeadline,
+        rosterId: String(source.rosterId || source.rosterDraftId || "").trim(),
+        planId: String(source.planId || source.tournamentPlanId || "").trim(),
+        updatedAt: formatTeamInterestTimestamp(
+          source.updatedAt || source.changedAt || source.lastChangedAt || ""
+        ),
         hasRosterSignal: Boolean(
           source.rosterId ||
             source.rosterDraftId ||
+            source.rosterPlayers ||
+            source.roster ||
             source.rosterSubmitted ||
             source.submitted ||
             status === "Submitted" ||
             status === "Approved" ||
             status === "Locked" ||
             status === "Late" ||
+            status === "Needs review" ||
             status === "Change requested"
         ),
         hasAvailabilitySignal: Boolean(
@@ -15265,6 +15404,24 @@ const savedRound = readStorageWithTtl(
               ? Math.max(Number(existing.playerCount || 0), Number(entry.playerCount))
               : existing.playerCount,
           submittedAt: entry.submittedAt || existing.submittedAt,
+          submittedBy: entry.submittedBy || existing.submittedBy,
+          reviewedAt: entry.reviewedAt || existing.reviewedAt,
+          reviewedBy: entry.reviewedBy || existing.reviewedBy,
+          lockedAt: entry.lockedAt || existing.lockedAt,
+          lockedBy: entry.lockedBy || existing.lockedBy,
+          lockReason: entry.lockReason || existing.lockReason,
+          rosterId: entry.rosterId || existing.rosterId,
+          planId: entry.planId || existing.planId,
+          rosterPlayers:
+            entry.rosterPlayers?.length >= existing.rosterPlayers?.length
+              ? entry.rosterPlayers
+              : existing.rosterPlayers,
+          duplicateWarnings: Array.from(
+            new Set([
+              ...(existing.duplicateWarnings || []),
+              ...(entry.duplicateWarnings || []),
+            ])
+          ),
           captainLabel: entry.captainLabel || existing.captainLabel,
           deadline: entry.deadline || existing.deadline,
           hasRosterSignal: existing.hasRosterSignal || entry.hasRosterSignal,
@@ -15361,9 +15518,16 @@ const savedRound = readStorageWithTtl(
           submitted: counts.submitted + (entry.status === "Submitted" ? 1 : 0),
           approved: counts.approved + (entry.status === "Approved" ? 1 : 0),
           locked: counts.locked + (entry.status === "Locked" ? 1 : 0),
+          needsReview:
+            counts.needsReview +
+            (entry.status === "Needs review" || entry.status === "Submitted"
+              ? 1
+              : 0),
           late:
             counts.late +
-            (entry.status === "Late" || entry.status === "Change requested"
+            (entry.status === "Late" ||
+            entry.status === "Change requested" ||
+            entry.lateByDeadline
               ? 1
               : 0),
         }),
@@ -15373,6 +15537,7 @@ const savedRound = readStorageWithTtl(
           submitted: 0,
           approved: 0,
           locked: 0,
+          needsReview: 0,
           late: 0,
         }
       );
@@ -15414,6 +15579,11 @@ const savedRound = readStorageWithTtl(
         value: teamInterestSummaryCounts.locked,
       },
       {
+        key: "needs-review",
+        label: "Needs review",
+        value: teamInterestSummaryCounts.needsReview,
+      },
+      {
         key: "late",
         label: "Late changes",
         value: teamInterestSummaryCounts.late,
@@ -15437,6 +15607,9 @@ const savedRound = readStorageWithTtl(
         : {}),
       ...(status === "Submitted"
         ? styles.tournamentTeamInterestStatusSubmittedV1
+        : {}),
+      ...(status === "Needs review"
+        ? styles.tournamentTeamInterestStatusNeedsReviewV1
         : {}),
       ...(status === "Approved"
         ? styles.tournamentTeamInterestStatusApprovedV1
@@ -15632,6 +15805,474 @@ const savedRound = readStorageWithTtl(
         <div style={styles.tournamentMutedText}>
           {tournamentText.publicCountsPrivacyNote}
         </div>
+      </div>
+    );
+    const buildRegistrationDuplicateWarnings = (entry, rows) => {
+      const warnings = [...(entry.duplicateWarnings || [])];
+      const normalizedPlayers = (entry.rosterPlayers || [])
+        .map((player) => ({
+          key: String(player.id || player.name || "").trim().toLowerCase(),
+          name: player.name,
+        }))
+        .filter((player) => player.key);
+      const seenInRoster = new Map();
+
+      normalizedPlayers.forEach((player) => {
+        if (seenInRoster.has(player.key)) {
+          warnings.push(`${player.name} appears twice on this roster.`);
+        }
+        seenInRoster.set(player.key, player.name);
+      });
+
+      normalizedPlayers.forEach((player) => {
+        const otherTeams = rows
+          .filter((row) => row.id !== entry.id && row.seriesId === entry.seriesId)
+          .filter((row) =>
+            (row.rosterPlayers || []).some(
+              (other) =>
+                String(other.id || other.name || "").trim().toLowerCase() ===
+                player.key
+            )
+          )
+          .map((row) => row.name)
+          .filter(Boolean);
+
+        if (otherTeams.length) {
+          warnings.push(
+            `${player.name} also appears on ${Array.from(
+              new Set(otherTeams)
+            ).join(", ")}.`
+          );
+        }
+      });
+
+      return Array.from(new Set(warnings));
+    };
+    const registrationBoardRows = classFilteredTeamInterestRows.map((entry) => ({
+      ...entry,
+      duplicateWarnings: buildRegistrationDuplicateWarnings(
+        entry,
+        classFilteredTeamInterestRows
+      ),
+    }));
+    const registrationBoardCounts = countTeamInterestRows(registrationBoardRows);
+    const registrationBoardSummaryItems = [
+      {
+        key: "interested",
+        label: "Teams interested",
+        value: registrationBoardCounts.interested,
+      },
+      {
+        key: "asking",
+        label: "Availability active",
+        value: registrationBoardCounts.asking,
+      },
+      {
+        key: "submitted",
+        label: "Rosters submitted",
+        value: registrationBoardCounts.submitted,
+      },
+      {
+        key: "approved",
+        label: "Approved",
+        value: registrationBoardCounts.approved,
+      },
+      {
+        key: "locked",
+        label: "Locked",
+        value: registrationBoardCounts.locked,
+      },
+      {
+        key: "needs-review",
+        label: "Needs review",
+        value: registrationBoardCounts.needsReview,
+      },
+      {
+        key: "late",
+        label: "Late changes",
+        value: registrationBoardCounts.late,
+      },
+    ];
+    const registrationBoardFilterOptions = [
+      { id: "all", label: "All" },
+      { id: "interested", label: "Interested" },
+      { id: "submitted", label: "Submitted" },
+      { id: "approved", label: "Approved" },
+      { id: "locked", label: "Locked" },
+      { id: "needs-review", label: "Needs review" },
+      { id: "late", label: "Late" },
+    ];
+    const registrationBoardStatusMatchesFilter = (entry) => {
+      if (activeRegistrationBoardFilter === "all") return true;
+      if (activeRegistrationBoardFilter === "late") {
+        return (
+          entry.status === "Late" ||
+          entry.status === "Change requested" ||
+          entry.lateByDeadline
+        );
+      }
+      if (activeRegistrationBoardFilter === "needs-review") {
+        return (
+          entry.status === "Needs review" ||
+          entry.status === "Submitted" ||
+          entry.status === "Change requested" ||
+          entry.duplicateWarnings?.length > 0 ||
+          entry.lateByDeadline
+        );
+      }
+      if (activeRegistrationBoardFilter === "approved") {
+        return entry.status === "Approved";
+      }
+      if (activeRegistrationBoardFilter === "locked") {
+        return entry.status === "Locked";
+      }
+      if (activeRegistrationBoardFilter === "submitted") {
+        return entry.status === "Submitted";
+      }
+      if (activeRegistrationBoardFilter === "interested") {
+        return entry.status === "Interested";
+      }
+      return true;
+    };
+    const visibleRegistrationBoardRows = registrationBoardRows.filter(
+      registrationBoardStatusMatchesFilter
+    );
+    const selectedRegistrationBoardEntry =
+      registrationBoardRows.find(
+        (entry) => String(entry.id) === String(selectedRegistrationBoardId)
+      ) || visibleRegistrationBoardRows[0] || null;
+    const rosterLockSeriesSummary = activeRosterLock.enabled
+      ? tournamentSeriesClasses
+          .map(
+            (series) =>
+              `${getSeriesShortLabel(series)}: ${
+                getSeriesRosterDeadline(series) || defaultRosterDeadline || "enabled"
+              }`
+          )
+          .join(" / ")
+      : "Roster lock disabled";
+    const renderRegistrationBoardDetails = (entry) => {
+      if (!entry) {
+        return (
+          <div style={styles.tournamentRegistrationDetailsV2}>
+            <div style={styles.tournamentMutedPanel}>
+              Select a registration to review roster details.
+            </div>
+          </div>
+        );
+      }
+
+      const duplicateWarnings = entry.duplicateWarnings || [];
+      const safeRosterPlayers = entry.rosterPlayers || [];
+
+      return (
+        <aside
+          style={{
+            ...styles.tournamentRegistrationDetailsV2,
+            ...(isMobile ? { position: "static" } : {}),
+          }}
+        >
+          <div style={styles.tournamentSectionHeader}>
+            <div>
+              <div style={styles.tournamentEyebrow}>Roster review</div>
+              <div style={styles.tournamentSectionTitle}>{entry.name}</div>
+              <div style={styles.tournamentMutedText}>
+                {entry.seriesName || "Class not set"}
+              </div>
+            </div>
+            <span style={getTeamInterestStatusStyle(entry.status)}>
+              {entry.status}
+            </span>
+          </div>
+
+          <div style={styles.tournamentTeamInterestMetaRowV1}>
+            {entry.submittedAt && (
+              <span style={styles.tournamentTeamInterestMetaChipV1}>
+                Submitted {entry.submittedAt}
+                {entry.submittedBy ? ` by ${entry.submittedBy}` : ""}
+              </span>
+            )}
+            {entry.reviewedAt && (
+              <span style={styles.tournamentTeamInterestMetaChipV1}>
+                Reviewed {entry.reviewedAt}
+                {entry.reviewedBy ? ` by ${entry.reviewedBy}` : ""}
+              </span>
+            )}
+            {entry.lockedAt && (
+              <span style={styles.tournamentTeamInterestMetaChipV1}>
+                Locked {entry.lockedAt}
+                {entry.lockedBy ? ` by ${entry.lockedBy}` : ""}
+              </span>
+            )}
+            {entry.lockReason && (
+              <span style={styles.tournamentTeamInterestMetaChipWarnV1}>
+                Reason: {entry.lockReason}
+              </span>
+            )}
+            {entry.lateByDeadline && (
+              <span style={styles.tournamentTeamInterestMetaChipWarnV1}>
+                Late change
+              </span>
+            )}
+          </div>
+
+          {duplicateWarnings.length > 0 && (
+            <div style={styles.tournamentRegistrationWarningBoxV2}>
+              <strong>Duplicate warning</strong>
+              {duplicateWarnings.map((warning) => (
+                <span key={`registration-warning-${entry.id}-${warning}`}>
+                  {warning}
+                </span>
+              ))}
+            </div>
+          )}
+
+          <div style={styles.tournamentRegistrationRosterListV2}>
+            <div style={styles.tournamentMiniTitle}>Roster players</div>
+            {safeRosterPlayers.length ? (
+              safeRosterPlayers.map((player) => (
+                <div
+                  key={`registration-player-${entry.id}-${player.id}`}
+                  style={styles.tournamentRegistrationPlayerRowV2}
+                >
+                  <strong>{player.name}</strong>
+                  {player.status ? <span>{player.status}</span> : null}
+                </div>
+              ))
+            ) : (
+              <div style={styles.tournamentMutedPanel}>
+                No roster player list is loaded for this team.
+              </div>
+            )}
+          </div>
+
+          <div style={styles.tournamentTeamInterestActionsV1}>
+            <button
+              type="button"
+              style={styles.secondaryButtonCompact}
+              onClick={() => openTeamInterestPlan(entry)}
+            >
+              Open plan
+            </button>
+            {entry.hasAvailabilitySignal && hasPlayerHubAccess && (
+              <button
+                type="button"
+                style={styles.secondaryButtonCompact}
+                onClick={openTeamInterestPlayerHub}
+              >
+                View availability
+              </button>
+            )}
+            {entry.hasRosterSignal && currentUserIsAdmin && hasPlayerHubAccess && (
+              <button
+                type="button"
+                style={styles.primaryButtonSmall}
+                onClick={openTeamInterestPlayerHub}
+              >
+                Review roster
+              </button>
+            )}
+          </div>
+        </aside>
+      );
+    };
+    const renderTournamentRegistrationBoard = () => (
+      <div style={styles.tournamentRegistrationBoardV2}>
+        <div style={styles.tournamentSectionHeader}>
+          <div>
+            <div style={styles.tournamentEyebrow}>Registration board</div>
+            <div style={styles.tournamentSectionTitle}>
+              Registration + roster review
+            </div>
+            <div style={styles.tournamentMutedText}>
+              After deadline, changes require organizer/admin approval.
+            </div>
+          </div>
+          <span
+            style={
+              activeRosterLock.enabled
+                ? styles.tournamentTeamInterestMetaChipWarnV1
+                : styles.tournamentTeamInterestMetaChipV1
+            }
+          >
+            {rosterLockSeriesSummary}
+          </span>
+        </div>
+
+        <div style={styles.tournamentTeamInterestSummaryGridV1}>
+          {registrationBoardSummaryItems.map((item) => (
+            <div
+              key={`registration-summary-${item.key}`}
+              style={styles.tournamentTeamInterestSummaryCardV1}
+            >
+              <strong>{item.value}</strong>
+              <span>{item.label}</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={styles.tournamentTeamInterestFilterRowV1}>
+          {registrationBoardFilterOptions.map((option) => (
+            <button
+              key={`registration-filter-${option.id}`}
+              type="button"
+              style={{
+                ...styles.tournamentMatchControlFilterButtonV2,
+                ...(activeRegistrationBoardFilter === option.id
+                  ? styles.tournamentMatchControlFilterButtonActiveV2
+                  : {}),
+              }}
+              onClick={() => setActiveRegistrationBoardFilter(option.id)}
+            >
+              {option.label}
+            </button>
+          ))}
+
+          {hasTournamentClassFilters &&
+            tournamentSeriesClasses.map((series) => (
+              <button
+                key={`registration-series-${series.id}`}
+                type="button"
+                style={{
+                  ...styles.tournamentMatchControlFilterButtonV2,
+                  ...(String(activeTournamentSeriesFilter) === String(series.id)
+                    ? styles.tournamentMatchControlFilterButtonActiveV2
+                    : {}),
+                }}
+                onClick={() => {
+                  setActiveTournamentSeriesFilter(series.id);
+                  setActiveTournamentSetupSeriesId(series.id);
+                }}
+              >
+                {getSeriesShortLabel(series)}
+              </button>
+            ))}
+          {hasTournamentClassFilters && (
+            <button
+              type="button"
+              style={{
+                ...styles.tournamentMatchControlFilterButtonV2,
+                ...(activeTournamentSeriesFilter === "all"
+                  ? styles.tournamentMatchControlFilterButtonActiveV2
+                  : {}),
+              }}
+              onClick={() => setActiveTournamentSeriesFilter("all")}
+            >
+              {tournamentText.allClassesLabel}
+            </button>
+          )}
+        </div>
+
+        {visibleRegistrationBoardRows.length ? (
+          <div
+            style={{
+              ...styles.tournamentRegistrationBoardLayoutV2,
+              ...(isMobile ? styles.tournamentRegistrationBoardLayoutMobileV2 : {}),
+            }}
+          >
+            <div style={styles.tournamentTeamInterestListV1}>
+              {visibleRegistrationBoardRows.map((entry) => {
+                const isSelected =
+                  String(selectedRegistrationBoardEntry?.id || "") ===
+                  String(entry.id);
+                const duplicateWarnings = entry.duplicateWarnings || [];
+
+                return (
+                  <article
+                    key={`registration-row-${entry.id}`}
+                    style={{
+                      ...styles.tournamentTeamInterestCardV1,
+                      ...(isSelected
+                        ? styles.tournamentRegistrationCardSelectedV2
+                        : {}),
+                    }}
+                  >
+                    <div style={styles.tournamentTeamInterestCardTopV1}>
+                      <div style={styles.tournamentTeamInterestNameBlockV1}>
+                        <strong>{entry.name}</strong>
+                        <span>
+                          {entry.seriesName || "Class not set"}
+                          {entry.captainLabel ? ` - ${entry.captainLabel}` : ""}
+                        </span>
+                      </div>
+                      <span style={getTeamInterestStatusStyle(entry.status)}>
+                        {entry.status}
+                      </span>
+                    </div>
+
+                    <div style={styles.tournamentTeamInterestMetaRowV1}>
+                      {entry.playerCount !== null &&
+                        entry.playerCount !== undefined && (
+                          <span style={styles.tournamentTeamInterestMetaChipV1}>
+                            {entry.playerCount} players
+                          </span>
+                        )}
+                      {entry.submittedAt && (
+                        <span style={styles.tournamentTeamInterestMetaChipV1}>
+                          Submitted {entry.submittedAt}
+                        </span>
+                      )}
+                      {entry.reviewedAt && (
+                        <span style={styles.tournamentTeamInterestMetaChipV1}>
+                          Reviewed {entry.reviewedAt}
+                        </span>
+                      )}
+                      {entry.lockedAt && (
+                        <span style={styles.tournamentTeamInterestMetaChipV1}>
+                          Locked {entry.lockedAt}
+                        </span>
+                      )}
+                      {activeRosterLock.enabled && entry.deadline && (
+                        <span style={styles.tournamentTeamInterestMetaChipWarnV1}>
+                          Deadline {entry.deadline}
+                        </span>
+                      )}
+                      {(entry.lateByDeadline || entry.status === "Late") && (
+                        <span style={styles.tournamentTeamInterestMetaChipWarnV1}>
+                          Late change
+                        </span>
+                      )}
+                      {duplicateWarnings.length > 0 && (
+                        <span style={styles.tournamentTeamInterestMetaChipWarnV1}>
+                          Duplicate warning
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={styles.tournamentTeamInterestActionsV1}>
+                      <button
+                        type="button"
+                        style={styles.primaryButtonSmall}
+                        onClick={() => setSelectedRegistrationBoardId(entry.id)}
+                      >
+                        Review / Open
+                      </button>
+                      {entry.hasRosterSignal && currentUserIsAdmin && hasPlayerHubAccess && (
+                        <button
+                          type="button"
+                          style={styles.secondaryButtonCompact}
+                          onClick={openTeamInterestPlayerHub}
+                        >
+                          Admin review
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            {renderRegistrationBoardDetails(selectedRegistrationBoardEntry)}
+          </div>
+        ) : (
+          <div style={styles.tournamentMutedPanel}>
+            <strong>No team registrations yet.</strong>
+            <span>
+              Teams appear here when captains start availability or submit
+              rosters.
+            </span>
+          </div>
+        )}
       </div>
     );
     const renderTournamentSetupProgress = () => (
@@ -19207,6 +19848,7 @@ const savedRound = readStorageWithTtl(
                     {activeTournamentView === "table" && (
                       <>
                       {renderTournamentTeamInterestBoard()}
+                      {renderTournamentRegistrationBoard()}
 
                       <div style={styles.tournamentSurface}>
                         <div style={styles.tournamentSectionHeader}>
@@ -30827,6 +31469,11 @@ Object.assign(styles, {
     border: "1px solid rgba(129,140,248,0.28)",
     color: "#c7d2fe",
   },
+  tournamentTeamInterestStatusNeedsReviewV1: {
+    background: "rgba(245,158,11,0.18)",
+    border: "1px solid rgba(251,191,36,0.30)",
+    color: "#fde68a",
+  },
   tournamentTeamInterestStatusApprovedV1: {
     background: "rgba(34,197,94,0.18)",
     border: "1px solid rgba(52,211,153,0.30)",
@@ -30873,6 +31520,77 @@ Object.assign(styles, {
     flexWrap: "wrap",
     gap: "7px",
     minWidth: 0,
+  },
+  tournamentRegistrationBoardV2: {
+    ...sportsGlassV3,
+    display: "grid",
+    gap: "14px",
+    borderRadius: "24px",
+    padding: "14px",
+    minWidth: 0,
+    boxSizing: "border-box",
+  },
+  tournamentRegistrationBoardLayoutV2: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) minmax(280px, 0.45fr)",
+    gap: "12px",
+    alignItems: "start",
+    minWidth: 0,
+  },
+  tournamentRegistrationBoardLayoutMobileV2: {
+    gridTemplateColumns: "minmax(0, 1fr)",
+  },
+  tournamentRegistrationCardSelectedV2: {
+    border: "1px solid rgba(125,211,252,0.38)",
+    boxShadow:
+      "0 0 0 1px rgba(14,165,233,0.14), 0 16px 36px rgba(14,165,233,0.12)",
+    background:
+      "linear-gradient(145deg, rgba(14,165,233,0.18), rgba(15,23,42,0.68))",
+  },
+  tournamentRegistrationDetailsV2: {
+    ...sportsRowV3,
+    display: "grid",
+    gap: "12px",
+    borderRadius: "20px",
+    padding: "13px",
+    minWidth: 0,
+    boxSizing: "border-box",
+    position: "sticky",
+    top: "12px",
+  },
+  tournamentRegistrationWarningBoxV2: {
+    display: "grid",
+    gap: "5px",
+    padding: "10px",
+    borderRadius: "14px",
+    background: "rgba(245,158,11,0.14)",
+    border: "1px solid rgba(251,191,36,0.24)",
+    color: "#fde68a",
+    fontSize: "11px",
+    fontWeight: "850",
+    lineHeight: 1.35,
+    minWidth: 0,
+  },
+  tournamentRegistrationRosterListV2: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  tournamentRegistrationPlayerRowV2: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "8px",
+    minHeight: "36px",
+    padding: "8px 9px",
+    borderRadius: "12px",
+    background: "rgba(2,6,23,0.34)",
+    border: "1px solid rgba(148,163,184,0.13)",
+    color: "#dff7ff",
+    fontSize: "12px",
+    fontWeight: "850",
+    minWidth: 0,
+    overflowWrap: "break-word",
   },
   tournamentScheduleCourt: {
     ...styles.tournamentScheduleCourt,
