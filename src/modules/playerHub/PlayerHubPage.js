@@ -3468,6 +3468,34 @@ Object.assign(playerHubStyles, {
     fontSize: "12px",
     background: "rgba(14,165,233,0.12)",
   },
+  captainActionPrimaryButton: {
+    ...playerHubStyles.saveButton,
+    minHeight: "48px",
+    padding: "12px 14px",
+    borderRadius: "16px",
+    fontSize: "13px",
+    justifySelf: "stretch",
+    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
+    borderColor: "rgba(125,211,252,0.34)",
+    color: "#04111f",
+  },
+  captainActionSecondaryRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))",
+    gap: "7px",
+    minWidth: 0,
+  },
+  captainActionMore: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  captainActionMoreGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 150px), 1fr))",
+    gap: "7px",
+    minWidth: 0,
+  },
   teamCompactPanel: {
     ...hubGlassPanelSoft,
     display: "grid",
@@ -3514,6 +3542,11 @@ Object.assign(playerHubStyles, {
     fontSize: "11px",
     fontWeight: "950",
     cursor: "pointer",
+  },
+  teamNeedsMoreDetails: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
   },
   compactSquadNamesGrid: {
     display: "grid",
@@ -4251,6 +4284,10 @@ Object.assign(playerHubStyles, {
     ...playerHubStyles.captainActionButton,
     minHeight: "44px",
     borderRadius: "16px",
+  },
+  captainActionPrimaryButton: {
+    ...playerHubStyles.captainActionPrimaryButton,
+    minHeight: "50px",
   },
   teamCompactPanel: {
     ...playerHubStyles.teamCompactPanel,
@@ -7787,6 +7824,87 @@ export default function PlayerHubPage({
     ];
   }
 
+  function captainRosterPrimaryAction(flow, step) {
+    const safeFlow = flow || {};
+    const stepId = String(step?.id || "");
+    const rosterLocked = safeFlow.rosterStatus === "LOCKED";
+    const rosterApproved = safeFlow.rosterStatus === "APPROVED";
+    const rosterSubmitted = safeFlow.rosterStatus === "SUBMITTED";
+    const hasPlan = Boolean(safeFlow.plan);
+
+    if (rosterLocked) {
+      return {
+        id: "locked",
+        label: "Locked",
+        detail: "Official roster is locked.",
+        disabled: true,
+        onClick: () => {},
+      };
+    }
+
+    if (stepId === "approval" || rosterSubmitted || rosterApproved) {
+      return {
+        id: "approval",
+        label: "View approval",
+        detail: step?.detail || "Open roster status.",
+        disabled: !hasPlan,
+        onClick: () => openCaptainChecklistSubmit(safeFlow.plan),
+      };
+    }
+
+    if (stepId === "submit" && safeFlow.rosterCanSubmit) {
+      return {
+        id: "submit",
+        label:
+          safeFlow.rosterStatus === "CHANGE_REQUESTED" ||
+          safeFlow.rosterStatus === "REJECTED"
+            ? "Resubmit roster"
+            : "Submit roster",
+        detail: step?.detail || "Send roster to organizer/admin.",
+        disabled: !hasPlan,
+        onClick: () => openCaptainChecklistSubmit(safeFlow.plan),
+      };
+    }
+
+    if (stepId === "names") {
+      return {
+        id: "names",
+        label: "Name squads",
+        detail: step?.detail || "Edit squad display names.",
+        disabled: !hasPlan,
+        onClick: () => toggleTournamentSquadPlanning(safeFlow.plan),
+      };
+    }
+
+    if (stepId === "plan" || stepId === "squads") {
+      return {
+        id: "plan",
+        label: "Plan squads",
+        detail: step?.detail || "Assign players to squads.",
+        disabled: !hasPlan,
+        onClick: () => toggleTournamentSquadPlanning(safeFlow.plan),
+      };
+    }
+
+    if (stepId === "review" || stepId === "responses") {
+      return {
+        id: "review",
+        label: "Review responses",
+        detail: step?.detail || "Open availability responses.",
+        disabled: !hasPlan,
+        onClick: () => toggleTournamentPlanResponses(safeFlow.plan),
+      };
+    }
+
+    return {
+      id: "ask",
+      label: showTournamentPlanForm ? "Close plan" : "Ask availability",
+      detail: step?.detail || "Ask confirmed members.",
+      disabled: !safeFlow.hasTournamentOptions,
+      onClick: () => toggleTeamActionPanel("plan"),
+    };
+  }
+
   async function openCaptainChecklistSubmit(plan) {
     const planId = String(plan?.planId || "");
     if (!planId) return;
@@ -7801,7 +7919,6 @@ export default function PlayerHubPage({
 
   function renderCaptainTournamentChecklist() {
     const flow = buildCaptainTournamentFlow();
-    const steps = buildCaptainChecklistSteps(flow);
     const hasPlan = Boolean(flow.plan);
     const rosterApproved = flow.rosterStatus === "APPROVED";
     const rosterLocked = flow.rosterStatus === "LOCKED";
@@ -7922,6 +8039,24 @@ export default function PlayerHubPage({
       rosterFlowSteps.find((step) => step.status === "pending") ||
       rosterFlowSteps.find((step) => step.status === "blocked") ||
       rosterFlowSteps[rosterFlowSteps.length - 1];
+    const rosterCurrentStepIndex = Math.max(
+      0,
+      rosterFlowSteps.findIndex((step) => step.id === rosterCurrentStep?.id)
+    );
+    const rosterNextStep =
+      rosterFlowSteps
+        .slice(rosterCurrentStepIndex + 1)
+        .find((step) =>
+          ["next", "pending", "blocked", "needs-changes"].includes(step.status)
+        ) ||
+      rosterFlowSteps[rosterCurrentStepIndex + 1] ||
+      null;
+    const visibleRosterFlowSteps = [
+      rosterCurrentStep ? { ...rosterCurrentStep, focusLabel: "Current" } : null,
+      rosterNextStep && rosterNextStep.id !== rosterCurrentStep?.id
+        ? { ...rosterNextStep, focusLabel: "Next" }
+        : null,
+    ].filter(Boolean);
     const responseRows = (Array.isArray(flow.availability) ? flow.availability : [])
       .slice()
       .sort((left, right) => {
@@ -7981,50 +8116,7 @@ export default function PlayerHubPage({
         ? "Choose a tournament and ask confirmed members."
         : "Coming soon.";
 
-    const primaryAction =
-      rosterLocked
-        ? {
-            label: "Locked / no action needed",
-            disabled: true,
-            onClick: () => {},
-          }
-        : rosterCurrentStep?.id === "approval" ||
-            rosterSubmitted ||
-            rosterApproved
-          ? {
-              label: "View approval",
-              disabled: !flow.plan,
-              onClick: () => openCaptainChecklistSubmit(flow.plan),
-            }
-          : rosterCurrentStep?.id === "submit" && flow.rosterCanSubmit
-            ? {
-                label: rosterNeedsChanges ? "Resubmit roster" : "Submit roster",
-                disabled: false,
-                onClick: () => openCaptainChecklistSubmit(flow.plan),
-              }
-          : rosterCurrentStep?.id === "names"
-            ? {
-                label: "Name squads",
-                disabled: !flow.plan,
-                onClick: () => toggleTournamentSquadPlanning(flow.plan),
-              }
-          : rosterCurrentStep?.id === "squads"
-            ? {
-                label: "Plan squads",
-                disabled: !flow.plan,
-                onClick: () => toggleTournamentSquadPlanning(flow.plan),
-              }
-          : rosterCurrentStep?.id === "responses"
-            ? {
-                label: "Review responses",
-                disabled: !flow.plan,
-                onClick: () => toggleTournamentPlanResponses(flow.plan),
-              }
-          : {
-              label: "Ask availability",
-              disabled: !flow.hasTournamentOptions,
-              onClick: () => toggleTeamActionPanel("plan"),
-            };
+    const primaryAction = captainRosterPrimaryAction(flow, rosterCurrentStep);
 
     return (
       <section
@@ -8075,8 +8167,9 @@ export default function PlayerHubPage({
         </div>
 
         <div style={playerHubStyles.captainRosterFlowStepGrid}>
-          {rosterFlowSteps.map((step) => (
+          {visibleRosterFlowSteps.map((step) => (
             <article key={step.id} style={playerHubStyles.captainRosterFlowStep}>
+              <span style={playerHubStyles.homeKicker}>{step.focusLabel}</span>
               <div style={playerHubStyles.captainChecklistStepTop}>
                 <span style={playerHubStyles.captainChecklistStepName}>
                   {step.label}
@@ -8097,7 +8190,11 @@ export default function PlayerHubPage({
           ))}
         </div>
 
-        <div style={playerHubStyles.captainRosterWorkspaceGrid}>
+        <details style={playerHubStyles.captainChecklistDetails}>
+          <summary style={playerHubStyles.captainChecklistSummary}>
+            Roster details
+          </summary>
+          <div style={playerHubStyles.captainRosterWorkspaceGrid}>
           <section style={playerHubStyles.captainRosterMiniPanel}>
             <div style={playerHubStyles.homeCardHeader}>
               <div style={playerHubStyles.profileMeta}>
@@ -8272,14 +8369,15 @@ export default function PlayerHubPage({
               After deadline, changes require organizer/admin approval.
             </span>
           </section>
-        </div>
+          </div>
+        </details>
 
         <details style={playerHubStyles.captainChecklistDetails}>
           <summary style={playerHubStyles.captainChecklistSummary}>
-            All checklist steps
+            All steps
           </summary>
           <div style={playerHubStyles.captainChecklistGrid}>
-            {steps.map((step) => (
+            {rosterFlowSteps.map((step) => (
               <article key={`all-${step.id}`} style={playerHubStyles.captainChecklistStep}>
                 <div style={playerHubStyles.captainChecklistStepTop}>
                   <span style={playerHubStyles.captainChecklistStepName}>
@@ -9033,6 +9131,109 @@ export default function PlayerHubPage({
             </article>
           );
         })}
+      </div>
+    );
+  }
+
+  function renderTeamNeedCard(need) {
+    const interestsForNeed = captainInterestsByNeedId[need.needId] || [];
+    const stats = teamNeedStatLabels(need, interestsForNeed);
+    const acceptedPercent = Math.min(
+      100,
+      Math.round(
+        (stats.acceptedCount / Math.max(1, stats.neededCount)) * 100
+      )
+    );
+    const acceptedInterests = interestsForNeed.filter(
+      (interest) => interest.status === "ACCEPTED"
+    );
+    const pendingInterests = interestsForNeed.filter(
+      (interest) => interest.status === "PENDING"
+    );
+    const declinedInterests = interestsForNeed.filter(
+      (interest) => interest.status === "DECLINED"
+    );
+    const otherInterests = interestsForNeed.filter(
+      (interest) =>
+        !["ACCEPTED", "PENDING", "DECLINED"].includes(interest.status)
+    );
+
+    return (
+      <div key={need.needId} style={playerHubStyles.accessRequestList}>
+        <article style={playerHubStyles.teamControlRow}>
+          <div style={playerHubStyles.compactRowMain}>
+            <span style={playerHubStyles.compactRowTitle}>
+              {teamNeedSummary(need)}
+            </span>
+            <span style={playerHubStyles.compactRowMeta}>
+              {[
+                teamNeedContextLabel(need),
+                need.tournamentName,
+                need.needText,
+                `${stats.acceptedCount}/${stats.neededCount} accepted`,
+                stats.filled ? "Filled" : `${stats.remainingCount} spots left`,
+                stats.pendingCount ? `${stats.pendingCount} pending` : "",
+              ]
+                .filter(Boolean)
+                .join(" / ")}
+            </span>
+            <div style={playerHubStyles.progressTrack}>
+              <div
+                style={{
+                  ...playerHubStyles.progressFill,
+                  width: `${acceptedPercent}%`,
+                }}
+              />
+            </div>
+          </div>
+          <div style={playerHubStyles.teamControlActionsRow}>
+            <span
+              style={{
+                ...playerHubStyles.chip,
+                ...teamNeedContextChipStyle(need),
+              }}
+            >
+              {teamNeedContextLabel(need)}
+            </span>
+            <span style={playerHubStyles.chip}>
+              {need.status === "OPEN" ? "Open" : "Closed"}
+            </span>
+            <button
+              type="button"
+              style={playerHubStyles.adminActionButton}
+              onClick={() => toggleTeamNeedInterests(need)}
+            >
+              {expandedTeamNeedInterestId === need.needId ? "Hide" : "View"}
+            </button>
+            {need.status === "OPEN" ? (
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={() => handleCloseTeamNeed(need)}
+              >
+                Close
+              </button>
+            ) : null}
+          </div>
+        </article>
+        {expandedTeamNeedInterestId === need.needId ? (
+          <div style={playerHubStyles.accessRequestList}>
+            {loadingTeamNeedInterestId === need.needId ? (
+              <div style={playerHubStyles.emptyPreview}>Loading interests...</div>
+            ) : interestsForNeed.length ? (
+              <>
+                {renderCaptainInterestGroup("Accepted", acceptedInterests)}
+                {renderCaptainInterestGroup("Pending", pendingInterests)}
+                {renderCaptainInterestGroup("Declined", declinedInterests)}
+                {renderCaptainInterestGroup("Other", otherInterests)}
+              </>
+            ) : (
+              <div style={playerHubStyles.emptyPreview}>
+                No interested players yet.
+              </div>
+            )}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -10904,6 +11105,67 @@ export default function PlayerHubPage({
     }
   }
 
+  const captainTeamPrimaryAction = canManageTeamProfile
+    ? captainRosterPrimaryAction(captainHomeFlow, captainHomeNextTask)
+    : null;
+  const captainTeamActions = [
+    {
+      id: "ask",
+      label: showTournamentPlanForm ? "Close plan" : "Ask availability",
+      disabled: false,
+      onClick: () => toggleTeamActionPanel("plan"),
+    },
+    {
+      id: "plan",
+      label: "Plan squads",
+      disabled: !captainHomeFlow?.plan,
+      onClick: openCaptainPlanAction,
+    },
+    {
+      id: "names",
+      label: "Squad names",
+      disabled: !captainHomeFlow?.plan,
+      onClick: openCaptainPlanAction,
+    },
+    {
+      id: "submit",
+      label: "Submit roster",
+      disabled: !captainHomeFlow?.rosterCanSubmit,
+      onClick: openCaptainSubmitAction,
+    },
+    {
+      id: "ad",
+      label: showTournamentAdForm ? "Close ad" : "Publish player ad",
+      disabled: false,
+      onClick: () => toggleTeamActionPanel("ad"),
+    },
+    {
+      id: "need",
+      label: showTeamNeedForm ? "Close need" : "Add internal need",
+      disabled: false,
+      onClick: () => toggleTeamActionPanel("need"),
+    },
+    {
+      id: "edit",
+      label: showTeamEditor ? "Close edit" : "Edit team",
+      disabled: false,
+      onClick: () => toggleTeamActionPanel("edit"),
+    },
+  ];
+  const preferredSecondaryActionIds =
+    captainTeamPrimaryAction?.id === "ask" ? ["need", "ad"] : ["ask", "need"];
+  const visibleCaptainSecondaryActions = preferredSecondaryActionIds
+    .map((id) => captainTeamActions.find((action) => action.id === id))
+    .filter(
+      (action) => action && action.id !== captainTeamPrimaryAction?.id
+    )
+    .slice(0, 2);
+  const moreCaptainActions = captainTeamActions.filter(
+    (action) =>
+      action.id !== captainTeamPrimaryAction?.id &&
+      !visibleCaptainSecondaryActions.some((visible) => visible.id === action.id)
+  );
+
   return (
     <div style={playerHubStyles.shell} data-testid="player-hub-root">
       <section style={playerHubStyles.hero}>
@@ -11833,71 +12095,62 @@ export default function PlayerHubPage({
                   {teamProfile?.active === false ? "Inactive" : "Active"}
                 </span>
               </div>
-              <div style={playerHubStyles.captainActionGrid}>
-              <button
-                type="button"
-                style={playerHubStyles.captainActionButton}
-                onClick={() => toggleTeamActionPanel("plan")}
-              >
-                {showTournamentPlanForm ? "Close plan" : "Ask availability"}
-              </button>
               <button
                 type="button"
                 style={{
-                  ...playerHubStyles.captainActionButton,
-                  ...(!captainHomeFlow?.plan ? playerHubStyles.adminDisabledButton : {}),
-                }}
-                disabled={!captainHomeFlow?.plan}
-                onClick={openCaptainPlanAction}
-              >
-                Plan squads
-              </button>
-              <button
-                type="button"
-                style={{
-                  ...playerHubStyles.captainActionButton,
-                  ...(!captainHomeFlow?.plan ? playerHubStyles.adminDisabledButton : {}),
-                }}
-                disabled={!captainHomeFlow?.plan}
-                onClick={openCaptainPlanAction}
-              >
-                Squad names
-              </button>
-              <button
-                type="button"
-                style={{
-                  ...playerHubStyles.captainActionButton,
-                  ...(!captainHomeFlow?.rosterCanSubmit
+                  ...playerHubStyles.captainActionPrimaryButton,
+                  ...(captainTeamPrimaryAction?.disabled
                     ? playerHubStyles.adminDisabledButton
                     : {}),
                 }}
-                disabled={!captainHomeFlow?.rosterCanSubmit}
-                onClick={openCaptainSubmitAction}
+                disabled={captainTeamPrimaryAction?.disabled}
+                onClick={captainTeamPrimaryAction?.onClick}
               >
-                Submit roster
+                {captainTeamPrimaryAction?.label || "Ask availability"}
               </button>
-              <button
-                type="button"
-                style={playerHubStyles.captainActionButton}
-                onClick={() => toggleTeamActionPanel("ad")}
-              >
-                {showTournamentAdForm ? "Close ad" : "Publish player ad"}
-              </button>
-              <button
-                type="button"
-                style={playerHubStyles.captainActionButton}
-                onClick={() => toggleTeamActionPanel("need")}
-              >
-                {showTeamNeedForm ? "Close need" : "Add internal need"}
-              </button>
-              <button
-                type="button"
-                style={playerHubStyles.captainActionButton}
-                onClick={() => toggleTeamActionPanel("edit")}
-              >
-                {showTeamEditor ? "Close edit" : "Edit team"}
-              </button>
-              </div>
+              {visibleCaptainSecondaryActions.length ? (
+                <div style={playerHubStyles.captainActionSecondaryRow}>
+                  {visibleCaptainSecondaryActions.map((action) => (
+                    <button
+                      key={action.id}
+                      type="button"
+                      style={{
+                        ...playerHubStyles.captainActionButton,
+                        ...(action.disabled ? playerHubStyles.adminDisabledButton : {}),
+                      }}
+                      disabled={action.disabled}
+                      onClick={action.onClick}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {moreCaptainActions.length ? (
+                <details style={playerHubStyles.captainActionMore}>
+                  <summary style={playerHubStyles.captainChecklistSummary}>
+                    More actions
+                  </summary>
+                  <div style={playerHubStyles.captainActionMoreGrid}>
+                    {moreCaptainActions.map((action) => (
+                      <button
+                        key={action.id}
+                        type="button"
+                        style={{
+                          ...playerHubStyles.captainActionButton,
+                          ...(action.disabled
+                            ? playerHubStyles.adminDisabledButton
+                            : {}),
+                        }}
+                        disabled={action.disabled}
+                        onClick={action.onClick}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
             </article>
 
           {showCaptainChecklist ? renderCaptainTournamentChecklist() : null}
@@ -12481,132 +12734,17 @@ export default function PlayerHubPage({
 
               {teamNeeds.length ? (
                 <div style={playerHubStyles.accessRequestList}>
-                  {teamNeeds.map((need) => {
-                    const interestsForNeed =
-                      captainInterestsByNeedId[need.needId] || [];
-                    const stats = teamNeedStatLabels(need, interestsForNeed);
-                    const acceptedPercent = Math.min(
-                      100,
-                      Math.round(
-                        (stats.acceptedCount / Math.max(1, stats.neededCount)) *
-                          100
-                      )
-                    );
-                    const acceptedInterests = interestsForNeed.filter(
-                      (interest) => interest.status === "ACCEPTED"
-                    );
-                    const pendingInterests = interestsForNeed.filter(
-                      (interest) => interest.status === "PENDING"
-                    );
-                    const declinedInterests = interestsForNeed.filter(
-                      (interest) => interest.status === "DECLINED"
-                    );
-                    const otherInterests = interestsForNeed.filter(
-                      (interest) =>
-                        !["ACCEPTED", "PENDING", "DECLINED"].includes(
-                          interest.status
-                        )
-                    );
-
-                    return (
-                      <div key={need.needId} style={playerHubStyles.accessRequestList}>
-                        <article style={playerHubStyles.teamControlRow}>
-                          <div style={playerHubStyles.compactRowMain}>
-                            <span style={playerHubStyles.compactRowTitle}>
-                              {teamNeedSummary(need)}
-                            </span>
-                            <span style={playerHubStyles.compactRowMeta}>
-                              {[
-                                teamNeedContextLabel(need),
-                                need.tournamentName,
-                                need.needText,
-                                `${stats.acceptedCount}/${stats.neededCount} accepted`,
-                                stats.filled
-                                  ? "Filled"
-                                  : `${stats.remainingCount} spots left`,
-                                stats.pendingCount
-                                  ? `${stats.pendingCount} pending`
-                                  : "",
-                              ]
-                                .filter(Boolean)
-                                .join(" / ")}
-                            </span>
-                            <div style={playerHubStyles.progressTrack}>
-                              <div
-                                style={{
-                                  ...playerHubStyles.progressFill,
-                                  width: `${acceptedPercent}%`,
-                                }}
-                              />
-                            </div>
-                          </div>
-                          <div style={playerHubStyles.teamControlActionsRow}>
-                            <span
-                              style={{
-                                ...playerHubStyles.chip,
-                                ...teamNeedContextChipStyle(need),
-                              }}
-                            >
-                              {teamNeedContextLabel(need)}
-                            </span>
-                            <span style={playerHubStyles.chip}>
-                              {need.status === "OPEN" ? "Open" : "Closed"}
-                            </span>
-                            <button
-                              type="button"
-                              style={playerHubStyles.adminActionButton}
-                              onClick={() => toggleTeamNeedInterests(need)}
-                            >
-                              {expandedTeamNeedInterestId === need.needId
-                                ? "Hide"
-                                : "View"}
-                            </button>
-                            {need.status === "OPEN" ? (
-                              <button
-                                type="button"
-                                style={playerHubStyles.adminActionButton}
-                                onClick={() => handleCloseTeamNeed(need)}
-                              >
-                                Close
-                              </button>
-                            ) : null}
-                          </div>
-                        </article>
-                        {expandedTeamNeedInterestId === need.needId ? (
-                          <div style={playerHubStyles.accessRequestList}>
-                            {loadingTeamNeedInterestId === need.needId ? (
-                              <div style={playerHubStyles.emptyPreview}>
-                                Loading interests...
-                              </div>
-                            ) : interestsForNeed.length ? (
-                              <>
-                                {renderCaptainInterestGroup(
-                                  "Accepted",
-                                  acceptedInterests
-                                )}
-                                {renderCaptainInterestGroup(
-                                  "Pending",
-                                  pendingInterests
-                                )}
-                                {renderCaptainInterestGroup(
-                                  "Declined",
-                                  declinedInterests
-                                )}
-                                {renderCaptainInterestGroup(
-                                  "Other",
-                                  otherInterests
-                                )}
-                              </>
-                            ) : (
-                              <div style={playerHubStyles.emptyPreview}>
-                                No interested players yet.
-                              </div>
-                            )}
-                          </div>
-                        ) : null}
+                  {teamNeeds.slice(0, 3).map((need) => renderTeamNeedCard(need))}
+                  {teamNeeds.length > 3 ? (
+                    <details style={playerHubStyles.teamNeedsMoreDetails}>
+                      <summary style={playerHubStyles.captainChecklistSummary}>
+                        View all needs
+                      </summary>
+                      <div style={playerHubStyles.accessRequestList}>
+                        {teamNeeds.slice(3).map((need) => renderTeamNeedCard(need))}
                       </div>
-                    );
-                  })}
+                    </details>
+                  ) : null}
                 </div>
               ) : (
                 <span style={playerHubStyles.mutedLine}>No team needs yet.</span>
