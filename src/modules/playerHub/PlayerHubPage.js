@@ -2605,6 +2605,14 @@ Object.assign(playerHubStyles, {
     borderRadius: "18px",
     minWidth: 0,
   },
+  captainRosterFlowCard: {
+    ...hubGlassPanelSoft,
+    display: "grid",
+    gap: "12px",
+    padding: "12px",
+    borderRadius: "18px",
+    minWidth: 0,
+  },
   captainChecklistTop: {
     display: "flex",
     alignItems: "flex-start",
@@ -2674,6 +2682,98 @@ Object.assign(playerHubStyles, {
     background: "linear-gradient(135deg, #38bdf8, #22c55e)",
     borderColor: "rgba(125,211,252,0.34)",
     color: "#04111f",
+  },
+  captainRosterNextAction: {
+    ...hubGlassRow,
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "10px",
+    alignItems: "center",
+    padding: "11px",
+    borderRadius: "16px",
+    minWidth: 0,
+  },
+  captainRosterFlowStepGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 128px), 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+  captainRosterFlowStep: {
+    display: "grid",
+    gap: "7px",
+    padding: "10px",
+    borderRadius: "14px",
+    background: "rgba(15,23,42,0.42)",
+    border: "1px solid rgba(125,211,252,0.14)",
+    minWidth: 0,
+  },
+  captainRosterWorkspaceGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))",
+    gap: "10px",
+    minWidth: 0,
+  },
+  captainRosterMiniPanel: {
+    ...hubGlassRow,
+    display: "grid",
+    gap: "10px",
+    padding: "11px",
+    borderRadius: "16px",
+    minWidth: 0,
+  },
+  captainRosterMetricRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    minWidth: 0,
+  },
+  captainRosterCompactList: {
+    display: "grid",
+    gap: "6px",
+    minWidth: 0,
+  },
+  captainRosterCompactRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "center",
+    gap: "8px",
+    minHeight: "34px",
+    padding: "7px 8px",
+    borderRadius: "12px",
+    background: "rgba(2,6,23,0.28)",
+    border: "1px solid rgba(148,163,184,0.12)",
+    color: hubDarkPalette.text,
+    fontSize: "12px",
+    minWidth: 0,
+  },
+  captainRosterSquadGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: "7px",
+    minWidth: 0,
+  },
+  captainRosterSquadMini: {
+    display: "grid",
+    gap: "4px",
+    padding: "8px",
+    borderRadius: "12px",
+    background: "rgba(14,165,233,0.10)",
+    border: "1px solid rgba(125,211,252,0.14)",
+    color: hubDarkPalette.text,
+    minWidth: 0,
+  },
+  captainRosterWarningRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    minWidth: 0,
+  },
+  captainRosterNamesPreview: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
+    minWidth: 0,
   },
   captainChecklistStatusNext: {
     background: "rgba(14,165,233,0.18)",
@@ -7278,15 +7378,23 @@ export default function PlayerHubPage({
     if (status === "next") return "Next";
     if (status === "pending") return "Pending";
     if (status === "blocked") return "Blocked";
+    if (status === "approved") return "Approved";
+    if (status === "locked") return "Locked";
+    if (status === "needs-changes") return "Needs changes";
     if (status === "coming-soon") return "Coming soon";
     return "Not started";
   }
 
   function captainChecklistStatusStyle(status) {
+    if (status === "approved" || status === "locked") {
+      return playerHubStyles.accessStatusApproved;
+    }
     if (status === "done") return playerHubStyles.accessStatusApproved;
     if (status === "next") return playerHubStyles.captainChecklistStatusNext;
     if (status === "pending") return playerHubStyles.accessStatusPending;
-    if (status === "blocked") return playerHubStyles.accessStatusRejected;
+    if (status === "blocked" || status === "needs-changes") {
+      return playerHubStyles.accessStatusRejected;
+    }
     return playerHubStyles.accessStatusIdle;
   }
 
@@ -7403,6 +7511,9 @@ export default function PlayerHubPage({
       hasTournamentOptions: tournamentOptions.length > 0,
       draftTournament,
       draftTournamentSelected: Boolean(tournamentPlanDraft.tournamentId),
+      availability,
+      planning,
+      draftData,
     };
   }
 
@@ -7549,14 +7660,171 @@ export default function PlayerHubPage({
   function renderCaptainTournamentChecklist() {
     const flow = buildCaptainTournamentFlow();
     const steps = buildCaptainChecklistSteps(flow);
-    const currentStep = steps.find((step) => step.status === "next") ||
-      steps.find((step) => step.status === "pending") ||
-      steps.find((step) => step.status === "blocked") ||
-      steps[steps.length - 1];
-    const nextStepPreview = steps.find(
-      (step) => step.id !== currentStep?.id && step.status !== "done"
+    const hasPlan = Boolean(flow.plan);
+    const rosterApproved = flow.rosterStatus === "APPROVED";
+    const rosterLocked = flow.rosterStatus === "LOCKED";
+    const rosterSubmitted = flow.rosterStatus === "SUBMITTED";
+    const rosterNeedsChanges =
+      flow.rosterStatus === "REJECTED" ||
+      flow.rosterStatus === "CHANGE_REQUESTED";
+    const squadNameLabels = squadNamesFromSource({
+      ...flow.plan,
+      ...(flow.draftData || {}),
+      roster: flow.roster,
+    });
+    const rosterFlowSteps = [
+      {
+        id: "availability",
+        label: "Availability",
+        status: hasPlan ? "done" : flow.hasTournamentOptions ? "next" : "blocked",
+        detail: hasPlan
+          ? `${flow.stats.total || 0} invited`
+          : flow.hasTournamentOptions
+            ? "Ask confirmed members."
+            : "No tournaments available.",
+      },
+      {
+        id: "responses",
+        label: "Responses",
+        status: !hasPlan
+          ? "blocked"
+          : flow.answeredCount || flow.rosterActive
+            ? "done"
+            : flow.stats.total
+              ? "next"
+              : "pending",
+        detail: hasPlan
+          ? `${flow.answeredCount}/${flow.stats.total || 0} answered`
+          : "Ask availability first.",
+      },
+      {
+        id: "squads",
+        label: "Squads",
+        status: !hasPlan
+          ? "blocked"
+          : flow.assignedCount
+            ? "done"
+            : flow.answeredCount
+              ? "next"
+              : "pending",
+        detail: flow.assignedCount
+          ? `${flow.assignedCount} assigned`
+          : hasPlan
+            ? "Place Going/Maybe players."
+            : "No plan selected.",
+      },
+      {
+        id: "names",
+        label: "Squad names",
+        status: !hasPlan
+          ? "blocked"
+          : flow.labelCount
+            ? "done"
+            : flow.assignedCount
+              ? "next"
+              : "pending",
+        detail: flow.labelCount
+          ? `${flow.labelCount} custom label${flow.labelCount === 1 ? "" : "s"}`
+          : "A/B/C/Reserve labels.",
+      },
+      {
+        id: "submit",
+        label: "Submit roster",
+        status: rosterLocked
+          ? "locked"
+          : rosterApproved
+            ? "approved"
+            : rosterSubmitted
+              ? "done"
+              : rosterNeedsChanges
+                ? "needs-changes"
+                : flow.rosterLock?.afterDeadline && !flow.lateChangeRequested
+                  ? "blocked"
+                  : flow.rosterCanSubmit
+                    ? "next"
+                    : flow.assignedCount
+                      ? "pending"
+                      : "blocked",
+        detail: flow.rosterActive
+          ? formatRosterStatus(flow.rosterStatus)
+          : flow.assignedCount
+            ? "Create draft below."
+            : "Plan squads first.",
+      },
+      {
+        id: "approval",
+        label: "Approval",
+        status: rosterLocked
+          ? "locked"
+          : rosterApproved
+            ? "approved"
+            : rosterSubmitted
+              ? "pending"
+              : rosterNeedsChanges
+                ? "needs-changes"
+                : "pending",
+        detail: rosterLocked
+          ? "Official roster locked."
+          : rosterApproved
+            ? "Approved by organizer/admin."
+            : rosterSubmitted
+              ? "Organizer review."
+              : rosterNeedsChanges
+                ? "Update and resubmit."
+                : "Not submitted yet.",
+      },
+    ];
+    const rosterCurrentStep =
+      rosterFlowSteps.find((step) => step.status === "next") ||
+      rosterFlowSteps.find((step) => step.status === "needs-changes") ||
+      rosterFlowSteps.find((step) => step.status === "pending") ||
+      rosterFlowSteps.find((step) => step.status === "blocked") ||
+      rosterFlowSteps[rosterFlowSteps.length - 1];
+    const responseRows = (Array.isArray(flow.availability) ? flow.availability : [])
+      .slice()
+      .sort((left, right) => {
+        const leftStatus = normalizeTournamentAvailabilityStatus(left.responseStatus);
+        const rightStatus = normalizeTournamentAvailabilityStatus(right.responseStatus);
+        return leftStatus.localeCompare(rightStatus) ||
+          String(left.playerDisplayName || left.playerUsername || "").localeCompare(
+            String(right.playerDisplayName || right.playerUsername || "")
+          );
+      })
+      .slice(0, 4);
+    const planningItems = (Array.isArray(flow.planning) ? flow.planning : []).filter(
+      (item) => item.planningStatus !== "REMOVED"
     );
-    const visibleSteps = [currentStep, nextStepPreview].filter(Boolean).slice(0, 2);
+    const assignedGroups = captainSquadNameSlots.map((squad) => ({
+      squad,
+      label: squadDisplayName(squad, flow.plan),
+      items: planningItems.filter(
+        (item) => normalizeAssignedSquad(item.assignedSquad) === squad
+      ),
+    }));
+    const unassignedPlanningCount = planningItems.filter(
+      (item) => normalizeAssignedSquad(item.assignedSquad) === "UNASSIGNED"
+    ).length;
+    const assignableResponseCount = (Array.isArray(flow.availability)
+      ? flow.availability
+      : []
+    ).filter((item) => {
+      const status = normalizeTournamentAvailabilityStatus(item.responseStatus);
+      return status === "YES" || status === "MAYBE";
+    }).length;
+    const suggestedMinimumPlayers = Math.max(
+      0,
+      Number(flow.plan?.playersPerTeam || flow.plan?.teamSize || 0)
+    );
+    const squadWarnings = [
+      flow.assignedCount &&
+      suggestedMinimumPlayers &&
+      flow.assignedCount < suggestedMinimumPlayers
+        ? `Only ${flow.assignedCount}/${suggestedMinimumPlayers} players assigned`
+        : "",
+      assignableResponseCount > flow.assignedCount
+        ? `${assignableResponseCount - flow.assignedCount} available unassigned`
+        : "",
+    ].filter(Boolean);
     const focusMeta = flow.plan
       ? [
           eventMetaText(flow.plan),
@@ -7571,44 +7839,59 @@ export default function PlayerHubPage({
         ? "Choose a tournament and ask confirmed members."
         : "Coming soon.";
 
-    const actions = [
-      {
-        label: "Ask availability",
-        primary: currentStep?.id === "pick" || currentStep?.id === "ask",
-        disabled: !flow.hasTournamentOptions,
-        onClick: () => toggleTeamActionPanel("plan"),
-      },
-      {
-        label: "Review responses",
-        primary: currentStep?.id === "review",
-        disabled: !flow.plan,
-        onClick: () => toggleTournamentPlanResponses(flow.plan),
-      },
-      {
-        label: "Plan squads",
-        primary:
-          currentStep?.id === "plan" ||
-          currentStep?.id === "names" ||
-          (currentStep?.id === "submit" && !flow.rosterCanSubmit),
-        disabled: !flow.plan,
-        onClick: () => toggleTournamentSquadPlanning(flow.plan),
-      },
-      {
-        label: "Submit roster",
-        primary: currentStep?.id === "submit" && flow.rosterCanSubmit,
-        disabled: !flow.rosterCanSubmit,
-        onClick: () => openCaptainChecklistSubmit(flow.plan),
-      },
-    ];
+    const primaryAction =
+      rosterLocked
+        ? {
+            label: "Locked / no action needed",
+            disabled: true,
+            onClick: () => {},
+          }
+        : rosterCurrentStep?.id === "approval" ||
+            rosterSubmitted ||
+            rosterApproved
+          ? {
+              label: "View approval",
+              disabled: !flow.plan,
+              onClick: () => openCaptainChecklistSubmit(flow.plan),
+            }
+          : rosterCurrentStep?.id === "submit" && flow.rosterCanSubmit
+            ? {
+                label: rosterNeedsChanges ? "Resubmit roster" : "Submit roster",
+                disabled: false,
+                onClick: () => openCaptainChecklistSubmit(flow.plan),
+              }
+          : rosterCurrentStep?.id === "names"
+            ? {
+                label: "Name squads",
+                disabled: !flow.plan,
+                onClick: () => toggleTournamentSquadPlanning(flow.plan),
+              }
+          : rosterCurrentStep?.id === "squads"
+            ? {
+                label: "Plan squads",
+                disabled: !flow.plan,
+                onClick: () => toggleTournamentSquadPlanning(flow.plan),
+              }
+          : rosterCurrentStep?.id === "responses"
+            ? {
+                label: "Review responses",
+                disabled: !flow.plan,
+                onClick: () => toggleTournamentPlanResponses(flow.plan),
+              }
+          : {
+              label: "Ask availability",
+              disabled: !flow.hasTournamentOptions,
+              onClick: () => toggleTeamActionPanel("plan"),
+            };
 
     return (
       <section
-        style={playerHubStyles.captainChecklistCard}
+        style={playerHubStyles.captainRosterFlowCard}
         data-testid="captain-checklist"
       >
         <div style={playerHubStyles.captainChecklistTop}>
           <div style={playerHubStyles.captainChecklistFocus}>
-            <div style={playerHubStyles.sectionTitle}>Captain checklist</div>
+            <div style={playerHubStyles.sectionTitle}>Roster flow</div>
             <span style={playerHubStyles.previewSubtitle}>
               {flow.plan?.tournamentName || "Tournament flow"}
             </span>
@@ -7619,16 +7902,39 @@ export default function PlayerHubPage({
           <span
             style={{
               ...playerHubStyles.accessStatusChip,
-              ...captainChecklistStatusStyle(currentStep?.status),
+              ...captainChecklistStatusStyle(rosterCurrentStep?.status),
             }}
           >
-            Next: {currentStep?.label || "Not started"}
+            {captainChecklistStatusLabel(rosterCurrentStep?.status)}
           </span>
         </div>
 
-        <div style={playerHubStyles.captainChecklistGrid}>
-          {visibleSteps.map((step) => (
-            <article key={step.id} style={playerHubStyles.captainChecklistStep}>
+        <div style={playerHubStyles.captainRosterNextAction}>
+          <div style={playerHubStyles.profileMeta}>
+            <span style={playerHubStyles.homeKicker}>Next action</span>
+            <strong style={playerHubStyles.previewTitle}>
+              {rosterCurrentStep?.label || "No action needed"}
+            </strong>
+            <span style={playerHubStyles.previewSubtitle}>
+              {rosterCurrentStep?.detail || "Roster work is clear."}
+            </span>
+          </div>
+          <button
+            type="button"
+            style={{
+              ...playerHubStyles.captainChecklistPrimaryAction,
+              ...(primaryAction.disabled ? playerHubStyles.adminDisabledButton : {}),
+            }}
+            disabled={primaryAction.disabled}
+            onClick={primaryAction.onClick}
+          >
+            {primaryAction.label}
+          </button>
+        </div>
+
+        <div style={playerHubStyles.captainRosterFlowStepGrid}>
+          {rosterFlowSteps.map((step) => (
+            <article key={step.id} style={playerHubStyles.captainRosterFlowStep}>
               <div style={playerHubStyles.captainChecklistStepTop}>
                 <span style={playerHubStyles.captainChecklistStepName}>
                   {step.label}
@@ -7647,6 +7953,183 @@ export default function PlayerHubPage({
               </span>
             </article>
           ))}
+        </div>
+
+        <div style={playerHubStyles.captainRosterWorkspaceGrid}>
+          <section style={playerHubStyles.captainRosterMiniPanel}>
+            <div style={playerHubStyles.homeCardHeader}>
+              <div style={playerHubStyles.profileMeta}>
+                <strong style={playerHubStyles.previewTitle}>Responses</strong>
+                <span style={playerHubStyles.previewSubtitle}>
+                  Going / Maybe / No / Pending
+                </span>
+              </div>
+              <button
+                type="button"
+                style={playerHubStyles.feedTinyAction}
+                disabled={!flow.plan}
+                onClick={() => toggleTournamentPlanResponses(flow.plan)}
+              >
+                Review
+              </button>
+            </div>
+            <div style={playerHubStyles.captainRosterMetricRow}>
+              <span style={playerHubStyles.chip}>Going {flow.stats.yes}</span>
+              <span style={playerHubStyles.chip}>Maybe {flow.stats.maybe}</span>
+              <span style={playerHubStyles.chip}>No {flow.stats.no}</span>
+              <span style={playerHubStyles.chip}>Pending {flow.stats.pending}</span>
+            </div>
+            {responseRows.length ? (
+              <div style={playerHubStyles.captainRosterCompactList}>
+                {responseRows.map((item) => {
+                  const responseStatus = normalizeTournamentAvailabilityStatus(
+                    item.responseStatus
+                  );
+                  return (
+                    <div
+                      key={item.availabilityId || item.playerUsername}
+                      style={playerHubStyles.captainRosterCompactRow}
+                    >
+                      <strong>
+                        {item.playerDisplayName || item.playerUsername || "Player"}
+                      </strong>
+                      <span
+                        style={{
+                          ...playerHubStyles.accessStatusChip,
+                          ...tournamentAvailabilityStatusStyle(responseStatus),
+                        }}
+                      >
+                        {formatPlayerAvailabilityStatus(responseStatus)}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <span style={playerHubStyles.mutedLine}>
+                Responses appear after availability is loaded.
+              </span>
+            )}
+          </section>
+
+          <section style={playerHubStyles.captainRosterMiniPanel}>
+            <div style={playerHubStyles.homeCardHeader}>
+              <div style={playerHubStyles.profileMeta}>
+                <strong style={playerHubStyles.previewTitle}>Squads</strong>
+                <span style={playerHubStyles.previewSubtitle}>
+                  {unassignedPlanningCount} unassigned
+                </span>
+              </div>
+              <button
+                type="button"
+                style={playerHubStyles.feedTinyAction}
+                disabled={!flow.plan}
+                onClick={() => toggleTournamentSquadPlanning(flow.plan)}
+              >
+                Plan
+              </button>
+            </div>
+            <div style={playerHubStyles.captainRosterSquadGrid}>
+              {assignedGroups.map((group) => (
+                <div key={group.squad} style={playerHubStyles.captainRosterSquadMini}>
+                  <span>{group.label}</span>
+                  <strong>{group.items.length}</strong>
+                </div>
+              ))}
+            </div>
+            {squadWarnings.length ? (
+              <div style={playerHubStyles.captainRosterWarningRow}>
+                {squadWarnings.map((warning) => (
+                  <span key={warning} style={playerHubStyles.chip}>
+                    {warning}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </section>
+
+          <section style={playerHubStyles.captainRosterMiniPanel}>
+            <div style={playerHubStyles.homeCardHeader}>
+              <div style={playerHubStyles.profileMeta}>
+                <strong style={playerHubStyles.previewTitle}>Squad names</strong>
+                <span style={playerHubStyles.previewSubtitle}>
+                  Display labels for roster preview.
+                </span>
+              </div>
+              <button
+                type="button"
+                style={playerHubStyles.feedTinyAction}
+                disabled={!flow.plan}
+                onClick={() => toggleTournamentSquadPlanning(flow.plan)}
+              >
+                Edit names
+              </button>
+            </div>
+            <div style={playerHubStyles.captainRosterNamesPreview}>
+              {captainSquadNameSlots.map((squad) => (
+                <span key={squad} style={playerHubStyles.chip}>
+                  {squadNameEditorSlotLabel(squad)} -{" "}
+                  {squadNameLabels[squad] || squadDisplayName(squad, flow.plan)}
+                </span>
+              ))}
+            </div>
+          </section>
+
+          <section style={playerHubStyles.captainRosterMiniPanel}>
+            <div style={playerHubStyles.homeCardHeader}>
+              <div style={playerHubStyles.profileMeta}>
+                <strong style={playerHubStyles.previewTitle}>Submit / approval</strong>
+                <span style={playerHubStyles.previewSubtitle}>
+                  {flow.plan?.className || flow.plan?.squadLabel || "Series not set"}
+                </span>
+              </div>
+              <span
+                style={{
+                  ...playerHubStyles.accessStatusChip,
+                  ...rosterStatusStyle(flow.rosterStatus),
+                }}
+              >
+                {flow.rosterActive
+                  ? formatRosterStatus(flow.rosterStatus)
+                  : "No draft"}
+              </span>
+            </div>
+            <div style={playerHubStyles.captainRosterMetricRow}>
+              <span style={playerHubStyles.chip}>
+                {flow.assignedCount} players
+              </span>
+              {rosterLockLabel(flow.rosterLock) ? (
+                <span style={playerHubStyles.chip}>
+                  {rosterLockLabel(flow.rosterLock)}
+                </span>
+              ) : null}
+              {flow.rosterLock?.afterDeadline ? (
+                <span style={playerHubStyles.chip}>Late change approval</span>
+              ) : null}
+            </div>
+            {flow.roster?.submittedAt || flow.roster?.reviewedAt || flow.roster?.lockedAt ? (
+              <div style={playerHubStyles.captainRosterCompactList}>
+                {flow.roster?.submittedAt ? (
+                  <span style={playerHubStyles.mutedLine}>
+                    Submitted: {new Date(flow.roster.submittedAt).toLocaleString()}
+                  </span>
+                ) : null}
+                {flow.roster?.reviewedAt ? (
+                  <span style={playerHubStyles.mutedLine}>
+                    Reviewed: {new Date(flow.roster.reviewedAt).toLocaleString()}
+                  </span>
+                ) : null}
+                {flow.roster?.lockedAt ? (
+                  <span style={playerHubStyles.mutedLine}>
+                    Locked: {new Date(flow.roster.lockedAt).toLocaleString()}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            <span style={playerHubStyles.mutedLine}>
+              After deadline, changes require organizer/admin approval.
+            </span>
+          </section>
         </div>
 
         <details style={playerHubStyles.captainChecklistDetails}>
@@ -7677,24 +8160,6 @@ export default function PlayerHubPage({
           </div>
         </details>
 
-        <div style={playerHubStyles.captainChecklistActions}>
-          {actions.map((action) => (
-            <button
-              key={action.label}
-              type="button"
-              style={{
-                ...(action.primary
-                  ? playerHubStyles.captainChecklistPrimaryAction
-                  : playerHubStyles.captainChecklistAction),
-                ...(action.disabled ? playerHubStyles.adminDisabledButton : {}),
-              }}
-              disabled={action.disabled}
-              onClick={action.onClick}
-            >
-              {action.label}
-            </button>
-          ))}
-        </div>
       </section>
     );
   }
