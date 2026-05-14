@@ -13884,7 +13884,7 @@ const savedRound = readStorageWithTtl(
                 </section>
               )}
 
-              {publicMatchCards.length > 0 ? (
+              {publicMatchCards.length > 0 && (
                 <section
                   style={{
                     ...styles.publicLiveWorkspace,
@@ -14032,12 +14032,6 @@ const savedRound = readStorageWithTtl(
                       )}
                     </aside>
                   )}
-                </section>
-              ) : (
-                <section style={publicSectionStyle}>
-                  <div style={publicMutedStyle}>
-                    {publicLiveLabels.noMatches}
-                  </div>
                 </section>
               )}
 
