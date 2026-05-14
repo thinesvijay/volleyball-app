@@ -3548,6 +3548,45 @@ Object.assign(playerHubStyles, {
     gap: "8px",
     minWidth: 0,
   },
+  teamRosterVisibilityPanel: {
+    ...hubGlassPanelSoft,
+    display: "grid",
+    gap: "10px",
+    padding: "12px",
+    borderRadius: "20px",
+    minWidth: 0,
+  },
+  teamRosterFilterRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "7px",
+    minWidth: 0,
+  },
+  teamRosterList: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+  teamRosterCard: {
+    ...hubGlassRow,
+    display: "grid",
+    gap: "9px",
+    padding: "10px",
+    borderRadius: "16px",
+    minWidth: 0,
+  },
+  teamRosterCardTop: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "10px",
+    alignItems: "start",
+    minWidth: 0,
+  },
+  teamRosterDetails: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
   compactSquadNamesGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 190px), 1fr))",
@@ -4293,6 +4332,14 @@ Object.assign(playerHubStyles, {
     ...playerHubStyles.teamCompactPanel,
     ...hubGlassSoftV3,
   },
+  teamRosterVisibilityPanel: {
+    ...playerHubStyles.teamRosterVisibilityPanel,
+    ...hubGlassSoftV3,
+  },
+  teamRosterCard: {
+    ...playerHubStyles.teamRosterCard,
+    ...hubRowV3,
+  },
   teamCompactRow: {
     ...playerHubStyles.teamCompactRow,
     ...hubRowV3,
@@ -4654,6 +4701,8 @@ export default function PlayerHubPage({
     useState("");
   const [playerTournamentRosterStatus, setPlayerTournamentRosterStatus] =
     useState([]);
+  const [teamRosterVisibilityFilter, setTeamRosterVisibilityFilter] =
+    useState("ALL");
   const [adminTournamentRosterDrafts, setAdminTournamentRosterDrafts] =
     useState([]);
   const [adminTournamentRosterStatus, setAdminTournamentRosterStatus] =
@@ -11105,6 +11154,402 @@ export default function PlayerHubPage({
     }
   }
 
+  function rosterVisibilityDate(value) {
+    const text = passportText(value);
+    if (!text) return "";
+    const date = new Date(text);
+    if (!Number.isNaN(date.getTime())) return date.toLocaleString();
+    return text;
+  }
+
+  function rosterVisibilitySeriesLabel(roster = {}, plan = {}) {
+    return passportText(
+      roster.className,
+      roster.seriesName,
+      roster.seriesLabel,
+      roster.squadLabel && !isNeutralPlanLabel(roster.squadLabel)
+        ? roster.squadLabel
+        : "",
+      plan.className,
+      plan.seriesName,
+      plan.seriesLabel,
+      plan.squadLabel && !isNeutralPlanLabel(plan.squadLabel)
+        ? plan.squadLabel
+        : ""
+    );
+  }
+
+  function rosterVisibilityKey(roster = {}, plan = {}) {
+    const key = [
+      passportText(roster.rosterId),
+      passportText(roster.planId, plan.planId),
+      passportText(roster.tournamentId, plan.tournamentId),
+      passportText(roster.clubTeamId, plan.clubTeamId),
+      passportText(roster.clubTeamName, plan.clubTeamName),
+    ]
+      .filter(Boolean)
+      .join(":");
+    return key;
+  }
+
+  function rosterVisibilityPlayers(players = []) {
+    return (Array.isArray(players) ? players : []).filter(
+      (player) => player && player.playerStatus !== "REMOVED"
+    );
+  }
+
+  function buildTeamRosterVisibilityItems() {
+    const itemsByKey = new Map();
+    const visibleStatuses = {
+      SUBMITTED: true,
+      APPROVED: true,
+      LOCKED: true,
+      CHANGE_REQUESTED: true,
+    };
+
+    function addRoster({ roster, plan = {}, players = [], source }) {
+      if (!roster) return;
+      const status = normalizeRosterStatus(roster.rosterStatus || roster.status);
+      if (!visibleStatuses[status]) return;
+
+      const rosterLock = rosterLockForSource({ ...plan, ...roster });
+      const isLate =
+        Boolean(roster.changedAfterDeadline) ||
+        rosterChangedAfterDeadline(roster, rosterLock);
+      const activePlayers = rosterVisibilityPlayers(
+        players.length ? players : roster.players
+      );
+      const rosterPlayerCount = Number(roster.playerCount);
+      const playerCount = Number.isFinite(rosterPlayerCount)
+        ? rosterPlayerCount
+        : activePlayers.length;
+      const statusAllowsPlayerNames = status === "APPROVED" || status === "LOCKED";
+      const canViewNames = Boolean(
+        activePlayers.length &&
+          ((source === "admin" && (isAdmin || canReviewRosterDrafts)) ||
+            (source === "captain" && canManageTeamProfile) ||
+            (source === "player" && primaryConfirmedTeam && statusAllowsPlayerNames))
+      );
+      const seriesLabel = rosterVisibilitySeriesLabel(roster, plan);
+      const key =
+        rosterVisibilityKey(roster, plan, source) ||
+        `${source}:${itemsByKey.size}`;
+
+      if (itemsByKey.has(key)) return;
+
+      itemsByKey.set(key, {
+        key,
+        source,
+        roster,
+        plan,
+        players: activePlayers,
+        canViewNames,
+        status,
+        isLate,
+        lockLabel: rosterLockLabel(rosterLock),
+        teamName: passportText(
+          roster.clubTeamName,
+          roster.teamName,
+          plan.clubTeamName,
+          plan.teamName,
+          "Team"
+        ),
+        tournamentName: passportText(
+          roster.tournamentName,
+          plan.tournamentName,
+          "Tournament"
+        ),
+        seriesLabel,
+        playerCount,
+        captainLabel: passportText(
+          roster.captainDisplayName,
+          roster.captainUsername,
+          plan.captainDisplayName,
+          plan.captainUsername
+        ),
+        submittedText: rosterVisibilityDate(roster.submittedAt),
+        reviewedText: rosterVisibilityDate(roster.reviewedAt),
+        lockedText: rosterVisibilityDate(roster.lockedAt),
+        changedBy: passportText(
+          roster.lockedBy,
+          roster.reviewedBy,
+          roster.submittedBy
+        ),
+      });
+    }
+
+    (Array.isArray(adminTournamentRosterDrafts)
+      ? adminTournamentRosterDrafts
+      : []
+    ).forEach((roster) =>
+      addRoster({
+        roster,
+        players: Array.isArray(roster?.players) ? roster.players : [],
+        source: "admin",
+      })
+    );
+
+    Object.values(
+      captainRosterDraftsByPlanId &&
+        typeof captainRosterDraftsByPlanId === "object"
+        ? captainRosterDraftsByPlanId
+        : {}
+    ).forEach((entry) => {
+      const roster = entry?.roster || null;
+      const plan = dedupedTournamentPlans.find(
+        (item) => String(item.planId || "") === String(roster?.planId || "")
+      );
+      addRoster({
+        roster,
+        plan: plan || {},
+        players: Array.isArray(entry?.players) ? entry.players : [],
+        source: "captain",
+      });
+    });
+
+    (Array.isArray(playerTournamentRosterStatus)
+      ? playerTournamentRosterStatus
+      : []
+    ).forEach((roster) => {
+      const plan = dedupedTournamentPlans.find(
+        (item) => String(item.planId || "") === String(roster?.planId || "")
+      );
+      addRoster({
+        roster,
+        plan: plan || {},
+        players: Array.isArray(roster?.players) ? roster.players : [],
+        source: "player",
+      });
+    });
+
+    return Array.from(itemsByKey.values()).sort((left, right) => {
+      const leftTime =
+        Date.parse(
+          left.roster.lockedAt ||
+            left.roster.reviewedAt ||
+            left.roster.submittedAt ||
+            left.roster.updatedAt ||
+            ""
+        ) || 0;
+      const rightTime =
+        Date.parse(
+          right.roster.lockedAt ||
+            right.roster.reviewedAt ||
+            right.roster.submittedAt ||
+            right.roster.updatedAt ||
+            ""
+        ) || 0;
+      return rightTime - leftTime;
+    });
+  }
+
+  function teamRosterMatchesFilter(item, filter) {
+    if (filter === "ALL") return true;
+    if (filter === "SUBMITTED") return item.status === "SUBMITTED";
+    if (filter === "APPROVED") return item.status === "APPROVED";
+    if (filter === "LOCKED") return item.status === "LOCKED";
+    if (filter === "LATE") {
+      return item.isLate || item.status === "CHANGE_REQUESTED";
+    }
+    const seriesText = String(item.seriesLabel || "").toLowerCase();
+    if (filter === "4_SIDE") return seriesText.includes("4");
+    if (filter === "5_SIDE") return seriesText.includes("5");
+    return true;
+  }
+
+  function renderTeamRosterVisibilityBoard() {
+    if (!showTeamRosterVisibilityBoard) return null;
+
+    return (
+      <section
+        style={playerHubStyles.teamRosterVisibilityPanel}
+        data-testid="team-roster-visibility"
+      >
+        <div style={playerHubStyles.homeCardHeader}>
+          <div style={playerHubStyles.profileMeta}>
+            <div style={playerHubStyles.sectionTitle}>Tournament rosters</div>
+            <div style={playerHubStyles.cardText}>
+              Private roster status for loaded tournaments and series.
+            </div>
+          </div>
+          <div style={playerHubStyles.teamControlActionsRow}>
+            <span style={playerHubStyles.chip}>
+              {teamRosterVisibilityItems.length}
+            </span>
+            {canReviewRosterDrafts ? (
+              <button
+                type="button"
+                style={playerHubStyles.feedTinyAction}
+                disabled={adminTournamentRosterStatus === "loading"}
+                onClick={loadAdminRosterDrafts}
+              >
+                {adminTournamentRosterStatus === "loading" ? "Loading..." : "Refresh"}
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div style={playerHubStyles.teamRosterFilterRow}>
+          {teamRosterVisibilityFilters.map((filter) => {
+            const active = teamRosterVisibilityFilter === filter.id;
+            return (
+              <button
+                key={filter.id}
+                type="button"
+                style={{
+                  ...playerHubStyles.segmentButton,
+                  ...(active ? playerHubStyles.segmentButtonActive : {}),
+                }}
+                onClick={() => setTeamRosterVisibilityFilter(filter.id)}
+              >
+                {filter.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {filteredTeamRosterVisibilityItems.length ? (
+          <div style={playerHubStyles.teamRosterList}>
+            {filteredTeamRosterVisibilityItems.map((item) => (
+              <article key={item.key} style={playerHubStyles.teamRosterCard}>
+                <div style={playerHubStyles.teamRosterCardTop}>
+                  <div style={playerHubStyles.profileMeta}>
+                    <strong style={playerHubStyles.previewTitle}>
+                      {item.teamName}
+                    </strong>
+                    <span style={playerHubStyles.previewSubtitle}>
+                      {[item.tournamentName, item.seriesLabel]
+                        .filter(Boolean)
+                        .join(" / ")}
+                    </span>
+                    {item.captainLabel ? (
+                      <span style={playerHubStyles.previewSubtitle}>
+                        Captain: {item.captainLabel}
+                      </span>
+                    ) : null}
+                  </div>
+                  <span
+                    style={{
+                      ...playerHubStyles.accessStatusChip,
+                      ...rosterStatusStyle(item.status),
+                    }}
+                  >
+                    {formatRosterStatus(item.status)}
+                  </span>
+                </div>
+
+                <div style={playerHubStyles.chipRow}>
+                  <span style={playerHubStyles.chip}>
+                    {item.playerCount} players
+                  </span>
+                  {item.seriesLabel ? (
+                    <span style={playerHubStyles.chip}>{item.seriesLabel}</span>
+                  ) : null}
+                  {item.submittedText ? (
+                    <span style={playerHubStyles.chip}>
+                      Submitted: {item.submittedText}
+                    </span>
+                  ) : null}
+                  {item.reviewedText ? (
+                    <span style={playerHubStyles.chip}>
+                      Reviewed: {item.reviewedText}
+                    </span>
+                  ) : null}
+                  {item.lockedText ? (
+                    <span style={playerHubStyles.chip}>
+                      Locked: {item.lockedText}
+                    </span>
+                  ) : null}
+                  {item.lockLabel ? (
+                    <span style={playerHubStyles.chip}>{item.lockLabel}</span>
+                  ) : null}
+                  {item.isLate ? (
+                    <span style={playerHubStyles.chip}>Late change</span>
+                  ) : null}
+                  {item.status === "CHANGE_REQUESTED" ? (
+                    <span style={playerHubStyles.chip}>Change requested</span>
+                  ) : null}
+                  {item.changedBy ? (
+                    <span style={playerHubStyles.chip}>By: {item.changedBy}</span>
+                  ) : null}
+                </div>
+
+                <details style={playerHubStyles.teamRosterDetails}>
+                  <summary style={playerHubStyles.captainChecklistSummary}>
+                    {item.canViewNames ? "Open roster" : "Roster status"}
+                  </summary>
+                  {item.canViewNames ? (
+                    <div style={playerHubStyles.squadPendingList}>
+                      {item.players.map((player) => (
+                        <div
+                          key={
+                            player.rosterPlayerId ||
+                            `${item.key}:${player.playerUsername}`
+                          }
+                          style={playerHubStyles.squadPlayerRow}
+                        >
+                          <div style={playerHubStyles.squadPlayerInfo}>
+                            <strong style={playerHubStyles.squadPlayerName}>
+                              {player.playerDisplayName ||
+                                player.playerUsername ||
+                                "Player"}
+                            </strong>
+                            <span style={playerHubStyles.squadPlayerMeta}>
+                              {[
+                                player.playerCountry || "No country",
+                                squadDisplayName(player.assignedSquad, {
+                                  ...item.plan,
+                                  ...item.roster,
+                                }),
+                              ].join(" / ")}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={playerHubStyles.profileMessage}>
+                      Roster names are visible after organizer approval.
+                    </div>
+                  )}
+                </details>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div style={playerHubStyles.passportEmpty}>
+            <strong>No approved rosters visible yet.</strong>
+            <span>
+              Roster names appear here after teams are submitted and approved.
+            </span>
+          </div>
+        )}
+      </section>
+    );
+  }
+
+  const teamRosterVisibilityFilters = [
+    { id: "ALL", label: "All" },
+    { id: "SUBMITTED", label: "Submitted" },
+    { id: "APPROVED", label: "Approved" },
+    { id: "LOCKED", label: "Locked" },
+    { id: "LATE", label: "Late" },
+    { id: "4_SIDE", label: "4-side" },
+    { id: "5_SIDE", label: "5-side" },
+  ];
+  const teamRosterVisibilityItems = buildTeamRosterVisibilityItems();
+  const filteredTeamRosterVisibilityItems = teamRosterVisibilityItems.filter(
+    (item) => teamRosterMatchesFilter(item, teamRosterVisibilityFilter)
+  );
+  const showTeamRosterVisibilityBoard = Boolean(
+    showTeamOverviewArea &&
+      (isAdmin ||
+        canReviewRosterDrafts ||
+        canManageTeamProfile ||
+        primaryConfirmedTeam ||
+        teamRosterVisibilityItems.length)
+  );
+
   const captainTeamPrimaryAction = canManageTeamProfile
     ? captainRosterPrimaryAction(captainHomeFlow, captainHomeNextTask)
     : null;
@@ -12059,6 +12504,8 @@ export default function PlayerHubPage({
             ) : null}
           </section>
         ) : null}
+
+        {renderTeamRosterVisibilityBoard()}
 
       </section>
       ) : null}
