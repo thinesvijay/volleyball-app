@@ -57,6 +57,104 @@ const TOURNAMENTS_STORAGE_KEY = "volleyball-tournaments-v1";
 const ACTIVE_TOURNAMENT_STORAGE_KEY_PREFIX = "volleyball-active-tournament-id:";
 const CURRENT_ROUND_TTL_MS = 60 * 60 * 1000;
 const SAVED_ROUND_TTL_MS = 6 * 60 * 60 * 1000;
+const APP_PERF_DEV = process.env.NODE_ENV !== "production";
+
+function appPerfNow() {
+  if (typeof performance !== "undefined" && performance.now) {
+    return performance.now();
+  }
+
+  return Date.now();
+}
+
+const appPerfBootStartedAt = appPerfNow();
+const appPerfRecords = [];
+let appPerfSummaryTimer = null;
+let appPerfBootLogged = false;
+
+function startAppPerf(label, details = {}) {
+  if (!APP_PERF_DEV) return null;
+
+  return {
+    label,
+    details,
+    startedAt: appPerfNow(),
+  };
+}
+
+function scheduleAppPerfSummary() {
+  if (
+    !APP_PERF_DEV ||
+    typeof window === "undefined" ||
+    typeof console === "undefined"
+  ) {
+    return;
+  }
+
+  window.clearTimeout(appPerfSummaryTimer);
+  appPerfSummaryTimer = window.setTimeout(() => {
+    const loadRecords = appPerfRecords.filter(
+      (record) => record.details?.kind === "api" || record.details?.kind === "load"
+    );
+    const slowest = [...loadRecords]
+      .sort((a, b) => b.durationMs - a.durationMs)
+      .slice(0, 8)
+      .map((record) => ({
+        label: record.label,
+        action: record.details?.action || "",
+        status: record.status || "",
+        durationMs: record.durationMs,
+      }));
+    const duplicateMap = new Map();
+
+    loadRecords.forEach((record) => {
+      const key = `${record.details?.layer || "frontend"}:${
+        record.details?.action || record.label
+      }`;
+      duplicateMap.set(key, (duplicateMap.get(key) || 0) + 1);
+    });
+
+    const duplicates = Array.from(duplicateMap.entries())
+      .filter(([, count]) => count > 1)
+      .map(([key, count]) => ({ key, count }));
+
+    if (console.groupCollapsed) {
+      console.groupCollapsed(
+        `[Perf] summary: ${loadRecords.length} load/api calls`
+      );
+    } else {
+      console.log(`[Perf] summary: ${loadRecords.length} load/api calls`);
+    }
+    if (console.table) {
+      console.table(slowest);
+      console.table(duplicates);
+    } else {
+      console.log("Slowest calls", slowest);
+      console.log("Duplicate calls", duplicates);
+    }
+    if (console.groupEnd) {
+      console.groupEnd();
+    }
+  }, 700);
+}
+
+function endAppPerf(timer, details = {}) {
+  if (!APP_PERF_DEV || !timer || typeof console === "undefined") return;
+
+  const record = {
+    ...timer,
+    ...details,
+    details: {
+      ...timer.details,
+      ...(details.details || {}),
+    },
+    durationMs: Math.round(appPerfNow() - timer.startedAt),
+  };
+
+  appPerfRecords.push(record);
+  console.log(`[Perf] ${record.label} ${record.durationMs}ms`, record);
+  scheduleAppPerfSummary();
+}
 
 const TOURNAMENT_SERVER_SAFE_FIELDS = [
   "publicCode",
@@ -2794,6 +2892,12 @@ export default function App() {
         return;
       }
 
+      const timer = startAppPerf("Team Builder load players", {
+        kind: "api",
+        layer: "Apps Script",
+        action: "getPlayers",
+      });
+
       try {
         const queryString = buildQueryString({
           action: "getPlayers",
@@ -2812,6 +2916,7 @@ export default function App() {
         if (Array.isArray(data)) {
           setPlayers(data);
           setArchivedPlayers([]);
+          endAppPerf(timer, { status: "ok", count: data.length });
           return;
         }
 
@@ -2823,15 +2928,27 @@ export default function App() {
           setArchivedPlayers(
             Array.isArray(data.archivedPlayers) ? data.archivedPlayers : []
           );
+          endAppPerf(timer, {
+            status: "ok",
+            count: Array.isArray(data.players) ? data.players.length : 0,
+            archivedCount: Array.isArray(data.archivedPlayers)
+              ? data.archivedPlayers.length
+              : 0,
+          });
           return;
         }
 
         setPlayers([]);
         setArchivedPlayers([]);
+        endAppPerf(timer, { status: "empty" });
       } catch (error) {
         console.error("Could not load players:", error);
         setPlayers([]);
         setArchivedPlayers([]);
+        endAppPerf(timer, {
+          status: "error",
+          error: String(error?.message || error),
+        });
       }
     },
     [getAuthPayload]
@@ -2842,6 +2959,12 @@ export default function App() {
       setTrainerUsers([]);
       return;
     }
+
+    const timer = startAppPerf("Admin trainer users load", {
+      kind: "api",
+      layer: "Apps Script",
+      action: "listTrainerUsers",
+    });
 
     try {
       const res = await fetch(`${API}?_ts=${Date.now()}`, {
@@ -2858,14 +2981,18 @@ export default function App() {
       });
 
       const data = await res.json();
-      setTrainerUsers(
-        Array.isArray(data?.users)
-          ? data.users.map((user) => normalizeUserWithAccess(user))
-          : []
-      );
+      const users = Array.isArray(data?.users)
+        ? data.users.map((user) => normalizeUserWithAccess(user))
+        : [];
+      setTrainerUsers(users);
+      endAppPerf(timer, { status: "ok", count: users.length });
     } catch (error) {
       console.error("Could not load trainer users:", error);
       setTrainerUsers([]);
+      endAppPerf(timer, {
+        status: "error",
+        error: String(error?.message || error),
+      });
     }
   }, [
     auth.loggedIn,
@@ -2877,6 +3004,12 @@ export default function App() {
   const saveUserSettingsToBackend = useCallback(
     async (nextSkillView, nextSkillScale) => {
       if (!auth.loggedIn || !auth.username || !auth.password) return;
+
+      const timer = startAppPerf("User settings save", {
+        kind: "api",
+        layer: "Apps Script",
+        action: "saveUserSettings",
+      });
 
       try {
         await fetch(`${API}?_ts=${Date.now()}`, {
@@ -2893,8 +3026,13 @@ export default function App() {
             skillScale: Number(nextSkillScale),
           }),
         });
+        endAppPerf(timer, { status: "ok" });
       } catch (error) {
         console.error("Could not save user settings:", error);
+        endAppPerf(timer, {
+          status: "error",
+          error: String(error?.message || error),
+        });
       }
     },
     [auth.loggedIn, auth.password, auth.username]
@@ -2927,6 +3065,11 @@ export default function App() {
         throw new Error("Login required");
       }
 
+      const timer = startAppPerf(`Player Hub API ${action}`, {
+        kind: "api",
+        layer: "Apps Script",
+        action,
+      });
       const body = JSON.stringify({
         action,
         username: auth.username,
@@ -2945,7 +3088,9 @@ export default function App() {
             body,
           });
 
-          return await readPlayerHubApiResponse(response, action);
+          const data = await readPlayerHubApiResponse(response, action);
+          endAppPerf(timer, { status: "ok", attempt: attempt + 1 });
+          return data;
         } catch (error) {
           if (
             error instanceof TypeError ||
@@ -2957,25 +3102,63 @@ export default function App() {
             }
           }
 
+          endAppPerf(timer, {
+            status: "error",
+            attempt: attempt + 1,
+            error: String(error?.message || error),
+          });
           throw error;
         }
       }
 
-      throw new Error(
+      const error = new Error(
         `${action}: Could not reach the Player Hub backend. Check the Apps Script deployment and try again.`
       );
+      endAppPerf(timer, {
+        status: "error",
+        error: error.message,
+      });
+      throw error;
     },
     [auth.loggedIn, auth.password, auth.username]
   );
 
   const loadMyPlayerProfile = useCallback(async () => {
-    const data = await callPlayerHubBackend("getMyPlayerProfile");
-    return data?.profile || null;
+    const timer = startAppPerf("profile load", {
+      kind: "load",
+      layer: "Player Hub",
+      action: "getMyPlayerProfile",
+    });
+    try {
+      const data = await callPlayerHubBackend("getMyPlayerProfile");
+      endAppPerf(timer, { status: "ok" });
+      return data?.profile || null;
+    } catch (error) {
+      endAppPerf(timer, {
+        status: "error",
+        error: String(error?.message || error),
+      });
+      throw error;
+    }
   }, [callPlayerHubBackend]);
 
   const loadPlayerHubSnapshot = useCallback(async () => {
-    const data = await callPlayerHubBackend("getPlayerHubSnapshot");
-    return data || null;
+    const timer = startAppPerf("Player Hub snapshot load", {
+      kind: "load",
+      layer: "Player Hub",
+      action: "getPlayerHubSnapshot",
+    });
+    try {
+      const data = await callPlayerHubBackend("getPlayerHubSnapshot");
+      endAppPerf(timer, { status: "ok" });
+      return data || null;
+    } catch (error) {
+      endAppPerf(timer, {
+        status: "error",
+        error: String(error?.message || error),
+      });
+      throw error;
+    }
   }, [callPlayerHubBackend]);
 
   const loadEventComments = useCallback(
@@ -3731,6 +3914,11 @@ export default function App() {
 
   const callTournamentBackend = useCallback(
     async (action, payload = {}, options = {}) => {
+      const timer = startAppPerf(`Tournament API ${action}`, {
+        kind: "api",
+        layer: "Apps Script",
+        action,
+      });
       const tournamentPayload = payload.tournament
         ? buildTournamentBackendPayload(payload.tournament)
         : {};
@@ -3769,31 +3957,68 @@ export default function App() {
         preferredTransport === "json" ? "form" : "json";
 
       try {
-        return await sendRequest(preferredTransport);
+        const data = await sendRequest(preferredTransport);
+        endAppPerf(timer, { status: "ok", transport: preferredTransport });
+        return data;
       } catch (error) {
-        return sendRequest(fallbackTransport);
+        try {
+          const data = await sendRequest(fallbackTransport);
+          endAppPerf(timer, {
+            status: "ok",
+            transport: fallbackTransport,
+            fallback: true,
+          });
+          return data;
+        } catch (fallbackError) {
+          endAppPerf(timer, {
+            status: "error",
+            transport: fallbackTransport,
+            fallback: true,
+            error: String(fallbackError?.message || fallbackError),
+          });
+          throw fallbackError;
+        }
       }
     },
     [auth.password, auth.username]
   );
 
   const fetchPublicTournamentFromBackend = useCallback(async (publicCode) => {
-    const requestPayload = {
+    const timer = startAppPerf("public tournament load", {
+      kind: "api",
+      layer: "Apps Script",
       action: "getPublicTournament",
-      publicCode,
-    };
-    const queryString = buildQueryString({
-      ...requestPayload,
-      _ts: Date.now(),
     });
+    try {
+      const requestPayload = {
+        action: "getPublicTournament",
+        publicCode,
+      };
+      const queryString = buildQueryString({
+        ...requestPayload,
+        _ts: Date.now(),
+      });
 
-    const response = await fetch(`${API}?${queryString}`, {
-      method: "GET",
-      cache: "no-store",
-    });
-    const data = await readTournamentApiResponse(response);
+      const response = await fetch(`${API}?${queryString}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      const data = await readTournamentApiResponse(response);
 
-    return normalizeTournamentApiItem(data);
+      const tournament = normalizeTournamentApiItem(data);
+      endAppPerf(timer, {
+        status: tournament ? "ok" : "empty",
+        publicCode,
+      });
+      return tournament;
+    } catch (error) {
+      endAppPerf(timer, {
+        status: "error",
+        publicCode,
+        error: String(error?.message || error),
+      });
+      throw error;
+    }
   }, []);
 
   const normalizePublicTournamentList = useCallback((data) => {
@@ -3817,17 +4042,32 @@ export default function App() {
   }, []);
 
   const fetchPublicTournamentList = useCallback(async () => {
-    const queryString = buildQueryString({
+    const timer = startAppPerf("public tournaments load", {
+      kind: "api",
+      layer: "Apps Script",
       action: "listPublicTournaments",
-      _ts: Date.now(),
     });
+    try {
+      const queryString = buildQueryString({
+        action: "listPublicTournaments",
+        _ts: Date.now(),
+      });
 
-    const response = await fetch(`${API}?${queryString}`, {
-      method: "GET",
-      cache: "no-store",
-    });
-    const data = await readTournamentApiResponse(response);
-    return normalizePublicTournamentList(data);
+      const response = await fetch(`${API}?${queryString}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      const data = await readTournamentApiResponse(response);
+      const tournaments = normalizePublicTournamentList(data);
+      endAppPerf(timer, { status: "ok", count: tournaments.length });
+      return tournaments;
+    } catch (error) {
+      endAppPerf(timer, {
+        status: "error",
+        error: String(error?.message || error),
+      });
+      throw error;
+    }
   }, [normalizePublicTournamentList]);
 
   const persistTournamentNow = useCallback(
@@ -3895,12 +4135,20 @@ export default function App() {
     }
 
     const ownerUsername = getTournamentStorageUsername(auth.username);
+    const timer = startAppPerf("tournaments load", {
+      kind: "load",
+      layer: "Apps Script",
+      action: "listTournaments",
+    });
     try {
       setTournamentSyncStatus("loading");
       setTournamentSyncMessage(tournamentText.tournamentSyncLoading);
 
       const data = await callTournamentBackend("listTournaments");
-      if (tournamentSessionUsernameRef.current !== ownerUsername) return;
+      if (tournamentSessionUsernameRef.current !== ownerUsername) {
+        endAppPerf(timer, { status: "stale-session" });
+        return;
+      }
 
       const ownedBackendTournaments = filterTournamentsForUsername(
         normalizeTournamentApiList(data),
@@ -3911,6 +4159,9 @@ export default function App() {
           tournamentId && !deletedTournamentIdsRef.current.has(tournamentId)
         );
       });
+      const publicVerificationCount = ownedBackendTournaments.filter(
+        (tournament) => isTournamentPublished(tournament) && tournament.publicCode
+      ).length;
       const backendTournaments = await Promise.all(
         ownedBackendTournaments.map(async (tournament) => {
           if (!isTournamentPublished(tournament) || !tournament.publicCode) {
@@ -3954,8 +4205,19 @@ export default function App() {
 
       setTournamentSyncStatus("saved");
       setTournamentSyncMessage(tournamentText.tournamentSyncSaved);
+      endAppPerf(timer, {
+        status: "ok",
+        count: nextTournaments.length,
+        publicVerificationCount,
+      });
     } catch (error) {
-      if (tournamentSessionUsernameRef.current !== ownerUsername) return;
+      if (tournamentSessionUsernameRef.current !== ownerUsername) {
+        endAppPerf(timer, {
+          status: "stale-session-error",
+          error: String(error?.message || error),
+        });
+        return;
+      }
 
       console.error("Could not load tournaments from backend:", error);
       setTournaments([]);
@@ -3967,6 +4229,10 @@ export default function App() {
       setTournamentSyncMessage(
         error?.message || tournamentText.tournamentBackendTodo
       );
+      endAppPerf(timer, {
+        status: "error",
+        error: String(error?.message || error),
+      });
     }
   }, [
     auth.loggedIn,
@@ -8483,6 +8749,12 @@ export default function App() {
       return;
     }
 
+    const loginTimer = startAppPerf("login submit", {
+      kind: "load",
+      layer: "frontend",
+      action: "login",
+    });
+
     try {
       setLoginLoading(true);
       setLoginMessage("");
@@ -8494,17 +8766,35 @@ export default function App() {
         _ts: Date.now(),
       });
 
-      const res = await fetch(`${API}?${queryString}`, {
-        method: "GET",
-        cache: "no-store",
+      const loginApiTimer = startAppPerf("login API", {
+        kind: "api",
+        layer: "Apps Script",
+        action: "login",
       });
+      let data = null;
+      try {
+        const res = await fetch(`${API}?${queryString}`, {
+          method: "GET",
+          cache: "no-store",
+        });
 
-      const data = await res.json();
+        data = await res.json();
+        endAppPerf(loginApiTimer, {
+          status: data?.success ? "ok" : "rejected",
+        });
+      } catch (error) {
+        endAppPerf(loginApiTimer, {
+          status: "error",
+          error: String(error?.message || error),
+        });
+        throw error;
+      }
 
       if (!data?.success) {
         setLoginMessage(data?.message || t.loginFailed);
         setPlayers([]);
         setArchivedPlayers([]);
+        endAppPerf(loginTimer, { status: "rejected" });
         return;
       }
 
@@ -8562,11 +8852,20 @@ export default function App() {
           password,
         });
       }
+      endAppPerf(loginTimer, {
+        status: "ok",
+        canUseTeamBuilder: canUseTeamBuilder(nextAuth),
+        canUseTournaments: canUseTournaments(nextAuth),
+      });
     } catch (error) {
       console.error("Could not log in:", error);
       setLoginMessage(t.loginFailed);
       setPlayers([]);
       setArchivedPlayers([]);
+      endAppPerf(loginTimer, {
+        status: "error",
+        error: String(error?.message || error),
+      });
     } finally {
       setLoginLoading(false);
     }
@@ -8966,6 +9265,19 @@ export default function App() {
 
     window.addEventListener("popstate", handleUrlChange);
     return () => window.removeEventListener("popstate", handleUrlChange);
+  }, []);
+
+  useEffect(() => {
+    if (appPerfBootLogged) return;
+    appPerfBootLogged = true;
+    endAppPerf(
+      {
+        label: "app boot",
+        details: { kind: "load", layer: "frontend" },
+        startedAt: appPerfBootStartedAt,
+      },
+      { status: "mounted" }
+    );
   }, []);
 
   useEffect(() => {

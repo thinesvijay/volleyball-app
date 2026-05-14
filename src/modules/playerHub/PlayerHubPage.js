@@ -15,10 +15,7 @@ const playerHubCopy = {
   profileSaveButton: "Save profile",
 };
 
-const isPlayerHubDev =
-  typeof process !== "undefined" &&
-  process.env &&
-  process.env.NODE_ENV !== "production";
+const isPlayerHubDev = process.env.NODE_ENV !== "production";
 
 function playerHubNow() {
   if (typeof performance !== "undefined" && performance.now) {
@@ -35,6 +32,17 @@ function startPlayerHubTimer() {
 function logPlayerHubTiming(label, startedAt) {
   if (!isPlayerHubDev || !startedAt || typeof console === "undefined") return;
   console.log(`[PlayerHub] ${label} ${Math.round(playerHubNow() - startedAt)}ms`);
+}
+
+function logPlayerHubAfterPaint(label, startedAt) {
+  if (!isPlayerHubDev || !startedAt) return;
+
+  const schedule =
+    typeof requestAnimationFrame === "function"
+      ? requestAnimationFrame
+      : (callback) => setTimeout(callback, 0);
+
+  schedule(() => logPlayerHubTiming(label, startedAt));
 }
 
 function cleanPlayerHubError(error, fallback) {
@@ -5746,7 +5754,7 @@ export default function PlayerHubPage({
           }
           logPlayerHubTiming("snapshot request", snapshotStartedAt);
           applyPlayerHubSnapshot(snapshot);
-          logPlayerHubTiming("render ready", snapshotStartedAt);
+          logPlayerHubAfterPaint("paint after snapshot", snapshotStartedAt);
           return;
         } catch (error) {
           logPlayerHubTiming("snapshot failed", snapshotStartedAt);
@@ -5771,6 +5779,7 @@ export default function PlayerHubPage({
       ]).finally(() => {
         if (!cancelled) {
           logPlayerHubTiming("fallback load", fallbackStartedAt);
+          logPlayerHubAfterPaint("paint after fallback", fallbackStartedAt);
         }
       });
     }
