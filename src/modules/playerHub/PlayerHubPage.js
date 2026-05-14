@@ -3062,17 +3062,18 @@ Object.assign(playerHubStyles, {
   eventResponseActions: {
     display: "grid",
     gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-    gap: "7px",
+    gap: "8px",
     minWidth: 0,
   },
   eventResponseButton: {
     ...playerHubStyles.adminActionButton,
-    minHeight: "42px",
+    minHeight: "46px",
     width: "100%",
-    padding: "9px 8px",
-    borderRadius: "14px",
-    fontSize: "12px",
-    background: "rgba(14,165,233,0.10)",
+    padding: "10px 8px",
+    borderRadius: "16px",
+    fontSize: "13px",
+    background: "rgba(14,165,233,0.12)",
+    whiteSpace: "normal",
   },
   eventResponseButtonActive: {
     background: "linear-gradient(135deg, #38bdf8, #22c55e)",
@@ -3113,6 +3114,21 @@ Object.assign(playerHubStyles, {
     fontSize: "11px",
     fontWeight: "950",
     cursor: "pointer",
+  },
+  eventPreferencePanel: {
+    display: "grid",
+    gap: "9px",
+    padding: "10px",
+    borderRadius: "16px",
+    background: "rgba(2,6,23,0.40)",
+    border: "1px solid rgba(148,163,184,0.14)",
+    minWidth: 0,
+  },
+  eventResponseHint: {
+    color: hubDarkPalette.muted,
+    fontSize: "11px",
+    fontWeight: "800",
+    lineHeight: 1.35,
   },
   eventsEmptyState: {
     ...hubGlassPanelSoft,
@@ -4101,8 +4117,12 @@ Object.assign(playerHubStyles, {
   },
   eventResponseButton: {
     ...playerHubStyles.eventResponseButton,
-    minHeight: "44px",
+    minHeight: "48px",
     borderRadius: "16px",
+  },
+  eventPreferencePanel: {
+    ...playerHubStyles.eventPreferencePanel,
+    ...hubRowV3,
   },
   eventCommentDrawer: {
     ...playerHubStyles.eventCommentDrawer,
@@ -6979,8 +6999,16 @@ export default function PlayerHubPage({
     const hasRosterState = rosterStatus && rosterStatus !== "CANCELLED";
     const rosterIsViewOnly =
       rosterStatus === "APPROVED" || rosterStatus === "LOCKED";
+    const rosterStatusLabel =
+      rosterStatus === "APPROVED"
+        ? "Roster approved"
+        : rosterStatus === "LOCKED"
+          ? "Locked"
+          : rosterStatus
+            ? `Roster ${formatRosterStatus(rosterStatus).toLowerCase()}`
+            : "";
     const statusLabel = hasRosterState
-      ? formatRosterStatus(rosterStatus)
+      ? rosterStatusLabel
       : availability
         ? eventResponseActionLabel(availabilityStatus)
         : plannedLabel
@@ -6992,9 +7020,15 @@ export default function PlayerHubPage({
         ? tournamentAvailabilityStatusStyle(availabilityStatus)
         : playerHubStyles.accessStatusPending;
     const preferredSquad = formatPreferredSquadForEvent(
-      availability?.preferredSquad || bundle?.planning?.preferredSquad,
+      availability
+        ? availabilityDraftValue(availability, "preferredSquad", "NO_PREFERENCE")
+        : bundle?.planning?.preferredSquad,
       event
     );
+    const playerNoteValue = availability
+      ? availabilityDraftValue(availability, "playerNote", "")
+      : "";
+    const hasPlayerNote = Boolean(String(playerNoteValue || "").trim());
     const eventRosterLockText = rosterLockChipText(event);
     const stats = tournamentPlanStats(event, []);
     const hasStats = responseStatsHaveCounts(stats);
@@ -7061,6 +7095,9 @@ export default function PlayerHubPage({
           {eventRosterLockText ? (
             <span style={playerHubStyles.chip}>{eventRosterLockText}</span>
           ) : null}
+          {hasPlayerNote ? (
+            <span style={playerHubStyles.chip}>Note added</span>
+          ) : null}
         </div>
 
         {canRespond ? (
@@ -7091,49 +7128,57 @@ export default function PlayerHubPage({
             <div style={playerHubStyles.eventSecondaryActions}>
               <details style={playerHubStyles.eventPreferenceDetails}>
                 <summary style={playerHubStyles.eventPreferenceSummary}>
-                  Prefs / note
+                  {hasPlayerNote || preferredSquad ? "Edit note" : "Add note"}
                 </summary>
-                <div style={playerHubStyles.profileFormGrid}>
-                  <label style={playerHubStyles.profileField}>
-                    <span style={playerHubStyles.profileLabel}>Preferred team</span>
-                    <select
-                      style={playerHubStyles.profileInput}
-                      value={availabilityDraftValue(
-                        availability,
-                        "preferredSquad",
-                        "NO_PREFERENCE"
-                      )}
-                      onChange={(eventValue) =>
-                        updateTournamentAvailabilityDraft(
-                          availability.availabilityId,
+                <div style={playerHubStyles.eventPreferencePanel}>
+                  <span style={playerHubStyles.eventResponseHint}>
+                    Optional note for the captain. Save it by choosing Going,
+                    Maybe, or No.
+                  </span>
+                  <div style={playerHubStyles.profileFormGrid}>
+                    <label style={playerHubStyles.profileField}>
+                      <span style={playerHubStyles.profileLabel}>
+                        Preferred team
+                      </span>
+                      <select
+                        style={playerHubStyles.profileInput}
+                        value={availabilityDraftValue(
+                          availability,
                           "preferredSquad",
-                          eventValue.target.value
-                        )
-                      }
-                    >
-                      <option value="NO_PREFERENCE">No preference</option>
-                      {captainSquadNameSlots.map((squad) => (
-                        <option key={squad} value={squad}>
-                          {squadDisplayName(squad, event)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={playerHubStyles.profileField}>
-                    <span style={playerHubStyles.profileLabel}>Note</span>
-                    <input
-                      style={playerHubStyles.profileInput}
-                      value={availabilityDraftValue(availability, "playerNote", "")}
-                      onChange={(eventValue) =>
-                        updateTournamentAvailabilityDraft(
-                          availability.availabilityId,
-                          "playerNote",
-                          eventValue.target.value
-                        )
-                      }
-                      placeholder="Optional"
-                    />
-                  </label>
+                          "NO_PREFERENCE"
+                        )}
+                        onChange={(eventValue) =>
+                          updateTournamentAvailabilityDraft(
+                            availability.availabilityId,
+                            "preferredSquad",
+                            eventValue.target.value
+                          )
+                        }
+                      >
+                        <option value="NO_PREFERENCE">No preference</option>
+                        {captainSquadNameSlots.map((squad) => (
+                          <option key={squad} value={squad}>
+                            {squadDisplayName(squad, event)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={playerHubStyles.profileField}>
+                      <span style={playerHubStyles.profileLabel}>Note</span>
+                      <input
+                        style={playerHubStyles.profileInput}
+                        value={availabilityDraftValue(availability, "playerNote", "")}
+                        onChange={(eventValue) =>
+                          updateTournamentAvailabilityDraft(
+                            availability.availabilityId,
+                            "playerNote",
+                            eventValue.target.value
+                          )
+                        }
+                        placeholder="Optional"
+                      />
+                    </label>
+                  </div>
                 </div>
               </details>
               {canComment ? (
@@ -10340,7 +10385,7 @@ export default function PlayerHubPage({
         ]
           .filter(Boolean)
           .join(" / "),
-        button: "Open Events",
+        button: "Respond in Events",
         target: "events",
         status: "Pending",
       }
