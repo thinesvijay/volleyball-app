@@ -322,6 +322,7 @@ function normalizePassportRosterStatus(...values) {
     value === "APPROVED" ||
     value === "REJECTED" ||
     value === "LOCKED" ||
+    value === "CHANGE_REQUESTED" ||
     value === "CANCELLED"
   ) {
     return value;
@@ -335,6 +336,7 @@ function passportRosterLabel(status) {
   if (value === "APPROVED") return "Approved";
   if (value === "REJECTED") return "Rejected";
   if (value === "LOCKED") return "Locked";
+  if (value === "CHANGE_REQUESTED") return "Needs changes";
   if (value === "CANCELLED") return "Cancelled";
   return "Draft";
 }
@@ -364,11 +366,28 @@ function getPassportSortTime(...values) {
   return 0;
 }
 
+function formatPassportActivityDate(...values) {
+  for (const value of values) {
+    const text = passportText(value);
+    if (!text) continue;
+    const date = new Date(text);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      });
+    }
+    return text.split("T")[0].split(" ")[0];
+  }
+  return "";
+}
+
 function calculatePlayerPassportStats({
   confirmedTeams,
   playerTournamentAvailability,
   playerTournamentRosterStatus,
   myTeamNeedInterests,
+  captainRosterDraftsByPlanId = {},
 }) {
   const stats = {
     teamMembershipCount: passportArray(confirmedTeams).length,
@@ -378,8 +397,36 @@ function calculatePlayerPassportStats({
     noResponsesCount: 0,
     pendingResponsesCount: 0,
     rosterApprovedCount: 0,
+    rosterLockedCount: 0,
+    rosterSubmittedCount: 0,
+    rosterNeedsChangesCount: 0,
     playerAdsInterestsCount: passportArray(myTeamNeedInterests).length,
   };
+  const countedRosterKeys = new Set();
+
+  function countRosterStatus(item, { includeSubmitted = false } = {}) {
+    if (!item) return;
+    const key = passportText(
+      item.rosterId,
+      item.planId ? `plan:${item.planId}` : "",
+      item.tournamentName
+        ? `${item.tournamentName}:${item.clubTeamName || item.teamName || ""}`
+        : ""
+    );
+    if (key && countedRosterKeys.has(key)) return;
+    if (key) countedRosterKeys.add(key);
+
+    const status = normalizePassportRosterStatus(item?.rosterStatus, item?.status);
+    if (status === "APPROVED") {
+      stats.rosterApprovedCount += 1;
+    } else if (status === "LOCKED") {
+      stats.rosterLockedCount += 1;
+    } else if (includeSubmitted && status === "SUBMITTED") {
+      stats.rosterSubmittedCount += 1;
+    } else if (status === "CHANGE_REQUESTED" || status === "REJECTED") {
+      stats.rosterNeedsChangesCount += 1;
+    }
+  }
 
   passportArray(playerTournamentAvailability).forEach((item) => {
     const status = normalizePassportAvailabilityStatus(
@@ -393,11 +440,16 @@ function calculatePlayerPassportStats({
     else stats.pendingResponsesCount += 1;
   });
 
+  Object.values(
+    captainRosterDraftsByPlanId && typeof captainRosterDraftsByPlanId === "object"
+      ? captainRosterDraftsByPlanId
+      : {}
+  ).forEach((entry) => {
+    countRosterStatus(entry?.roster, { includeSubmitted: true });
+  });
+
   passportArray(playerTournamentRosterStatus).forEach((item) => {
-    const status = normalizePassportRosterStatus(item?.rosterStatus, item?.status);
-    if (status === "APPROVED" || status === "LOCKED") {
-      stats.rosterApprovedCount += 1;
-    }
+    countRosterStatus(item);
   });
 
   return stats;
@@ -407,23 +459,28 @@ function buildPlayerAchievements({
   profile,
   stats,
   hasCaptainRole,
-  squadActivityCount,
 }) {
   const answeredCount =
     (stats?.goingResponsesCount || 0) +
     (stats?.maybeResponsesCount || 0) +
     (stats?.noResponsesCount || 0);
+  const invitationCount = stats?.eventInvitationsCount || 0;
   const profileCompleted = Boolean(
     passportText(profile?.displayName, profile?.profileId) &&
-      passportText(profile?.country, profile?.clubTeamName, profile?.clubOrTeam)
+      passportText(profile?.country) &&
+      passportText(profile?.profileType) &&
+      (profile?.freeAgent ||
+        passportText(profile?.clubTeamName, profile?.clubOrTeam, profile?.teamNote))
   );
+  const reliableResponder = answeredCount >= 3 ||
+    (invitationCount >= 2 && answeredCount === invitationCount);
 
   return [
     {
       id: "profile",
-      label: "First profile completed",
+      label: "Profile completed",
       active: profileCompleted,
-      detail: profileCompleted ? "Identity ready" : "Complete profile",
+      detail: profileCompleted ? "Official profile ready" : "Complete profile",
     },
     {
       id: "team",
@@ -435,15 +492,17 @@ function buildPlayerAchievements({
     },
     {
       id: "captain",
-      label: "Captain badge",
+      label: "Captain",
       active: Boolean(hasCaptainRole),
-      detail: hasCaptainRole ? "Team control" : "Captain role",
+      detail: hasCaptainRole ? "Team control active" : "Captain role",
     },
     {
       id: "responder",
       label: "Reliable responder",
-      active: answeredCount >= 2,
-      detail: `${answeredCount} response${answeredCount === 1 ? "" : "s"}`,
+      active: reliableResponder,
+      detail: `${answeredCount}/${invitationCount || 0} invite${
+        invitationCount === 1 ? "" : "s"
+      } answered`,
     },
     {
       id: "ready",
@@ -452,10 +511,16 @@ function buildPlayerAchievements({
       detail: `${stats?.goingResponsesCount || 0} Going`,
     },
     {
-      id: "squad",
-      label: "Squad player",
-      active: squadActivityCount > 0,
-      detail: squadActivityCount > 0 ? "Squad activity" : "No squad yet",
+      id: "approved",
+      label: "Approved roster",
+      active: (stats?.rosterApprovedCount || 0) > 0,
+      detail: `${stats?.rosterApprovedCount || 0} approved`,
+    },
+    {
+      id: "locked",
+      label: "Locked roster",
+      active: (stats?.rosterLockedCount || 0) > 0,
+      detail: `${stats?.rosterLockedCount || 0} locked`,
     },
     {
       id: "helper",
@@ -484,14 +549,15 @@ function getRecentPlayerActivity(
     const planning = bundle?.planning || {};
     const roster = bundle?.roster || {};
     const hasRoster = Boolean(bundle?.roster);
+    const availabilityStatus = passportAvailabilityLabel(
+      availability.responseStatus ||
+        availability.availabilityStatus ||
+        planning.availabilityStatus ||
+        base.responseStatus
+    );
     const status = hasRoster
       ? passportRosterLabel(roster.rosterStatus || roster.status)
-      : passportAvailabilityLabel(
-          availability.responseStatus ||
-            availability.availabilityStatus ||
-            planning.availabilityStatus ||
-            base.responseStatus
-        );
+      : availabilityStatus;
     const assignedSquadRaw = passportText(
       planning.assignedSquad,
       roster.assignedSquad,
@@ -511,15 +577,23 @@ function getRecentPlayerActivity(
       planning,
       roster,
     };
-    const assignedSquad = assignedSquadRaw
-      ? resolveSquadDisplayName?.(assignedSquadRaw, squadLabelSource) ||
-        normalizePassportAssignedSquad(assignedSquadRaw)
+    const assignedSquadKey = normalizeCaptainSquadNameKey(assignedSquadRaw);
+    const preferenceKey = normalizeCaptainSquadNameKey(preferenceRaw);
+    const assignedSquad = assignedSquadKey
+      ? resolveSquadDisplayName?.(assignedSquadKey, squadLabelSource) ||
+        normalizePassportAssignedSquad(assignedSquadKey)
       : "";
-    const preference = preferenceRaw
-      ? resolveSquadDisplayName?.(preferenceRaw, squadLabelSource) ||
-        normalizePassportAssignedSquad(preferenceRaw)
+    const preference = preferenceKey
+      ? resolveSquadDisplayName?.(preferenceKey, squadLabelSource) ||
+        normalizePassportAssignedSquad(preferenceKey)
       : "";
     const sortTime = getPassportSortTime(
+      roster.lockedAt,
+      roster.reviewedAt,
+      roster.submittedAt,
+      availability.respondedAt,
+      availability.updatedAt,
+      planning.updatedAt,
       base.updatedAt,
       base.respondedAt,
       base.submittedAt,
@@ -527,6 +601,29 @@ function getRecentPlayerActivity(
       base.createdAt,
       base.deadlineAt
     );
+    const dateText = formatPassportActivityDate(
+      base.startDate,
+      base.eventDate,
+      base.tournamentStartDate,
+      base.date,
+      roster.lockedAt,
+      roster.reviewedAt,
+      roster.submittedAt,
+      availability.respondedAt,
+      availability.updatedAt,
+      planning.updatedAt,
+      base.updatedAt,
+      base.createdAt
+    );
+    const noteParts = [
+      hasRoster && availabilityStatus ? `Response: ${availabilityStatus}` : "",
+      assignedSquad ? assignedSquad : "",
+      preference ? `Preferred ${preference}` : "",
+      availability.responseNote,
+      availability.note,
+      planning.note,
+      roster.adminNote,
+    ].filter(Boolean);
 
     return {
       key:
@@ -550,14 +647,8 @@ function getRecentPlayerActivity(
         "Team"
       ),
       status,
-      note: passportText(
-        assignedSquad ? assignedSquad : "",
-        preference ? `Preferred ${preference}` : "",
-        availability.responseNote,
-        availability.note,
-        planning.note,
-        roster.adminNote
-      ),
+      note: noteParts.join(" / "),
+      dateText,
       sortTime,
     };
   });
@@ -590,6 +681,12 @@ function getRecentPlayerActivity(
         ),
         status: passportInterestLabel(interest?.status),
         note: passportText(interest?.message, "Player ad interest"),
+        dateText: formatPassportActivityDate(
+          interest?.updatedAt,
+          interest?.reviewedAt,
+          interest?.submittedAt,
+          interest?.createdAt
+        ),
         sortTime,
       };
     }
@@ -10243,6 +10340,7 @@ export default function PlayerHubPage({
     playerTournamentAvailability,
     playerTournamentRosterStatus,
     myTeamNeedInterests,
+    captainRosterDraftsByPlanId,
   });
   const passportTrainerRole = Boolean(
     savedProfilePreview.canUseTeamBuilder ||
@@ -10268,25 +10366,34 @@ export default function PlayerHubPage({
   const passportMemberSince = formatCompactDate(
     primaryConfirmedTeam?.memberSince ||
       primaryConfirmedTeam?.confirmedAt ||
-      primaryConfirmedTeam?.createdAt
+      primaryConfirmedTeam?.createdAt ||
+      savedProfilePreview.createdAt
   );
-  const passportActiveRosterCount = playerTournamentRosterStatus.filter(
-    (item) => normalizeRosterStatus(item?.rosterStatus || item?.status) !== "CANCELLED"
-  ).length;
-  const passportSquadActivityCount =
-    plannedTeamItems.length + passportActiveRosterCount;
+  const passportTeamStatusLabel = primaryConfirmedTeam
+    ? "Confirmed team"
+    : latestTeamMembershipRequest?.status
+      ? formatTeamMembershipStatus(latestTeamMembershipRequest.status)
+      : savedProfilePreview.freeAgent
+        ? "No fixed club/team"
+        : selectedProfileTeamName
+          ? "Team selected"
+          : "No confirmed team";
+  const passportTeamStatusStyle = primaryConfirmedTeam
+    ? playerHubStyles.accessStatusApproved
+    : latestTeamMembershipRequest?.status
+      ? accessRequestStatusStyle(latestTeamMembershipRequest.status)
+      : playerHubStyles.accessStatusIdle;
   const passportAchievements = buildPlayerAchievements({
     profile: savedProfilePreview,
     stats: passportStats,
     hasCaptainRole: canManageTeamProfile,
-    squadActivityCount: passportSquadActivityCount,
   });
   const passportActivityItems = getRecentPlayerActivity(
     playerDashboardEvents,
     squadDisplayName,
     myTeamNeedInterests
   );
-  const passportRecentActivityItems = passportActivityItems.slice(0, 3);
+  const passportRecentActivityItems = passportActivityItems.slice(0, 5);
   const passportHasMoreActivity =
     passportActivityItems.length > passportRecentActivityItems.length;
   const passportStatCards = [
@@ -10297,8 +10404,18 @@ export default function PlayerHubPage({
     ["No", passportStats.noResponsesCount],
     ["Pending", passportStats.pendingResponsesCount],
     ["Approved rosters", passportStats.rosterApprovedCount],
+    ["Locked rosters", passportStats.rosterLockedCount],
+    ["Needs changes", passportStats.rosterNeedsChangesCount],
+    ...(canManageTeamProfile
+      ? [["Submitted rosters", passportStats.rosterSubmittedCount]]
+      : []),
     ["Ad interests", passportStats.playerAdsInterestsCount],
-  ];
+  ].filter(([label, value]) => {
+    if (label === "Ad interests") return value > 0 || myTeamNeedInterests.length > 0;
+    if (label === "Locked rosters") return value > 0 || passportStats.rosterLockedCount > 0;
+    if (label === "Needs changes") return value > 0;
+    return true;
+  });
   const passportTeamPeople = teamMembers.filter((member) => {
     if (!member) return false;
     const status = passportText(member?.memberStatus, "ACTIVE").toUpperCase();
@@ -12730,10 +12847,10 @@ export default function PlayerHubPage({
             <div style={playerHubStyles.profileMeta}>
               <div style={playerHubStyles.sectionTitle}>Player Passport</div>
               <div style={playerHubStyles.cardText}>
-                Profile, roles, teams and playing history.
+                Official profile, response history and roster activity.
               </div>
             </div>
-            <span style={playerHubStyles.chip}>Private</span>
+            <span style={playerHubStyles.chip}>Private official data</span>
           </div>
 
           <div style={playerHubStyles.playersDashboardGrid}>
@@ -12762,6 +12879,14 @@ export default function PlayerHubPage({
                         {badge}
                       </span>
                     ))}
+                    <span
+                      style={{
+                        ...playerHubStyles.accessStatusChip,
+                        ...passportTeamStatusStyle,
+                      }}
+                    >
+                      {passportTeamStatusLabel}
+                    </span>
                   </div>
                 </div>
               </article>
@@ -12797,7 +12922,7 @@ export default function PlayerHubPage({
                             : playerHubStyles.passportAchievementStatusLocked),
                         }}
                       >
-                        {badge.active ? "Earned" : "Locked"}
+                        {badge.active ? "Earned" : "Not yet"}
                       </span>
                       <span style={playerHubStyles.passportAchievementTitle}>
                         {badge.label}
@@ -12815,9 +12940,9 @@ export default function PlayerHubPage({
               <article style={playerHubStyles.passportPanel}>
                 <div style={playerHubStyles.homeCardHeader}>
                   <div style={playerHubStyles.profileMeta}>
-                    <div style={playerHubStyles.sectionTitle}>Stats</div>
+                    <div style={playerHubStyles.sectionTitle}>Official stats</div>
                     <div style={playerHubStyles.cardText}>
-                      Teams, invites, responses, rosters and interests.
+                      Counts from loaded teams, invites, responses and roster records.
                     </div>
                   </div>
                 </div>
@@ -12838,9 +12963,11 @@ export default function PlayerHubPage({
               <article style={playerHubStyles.passportPanel}>
                 <div style={playerHubStyles.homeCardHeader}>
                   <div style={playerHubStyles.profileMeta}>
-                    <div style={playerHubStyles.sectionTitle}>Recent activity</div>
+                    <div style={playerHubStyles.sectionTitle}>
+                      Availability history
+                    </div>
                     <div style={playerHubStyles.cardText}>
-                      Availability, roster, squad and player-ad updates.
+                      Recent tournament responses, roster states and squad labels.
                     </div>
                   </div>
                   {passportHasMoreActivity ? (
@@ -12869,7 +12996,7 @@ export default function PlayerHubPage({
                             {activity.tournamentName}
                           </strong>
                           <span style={playerHubStyles.previewSubtitle}>
-                            {[activity.teamName, activity.note]
+                            {[activity.teamName, activity.dateText, activity.note]
                               .filter(Boolean)
                               .join(" / ")}
                           </span>
