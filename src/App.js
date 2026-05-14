@@ -12676,6 +12676,9 @@ const savedRound = readStorageWithTtl(
             : publicVisibleSeriesClasses
         )
       : [];
+    const publicAllSeriesSections = safeTournament
+      ? getTournamentSeriesRenderSections(safeTournament, publicVisibleSeriesClasses)
+      : [];
     const groups = publicSeriesSections.flatMap((section) =>
       section.groups.map((group) => ({
         ...group,
@@ -12771,6 +12774,70 @@ const savedRound = readStorageWithTtl(
             queue: "Next 3",
             latest: "Results",
             noMatches: "No matches published yet.",
+          };
+    const publicDetailsLabels =
+      language === "no"
+        ? {
+            details: "Turneringsdetaljer",
+            classes: "Klasser",
+            readiness: "Lagklarhet",
+            format: "Format",
+            privacy: "Personvern",
+            schedulePreview: "Kampoversikt",
+            publicStatus: "Status",
+            published: "Publisert",
+            upcoming: "Kommende",
+            live: "Live",
+            finished: "Ferdig",
+            rosterLock: "Roster lock",
+            rosterLockOff: "Ikke aktiv",
+            teamCount: "Lag",
+            noTeamCount: "Ikke publisert",
+            groupStage: "Gruppespill",
+            groupStageText: "Alle lag motes i gruppen.",
+            advancement: "Avansement",
+            advancementText: "Vinner og runner-up gar videre.",
+            knockout: "Sluttspill",
+            knockoutText: "Semifinaler og finale.",
+            thirdPlace: "Bronsekamp",
+            thirdPlaceText: "Bronsekamp publiseres hvis arrangoren bruker det.",
+            privacyNote:
+              "Offentlig visning viser bare lagstatus. Spillerlister er private.",
+            detailsPending:
+              "Detaljer vises nar arrangoren publiserer mer informasjon.",
+            back: "Til turneringer",
+            recentResults: "Siste resultater",
+          }
+        : {
+            details: "Tournament details",
+            classes: "Classes",
+            readiness: "Team readiness",
+            format: "Format",
+            privacy: "Privacy",
+            schedulePreview: "Schedule preview",
+            publicStatus: "Status",
+            published: "Published",
+            upcoming: "Upcoming",
+            live: "Live",
+            finished: "Finished",
+            rosterLock: "Roster lock",
+            rosterLockOff: "Not active",
+            teamCount: "Teams",
+            noTeamCount: "Not published",
+            groupStage: "Group stage",
+            groupStageText: "Teams meet in round-robin groups.",
+            advancement: "Advancement",
+            advancementText: "Winner and runner-up advance.",
+            knockout: "Knockout",
+            knockoutText: "Semi-final and final.",
+            thirdPlace: "3rd place",
+            thirdPlaceText: "3rd place is shown if the organizer uses it.",
+            privacyNote:
+              "Public view shows team-level status only. Player rosters are private.",
+            detailsPending:
+              "Details will appear when the organizer publishes more information.",
+            back: "Back to tournaments",
+            recentResults: "Recent results",
           };
     const publicMatchCards = publicSchedule.batches.flatMap((batch, batchIndex) =>
       (batch.items || [])
@@ -12895,6 +12962,148 @@ const savedRound = readStorageWithTtl(
     const allKnockoutMatches = publicSeriesSections.flatMap(
       (section) => section.knockoutMatches
     );
+    const publicRosterLock = safeTournament
+      ? getTournamentRosterLock(safeTournament)
+      : normalizeTournamentRosterLock();
+    const publicReadinessCounts = safeTournament
+      ? getPublicTournamentTeamInterestCounts(safeTournament)
+      : {
+          interested: 0,
+          availabilityActive: 0,
+          rosterSubmitted: 0,
+          confirmed: 0,
+          locked: 0,
+        };
+    const hasPublicReadinessSource = Boolean(
+      safeTournament?.teamInterestCounts ||
+        safeTournament?.publicTeamInterestCounts ||
+        safeTournament?.publicReadiness ||
+        safeTournament?.readinessCounts
+    );
+    const publicReadinessCards = [
+      {
+        label: tournamentText.interestedTeamsLabel,
+        value: publicReadinessCounts.interested,
+      },
+      {
+        label: tournamentText.availabilityActiveLabel,
+        value: publicReadinessCounts.availabilityActive,
+      },
+      {
+        label: tournamentText.rosterSubmittedLabel,
+        value: publicReadinessCounts.rosterSubmitted,
+      },
+      {
+        label: tournamentText.confirmedTeamsLabel,
+        value: publicReadinessCounts.confirmed,
+      },
+      {
+        label: tournamentText.lockedTeamsLabel,
+        value: publicReadinessCounts.locked,
+      },
+    ];
+    const formatPublicDetailDateTime = (value) => {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      const date = new Date(text);
+      if (Number.isNaN(date.getTime())) return text;
+      return date.toLocaleString(
+        language === "no" ? "nb-NO" : language === "dk" ? "da-DK" : "en-US",
+        {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }
+      );
+    };
+    const getPublicCountValue = (...values) => {
+      const rawValue = values.find((value) =>
+        String(value ?? "").trim()
+      );
+      if (rawValue === undefined) return "";
+      const numberValue = Number(rawValue);
+      return Number.isFinite(numberValue) && numberValue >= 0
+        ? numberValue
+        : "";
+    };
+    const getPublicSeriesRosterLockText = (series) => {
+      if (!publicRosterLock.enabled) return "";
+      const seriesDeadline =
+        publicRosterLock.appliesToSeries?.[String(series?.id || "")] ||
+        publicRosterLock.deadlineIso;
+      return formatPublicDetailDateTime(seriesDeadline);
+    };
+    const publicSeriesDetails = publicVisibleSeriesClasses.map((series) => {
+      const section =
+        publicAllSeriesSections.find(
+          (item) => String(item.series?.id || "") === String(series.id || "")
+        ) || {};
+      const groupedTeams = (section.groups || []).flatMap((group) =>
+        (group.teams || []).filter((team) => String(team?.name || "").trim())
+      );
+      const explicitTeamCount = getPublicCountValue(
+        series.publicTeamCount,
+        series.teamCount,
+        series.registeredTeamCount,
+        series.confirmedTeamCount,
+        series.teamsCount
+      );
+      const teamCountValue =
+        explicitTeamCount !== ""
+          ? explicitTeamCount
+          : (section.groups || []).length
+            ? groupedTeams.length
+            : "";
+
+      return {
+        id: series.id,
+        name: getSeriesDisplayName(series) || tournamentText.seriesLabel,
+        playersPerTeam: getSeriesPlayersPerTeam(series),
+        publicStatus: series.publicStatus,
+        teamCount: teamCountValue,
+        rosterLockText: getPublicSeriesRosterLockText(series),
+      };
+    });
+    const publicTournamentIsLive =
+      publicLiveMatches.length > 0 || isTournamentLiveForFilter(safeTournament);
+    const publicTournamentStatusLabel = publicTournamentIsLive
+      ? publicDetailsLabels.live
+      : isTournamentFinishedForFilter(safeTournament)
+        ? publicDetailsLabels.finished
+        : isTournamentPublished(safeTournament)
+          ? publicDetailsLabels.published
+          : publicDetailsLabels.upcoming;
+    const publicSchedulePreviewSections = [
+      {
+        id: "live",
+        title: publicLiveLabels.liveMatches,
+        items: publicLiveMatches.slice(0, 3),
+      },
+      {
+        id: "next",
+        title: publicLiveLabels.queue,
+        items: publicNextMatches,
+      },
+      {
+        id: "results",
+        title: publicDetailsLabels.recentResults,
+        items: publicRecentFinishedMatches.slice(0, 3),
+      },
+    ].filter((section) => section.items.length > 0);
+    const publicFormatItems = [
+      [publicDetailsLabels.groupStage, publicDetailsLabels.groupStageText],
+      [publicDetailsLabels.advancement, publicDetailsLabels.advancementText],
+      [publicDetailsLabels.knockout, publicDetailsLabels.knockoutText],
+      ...(safeTournament?.thirdPlaceMatch
+        ? [[publicDetailsLabels.thirdPlace, publicDetailsLabels.thirdPlaceText]]
+        : []),
+    ];
+    const scrollToPublicSchedulePreview = () => {
+      if (typeof document === "undefined") return;
+      const target = document.getElementById("public-live-scoreboard");
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
     const publicLiveSeries = publicVisibleSeriesClasses.filter(
       (series) => series.publicStatus === "live"
     );
@@ -13367,8 +13576,35 @@ const savedRound = readStorageWithTtl(
                   ))}
                 </div>
 
+                <div style={styles.publicTournamentHeroActionRow}>
+                  <button
+                    type="button"
+                    style={{
+                      ...styles.publicTournamentHeroPrimaryButton,
+                      background: `linear-gradient(135deg, ${publicTheme.primary}, ${publicTheme.accent})`,
+                      color: publicTheme.background,
+                    }}
+                    onClick={scrollToPublicSchedulePreview}
+                  >
+                    {tournamentText.followLive}
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      ...styles.publicTournamentHeroSecondaryButton,
+                      background: publicTheme.surface,
+                      borderColor: publicTheme.border,
+                      color: publicTheme.text,
+                    }}
+                    onClick={openAppFromPublicTournament}
+                  >
+                    {publicDetailsLabels.back}
+                  </button>
+                </div>
+
                 <div style={styles.publicTournamentSummaryGrid}>
                   {[
+                    [publicDetailsLabels.publicStatus, publicTournamentStatusLabel],
                     [tournamentText.dateLabel, formatPublicTournamentDate(safeTournament)],
                     [tournamentText.locationLabel, publicLocation],
                     [tournamentText.prizeLabel, safeTournament.prizeText],
@@ -13448,6 +13684,190 @@ const savedRound = readStorageWithTtl(
                     })}
                   </div>
                 )}
+              </section>
+
+              <section
+                style={{
+                  ...styles.publicTournamentDetailsLayout,
+                  ...(isMobile ? styles.publicTournamentDetailsLayoutMobile : {}),
+                }}
+              >
+                <div style={styles.publicTournamentDetailsMain}>
+                  <section style={publicSectionStyle}>
+                    <div style={publicSectionHeaderStyle}>
+                      <span>{publicDetailsLabels.classes}</span>
+                      <strong>{publicSeriesDetails.length}</strong>
+                    </div>
+                    {publicSeriesDetails.length ? (
+                      <div style={styles.publicTournamentDetailCardGrid}>
+                        {publicSeriesDetails.map((series) => {
+                          const statusLabel =
+                            series.publicStatus === "completed"
+                              ? publicDetailsLabels.finished
+                              : series.publicStatus === "live"
+                                ? publicDetailsLabels.live
+                                : publicDetailsLabels.published;
+                          return (
+                            <article
+                              key={`public-detail-series-${series.id}`}
+                              style={{
+                                ...styles.publicTournamentDetailClassCard,
+                                background: publicTheme.panel,
+                                borderColor: publicTheme.border,
+                                color: publicTheme.text,
+                              }}
+                            >
+                              <div style={styles.publicTournamentDetailCardTop}>
+                                <strong>{series.name}</strong>
+                                <span
+                                  style={{
+                                    ...styles.publicTournamentDetailChip,
+                                    background: hexToRgba(publicTheme.primary, 0.16),
+                                    borderColor: hexToRgba(publicTheme.primary, 0.34),
+                                    color: publicTheme.primary,
+                                  }}
+                                >
+                                  {statusLabel}
+                                </span>
+                              </div>
+                              <div style={styles.publicTournamentDetailChipRow}>
+                                {series.playersPerTeam ? (
+                                  <span style={styles.publicTournamentDetailChip}>
+                                    {series.playersPerTeam}-side
+                                  </span>
+                                ) : null}
+                                <span style={styles.publicTournamentDetailChip}>
+                                  {publicDetailsLabels.teamCount}:{" "}
+                                  {series.teamCount !== ""
+                                    ? series.teamCount
+                                    : publicDetailsLabels.noTeamCount}
+                                </span>
+                                {publicRosterLock.enabled ? (
+                                  <span style={styles.publicTournamentDetailChip}>
+                                    {publicDetailsLabels.rosterLock}:{" "}
+                                    {series.rosterLockText ||
+                                      publicDetailsLabels.rosterLockOff}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div style={styles.publicTournamentDetailsEmpty}>
+                        {publicDetailsLabels.detailsPending}
+                      </div>
+                    )}
+                  </section>
+
+                  <section id="public-live-scoreboard" style={publicSectionStyle}>
+                    <div style={publicSectionHeaderStyle}>
+                      <span>{publicDetailsLabels.schedulePreview}</span>
+                      <strong>{publicMatchCards.length}</strong>
+                    </div>
+                    {publicSchedulePreviewSections.length ? (
+                      <div style={styles.publicTournamentSchedulePreviewGrid}>
+                        {publicSchedulePreviewSections.map((section) => (
+                          <div
+                            key={`public-schedule-preview-${section.id}`}
+                            style={styles.publicTournamentSchedulePreviewBlock}
+                          >
+                            <div style={styles.publicLiveRailTitle}>
+                              {section.title}
+                            </div>
+                            <div style={styles.publicLiveMiniGrid}>
+                              {section.items.map((match) =>
+                                renderPublicMatchCard(match, {
+                                  compact: true,
+                                  keyPrefix: `public-detail-${section.id}`,
+                                })
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={styles.publicTournamentDetailsEmpty}>
+                        {publicDetailsLabels.detailsPending}
+                      </div>
+                    )}
+                  </section>
+                </div>
+
+                <aside style={styles.publicTournamentDetailsRail}>
+                  <section style={publicSecondarySectionStyle}>
+                    <div style={publicSectionHeaderStyle}>
+                      <span>{publicDetailsLabels.readiness}</span>
+                      <strong>
+                        {publicReadinessCards.reduce(
+                          (sum, item) => sum + Number(item.value || 0),
+                          0
+                        )}
+                      </strong>
+                    </div>
+                    {hasPublicReadinessSource ? (
+                      <div style={styles.publicTournamentReadinessSummaryGrid}>
+                        {publicReadinessCards.map((metric) => (
+                          <div
+                            key={`public-readiness-${metric.label}`}
+                            style={{
+                              ...styles.publicTournamentReadinessSummaryCard,
+                              background: publicTheme.panel,
+                              borderColor: publicTheme.border,
+                              color: publicTheme.text,
+                            }}
+                          >
+                            <span>{metric.label}</span>
+                            <strong>{metric.value}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={styles.publicTournamentDetailsEmpty}>
+                        {publicDetailsLabels.detailsPending}
+                      </div>
+                    )}
+                  </section>
+
+                  <section style={publicSecondarySectionStyle}>
+                    <div style={publicSectionHeaderStyle}>
+                      <span>{publicDetailsLabels.format}</span>
+                    </div>
+                    <div style={styles.publicTournamentFormatList}>
+                      {publicFormatItems.map(([label, value]) => (
+                        <div
+                          key={`public-format-${label}`}
+                          style={{
+                            ...styles.publicTournamentFormatItem,
+                            background: publicTheme.panel,
+                            borderColor: publicTheme.border,
+                            color: publicTheme.text,
+                          }}
+                        >
+                          <strong>{label}</strong>
+                          <span style={publicMutedStyle}>{value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section style={publicSecondarySectionStyle}>
+                    <div style={publicSectionHeaderStyle}>
+                      <span>{publicDetailsLabels.privacy}</span>
+                    </div>
+                    <div
+                      style={{
+                        ...styles.publicTournamentPrivacyNote,
+                        background: hexToRgba(publicTheme.primary, 0.10),
+                        borderColor: hexToRgba(publicTheme.primary, 0.24),
+                        color: publicTheme.mutedText,
+                      }}
+                    >
+                      {publicDetailsLabels.privacyNote}
+                    </div>
+                  </section>
+                </aside>
               </section>
 
               {publicClassStatusNotice && (
@@ -26195,6 +26615,181 @@ const styles = {
     background: "rgba(255,255,255,0.08)",
     border: "1px solid rgba(255,255,255,0.12)",
     minWidth: 0,
+  },
+
+  publicTournamentHeroActionRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "9px",
+    alignItems: "center",
+    minWidth: 0,
+  },
+
+  publicTournamentHeroPrimaryButton: {
+    border: "none",
+    borderRadius: "999px",
+    minHeight: "44px",
+    padding: "12px 18px",
+    fontSize: "13px",
+    fontWeight: "950",
+    cursor: "pointer",
+    boxShadow: "0 18px 38px rgba(34,197,94,0.20)",
+    minWidth: "132px",
+  },
+
+  publicTournamentHeroSecondaryButton: {
+    border: "1px solid rgba(255,255,255,0.16)",
+    borderRadius: "999px",
+    minHeight: "44px",
+    padding: "11px 16px",
+    fontSize: "13px",
+    fontWeight: "900",
+    cursor: "pointer",
+    minWidth: "132px",
+  },
+
+  publicTournamentDetailsLayout: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1.55fr) minmax(280px, 0.85fr)",
+    gap: "14px",
+    alignItems: "start",
+    minWidth: 0,
+  },
+
+  publicTournamentDetailsLayoutMobile: {
+    gridTemplateColumns: "minmax(0, 1fr)",
+  },
+
+  publicTournamentDetailsMain: {
+    display: "grid",
+    gap: "14px",
+    minWidth: 0,
+  },
+
+  publicTournamentDetailsRail: {
+    display: "grid",
+    gap: "14px",
+    minWidth: 0,
+  },
+
+  publicTournamentDetailCardGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 210px), 1fr))",
+    gap: "10px",
+    minWidth: 0,
+  },
+
+  publicTournamentDetailClassCard: {
+    display: "grid",
+    gap: "10px",
+    padding: "13px",
+    borderRadius: "17px",
+    background: "rgba(255,255,255,0.07)",
+    border: "1px solid rgba(255,255,255,0.10)",
+    minWidth: 0,
+  },
+
+  publicTournamentDetailCardTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "10px",
+    flexWrap: "wrap",
+    minWidth: 0,
+    fontSize: "14px",
+    fontWeight: "950",
+  },
+
+  publicTournamentDetailChipRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "7px",
+    minWidth: 0,
+  },
+
+  publicTournamentDetailChip: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: "999px",
+    padding: "6px 9px",
+    background: "rgba(255,255,255,0.08)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    color: "var(--public-muted, #d1fae5)",
+    fontSize: "11px",
+    lineHeight: 1.15,
+    fontWeight: "900",
+    overflowWrap: "anywhere",
+    maxWidth: "100%",
+  },
+
+  publicTournamentDetailsEmpty: {
+    borderRadius: "16px",
+    padding: "13px",
+    background: "rgba(255,255,255,0.06)",
+    border: "1px dashed rgba(255,255,255,0.14)",
+    color: "var(--public-muted, #d1fae5)",
+    fontSize: "13px",
+    lineHeight: 1.45,
+    fontWeight: "800",
+  },
+
+  publicTournamentSchedulePreviewGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
+    gap: "12px",
+    minWidth: 0,
+  },
+
+  publicTournamentSchedulePreviewBlock: {
+    display: "grid",
+    gap: "9px",
+    alignContent: "start",
+    minWidth: 0,
+  },
+
+  publicTournamentReadinessSummaryGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 112px), 1fr))",
+    gap: "8px",
+    minWidth: 0,
+  },
+
+  publicTournamentReadinessSummaryCard: {
+    display: "grid",
+    gap: "4px",
+    minHeight: "58px",
+    padding: "10px 11px",
+    borderRadius: "15px",
+    background: "rgba(255,255,255,0.07)",
+    border: "1px solid rgba(255,255,255,0.10)",
+    minWidth: 0,
+  },
+
+  publicTournamentFormatList: {
+    display: "grid",
+    gap: "8px",
+    minWidth: 0,
+  },
+
+  publicTournamentFormatItem: {
+    display: "grid",
+    gap: "3px",
+    padding: "11px",
+    borderRadius: "15px",
+    background: "rgba(255,255,255,0.07)",
+    border: "1px solid rgba(255,255,255,0.10)",
+    minWidth: 0,
+  },
+
+  publicTournamentPrivacyNote: {
+    borderRadius: "16px",
+    padding: "13px",
+    background: "rgba(34,197,94,0.10)",
+    border: "1px solid rgba(34,197,94,0.20)",
+    fontSize: "13px",
+    lineHeight: 1.45,
+    fontWeight: "850",
   },
 
   publicTournamentClassStatusList: {
