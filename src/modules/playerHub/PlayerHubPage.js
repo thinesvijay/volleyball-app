@@ -3187,6 +3187,12 @@ Object.assign(playerHubStyles, {
     fontSize: "12px",
     fontWeight: "980",
   },
+  eventStatIcon: {
+    color: hubDarkPalette.text,
+    fontSize: "11px",
+    lineHeight: 1,
+    fontWeight: "980",
+  },
   eventStatLabel: {
     color: hubDarkPalette.dim,
     fontSize: "10px",
@@ -3972,11 +3978,14 @@ Object.assign(playerHubStyles, {
     padding: "16px",
   },
   playersAdPanel: {
-    ...hubGlassPanel,
+    ...hubGlassPanelSoft,
     display: "grid",
     gap: "12px",
     padding: "14px",
     borderRadius: "22px",
+    borderColor: "rgba(148,163,184,0.14)",
+    background:
+      "linear-gradient(135deg, rgba(15,23,42,0.38), rgba(8,47,73,0.24))",
     overflow: "hidden",
     minWidth: 0,
   },
@@ -6955,6 +6964,14 @@ export default function PlayerHubPage({
     return "Pending";
   }
 
+  function eventResponseActionIcon(status) {
+    const value = normalizeTournamentAvailabilityStatus(status);
+    if (value === "YES") return "✓";
+    if (value === "MAYBE") return "?";
+    if (value === "NO") return "×";
+    return "⏳";
+  }
+
   function eventRosterForPlanId(planId) {
     const key = String(planId || "");
     const captainRoster = captainRosterDraftsByPlanId[key]?.roster;
@@ -7135,32 +7152,37 @@ export default function PlayerHubPage({
   function renderEventStats(stats) {
     if (!responseStatsHaveCounts(stats)) return null;
 
-    function eventStatTone(label) {
-      const value = String(label || "").toLowerCase();
-      if (value === "going") return playerHubStyles.eventStatGoing;
-      if (value === "maybe") return playerHubStyles.eventStatMaybe;
-      if (value === "no") return playerHubStyles.eventStatNo;
-      if (value === "pending") return playerHubStyles.eventStatPending;
+    function eventStatTone(key) {
+      if (key === "going") return playerHubStyles.eventStatGoing;
+      if (key === "maybe") return playerHubStyles.eventStatMaybe;
+      if (key === "no") return playerHubStyles.eventStatNo;
+      if (key === "pending") return playerHubStyles.eventStatPending;
       return null;
     }
 
+    const items = [
+      { key: "going", label: "Going", icon: "✓", value: stats.yes || 0 },
+      { key: "maybe", label: "Maybe", icon: "?", value: stats.maybe || 0 },
+      { key: "no", label: "No", icon: "×", value: stats.no || 0 },
+      { key: "pending", label: "Pending", icon: "⏳", value: stats.pending || 0 },
+    ];
+
     return (
       <div style={playerHubStyles.eventStats}>
-        {[
-          ["Going", stats.yes || 0],
-          ["Maybe", stats.maybe || 0],
-          ["No", stats.no || 0],
-          ["Pending", stats.pending || 0],
-        ].map(([label, value]) => (
+        {items.map((item) => (
           <div
-            key={label}
+            key={item.key}
+            aria-label={`${item.label}: ${item.value}`}
+            title={`${item.label}: ${item.value}`}
             style={{
               ...playerHubStyles.eventStat,
-              ...(eventStatTone(label) || {}),
+              ...(eventStatTone(item.key) || {}),
             }}
           >
-            <span style={playerHubStyles.eventStatValue}>{value}</span>
-            <span style={playerHubStyles.eventStatLabel}>{label}</span>
+            <span aria-hidden="true" style={playerHubStyles.eventStatIcon}>
+              {item.icon}
+            </span>
+            <span style={playerHubStyles.eventStatValue}>{item.value}</span>
           </div>
         ))}
       </div>
@@ -7369,7 +7391,7 @@ export default function PlayerHubPage({
                     handleTournamentAvailabilityResponse(availability, status)
                   }
                 >
-                  {eventResponseActionLabel(status)}
+                  {eventResponseActionIcon(status)} {eventResponseActionLabel(status)}
                 </button>
               ))}
             </div>
@@ -8267,7 +8289,7 @@ export default function PlayerHubPage({
               <div style={playerHubStyles.profileMeta}>
                 <strong style={playerHubStyles.previewTitle}>Responses</strong>
                 <span style={playerHubStyles.previewSubtitle}>
-                  Going / Maybe / No / Pending
+                  Availability status
                 </span>
               </div>
               <button
@@ -8280,10 +8302,18 @@ export default function PlayerHubPage({
               </button>
             </div>
             <div style={playerHubStyles.captainRosterMetricRow}>
-              <span style={playerHubStyles.chip}>Going {flow.stats.yes}</span>
-              <span style={playerHubStyles.chip}>Maybe {flow.stats.maybe}</span>
-              <span style={playerHubStyles.chip}>No {flow.stats.no}</span>
-              <span style={playerHubStyles.chip}>Pending {flow.stats.pending}</span>
+              <span style={playerHubStyles.chip} title="Going">
+                ✓ {flow.stats.yes}
+              </span>
+              <span style={playerHubStyles.chip} title="Maybe">
+                ? {flow.stats.maybe}
+              </span>
+              <span style={playerHubStyles.chip} title="No">
+                × {flow.stats.no}
+              </span>
+              <span style={playerHubStyles.chip} title="Pending">
+                ⏳ {flow.stats.pending}
+              </span>
             </div>
             {responseRows.length ? (
               <div style={playerHubStyles.captainRosterCompactList}>
@@ -9495,21 +9525,21 @@ export default function PlayerHubPage({
                 plan.tournamentName || "Tournament",
                 plan.clubTeamName || "Team",
                 boardLocked ? "Locked roster" : "Planning only",
-              ].join(" · ")}
+              ].join(" / ")}
             </div>
           </div>
           <div style={playerHubStyles.chipRow}>
-            <span style={playerHubStyles.chip}>
-              Going: {goingCount}
+            <span style={playerHubStyles.chip} title="Going">
+              ✓ {goingCount}
             </span>
-            <span style={playerHubStyles.chip}>
-              Maybe: {maybeCount}
+            <span style={playerHubStyles.chip} title="Maybe">
+              ? {maybeCount}
             </span>
             <span style={playerHubStyles.chip}>
               Assigned: {assignedCount}/{assignableAvailability.length}
             </span>
-            <span style={playerHubStyles.chip}>
-              Pending: {pendingCount}
+            <span style={playerHubStyles.chip} title="Pending">
+              ⏳ {pendingCount}
             </span>
             <span style={playerHubStyles.chip}>
               {boardRosterStatus === "LOCKED"
@@ -10683,9 +10713,17 @@ export default function PlayerHubPage({
       ? [["Submitted rosters", passportStats.rosterSubmittedCount]]
       : []),
   ].filter(([label, value]) => {
-    if (label === "Locked rosters") return value > 0 || passportStats.rosterLockedCount > 0;
+    if (label === "Teams") return value > 0;
+    if (label === "Invites") return value > 0;
+    if (label === "Going") return value > 0;
+    if (label === "Maybe") return value > 0;
+    if (label === "No") return value > 0;
+    if (label === "Pending") return value > 0;
+    if (label === "Approved rosters") return value > 0;
+    if (label === "Locked rosters") return value > 0;
     if (label === "Needs changes") return value > 0;
-    return true;
+    if (label === "Submitted rosters") return value > 0;
+    return Number(value) > 0;
   });
   const dedupedTournamentPlans = uniqueEventItems(tournamentPlans);
   const homeQuickStats = [
@@ -10814,6 +10852,18 @@ export default function PlayerHubPage({
     profileEditorOpen && homeNextAction.target === "profile"
   );
   const showHomeQuickStats = homeProfileComplete || homeQuickStatsHaveValue;
+  const hasVisibleHomeProfileData = Boolean(
+    passportText(savedProfilePreview.displayName, username) ||
+      passportText(savedProfilePreview.country) ||
+      passportText(savedProfilePreview.profileType) ||
+      selectedProfileTeamName ||
+      primaryConfirmedTeam ||
+      savedProfilePreview.freeAgent
+  );
+  const homeProfileMessage =
+    profileMessage === copy.profileLoading && hasVisibleHomeProfileData
+      ? ""
+      : profileMessage;
   const managedTeamName =
     teamProfile?.clubTeamName ||
     homeTeamCard?.clubTeamName ||
@@ -12081,9 +12131,9 @@ export default function PlayerHubPage({
                   ? copy.profileSaving
                   : copy.profileSaveButton}
               </button>
-              {profileMessage ? (
+              {homeProfileMessage ? (
                 <span style={playerHubStyles.profileMessage}>
-                  {profileMessage}
+                  {homeProfileMessage}
                 </span>
               ) : null}
             </div>
@@ -13570,18 +13620,24 @@ export default function PlayerHubPage({
                     </div>
                   </div>
                 </div>
-                <div style={playerHubStyles.passportStatsGrid}>
-                  {passportStatCards.map(([label, value]) => (
-                    <article key={label} style={playerHubStyles.passportStatCard}>
-                      <strong style={playerHubStyles.passportStatValue}>
-                        {value}
-                      </strong>
-                      <span style={playerHubStyles.passportStatLabel}>
-                        {label}
-                      </span>
-                    </article>
-                  ))}
-                </div>
+                {passportStatCards.length ? (
+                  <div style={playerHubStyles.passportStatsGrid}>
+                    {passportStatCards.map(([label, value]) => (
+                      <article key={label} style={playerHubStyles.passportStatCard}>
+                        <strong style={playerHubStyles.passportStatValue}>
+                          {value}
+                        </strong>
+                        <span style={playerHubStyles.passportStatLabel}>
+                          {label}
+                        </span>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={playerHubStyles.passportEmpty}>
+                    Official stats appear after team, event and roster activity.
+                  </div>
+                )}
               </article>
 
               <article style={playerHubStyles.passportPanel}>
@@ -13658,7 +13714,7 @@ export default function PlayerHubPage({
               Team opportunities
             </div>
             <div style={playerHubStyles.cardText}>
-              Player ad responses and open team needs.
+              Separate from official passport history.
             </div>
           </div>
           <span style={playerHubStyles.chip}>

@@ -10778,27 +10778,32 @@ const savedRound = readStorageWithTtl(
     return [
       {
         label: tournamentText.interestedTeamsLabel,
-        icon: "I",
+        shortLabel: tournamentText.interestedTeamsLabel,
+        icon: "👥",
         value: counts.interested,
       },
       {
         label: tournamentText.availabilityActiveLabel,
-        icon: "?",
+        shortLabel: "Asking",
+        icon: "⏳",
         value: counts.availabilityActive,
       },
       {
         label: tournamentText.rosterSubmittedLabel,
-        icon: "S",
+        shortLabel: "Submitted",
+        icon: "📋",
         value: counts.rosterSubmitted,
       },
       {
         label: tournamentText.confirmedTeamsLabel,
-        icon: "OK",
+        shortLabel: "Approved",
+        icon: "✓",
         value: counts.confirmed,
       },
       {
         label: tournamentText.lockedTeamsLabel,
-        icon: "L",
+        shortLabel: "Locked",
+        icon: "🔒",
         value: counts.locked,
       },
     ].filter((metric) => Number(metric.value || 0) > 0);
@@ -10886,20 +10891,20 @@ const savedRound = readStorageWithTtl(
                 .map((part) => String(part || "").trim())
                 .filter(Boolean)
                 .join(", ");
-              const contact = [
-                tournament.contactName,
-                tournament.contactPhone,
-                tournament.contactEmail,
-              ]
-                .map((part) => String(part || "").trim())
-                .filter(Boolean)
-                .join(" / ");
               const publicTheme = getTournamentPublicCardTheme(tournament);
               const cardSummary = getTournamentPublicSummary(tournament);
               const posterImageUrl = getTournamentPublicCardImageUrl(tournament);
               const publicTitle = getTournamentPublicTitle(tournament);
               const actionLabel = getPublicTournamentCardActionLabel(tournament);
               const organizer = getTournamentPublicOrganizerName(tournament);
+              const readinessMetrics = getPublicTournamentReadinessMetrics(tournament);
+              const visibleReadinessMetrics = isMobile
+                ? readinessMetrics.slice(0, 4)
+                : readinessMetrics;
+              const hiddenReadinessCount = Math.max(
+                readinessMetrics.length - visibleReadinessMetrics.length,
+                0
+              );
 
               return (
                 <article
@@ -11014,19 +11019,6 @@ const savedRound = readStorageWithTtl(
                           </strong>
                         </div>
                       )}
-                      {contact && (
-                        <div
-                          style={{
-                            ...styles.publicTournamentPosterMetaItem,
-                            background: publicTheme.surface,
-                            borderColor: publicTheme.border,
-                            color: publicTheme.mutedText,
-                          }}
-                        >
-                          <span>{tournamentText.contactLabel}</span>
-                          <strong>{contact}</strong>
-                        </div>
-                      )}
                       {organizer && (
                         <div
                           style={{
@@ -11071,6 +11063,71 @@ const savedRound = readStorageWithTtl(
                           .join(" / ")}
                       </div>
                     )}
+
+                    {readinessMetrics.length > 0 ? (
+                      <div style={styles.landingTournamentReadinessGrid}>
+                        {visibleReadinessMetrics.map((metric) => (
+                          <span
+                            key={metric.label}
+                            aria-label={`${metric.label}: ${metric.value}`}
+                            title={`${metric.label}: ${metric.value}`}
+                            style={{
+                              ...styles.landingTournamentReadinessItem,
+                              background: hexToRgba(publicTheme.surface, 0.78),
+                              borderColor: hexToRgba(publicTheme.border, 0.58),
+                            }}
+                          >
+                            <span
+                              aria-hidden="true"
+                              style={{
+                                ...styles.landingTournamentReadinessIcon,
+                                background: hexToRgba(publicTheme.primary, 0.16),
+                                color: publicTheme.text,
+                              }}
+                            >
+                              {metric.icon}
+                            </span>
+                            <strong
+                              style={{
+                                color: publicTheme.text,
+                                fontSize: "11px",
+                                lineHeight: 1,
+                                fontWeight: "950",
+                              }}
+                            >
+                              {metric.value}
+                            </strong>
+                            <span
+                              style={{
+                                color: publicTheme.mutedText,
+                                minWidth: 0,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                fontSize: "10px",
+                                lineHeight: 1,
+                                fontWeight: "900",
+                              }}
+                            >
+                              {metric.shortLabel || metric.label}
+                            </span>
+                          </span>
+                        ))}
+                        {hiddenReadinessCount > 0 ? (
+                          <span
+                            style={{
+                              ...styles.landingTournamentReadinessItem,
+                              ...styles.landingTournamentReadinessMore,
+                              background: hexToRgba(publicTheme.surface, 0.62),
+                              borderColor: hexToRgba(publicTheme.border, 0.42),
+                              color: publicTheme.mutedText,
+                            }}
+                          >
+                            +{hiddenReadinessCount} more
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
 
                     <button
                       style={{
@@ -11267,7 +11324,8 @@ const savedRound = readStorageWithTtl(
               {visibleReadinessMetrics.map((metric) => (
                 <span
                   key={metric.label}
-                  title={`${metric.value} ${metric.label}`}
+                  aria-label={`${metric.label}: ${metric.value}`}
+                  title={`${metric.label}: ${metric.value}`}
                   style={{
                     ...styles.landingTournamentReadinessItem,
                     background: hexToRgba(publicTheme.surface, 0.78),
@@ -11275,6 +11333,7 @@ const savedRound = readStorageWithTtl(
                   }}
                 >
                   <span
+                    aria-hidden="true"
                     style={{
                       ...styles.landingTournamentReadinessIcon,
                       background: hexToRgba(publicTheme.primary, 0.16),
@@ -11305,7 +11364,7 @@ const savedRound = readStorageWithTtl(
                       fontWeight: "900",
                     }}
                   >
-                    {metric.label}
+                    {metric.shortLabel || metric.label}
                   </span>
                 </span>
               ))}
@@ -11446,222 +11505,19 @@ const savedRound = readStorageWithTtl(
     );
   }
 
-  function renderLandingShowcaseVisual(type) {
-    if (type === "teams") {
-      return (
-        <div style={styles.landingMockScreen}>
-          <div style={styles.landingMockTopBar}>
-            <span>{t.teamBuilder}</span>
-            <strong>1-5</strong>
-          </div>
-          <div style={styles.landingTeamBuilderMock}>
-            <div style={styles.landingMockPanel}>
-              <div style={styles.landingMockLabel}>
-                {t.landingShowcasePlayerPool}
-              </div>
-              {["Mia", "Jonas", "Sara"].map((name, index) => (
-                <div key={name} style={styles.landingPlayerMockRow}>
-                  <span style={styles.landingPlayerMockAvatar}>
-                    {index + 1}
-                  </span>
-                  <span>{name}</span>
-                  <strong>{5 - (index % 2)}</strong>
-                </div>
-              ))}
-            </div>
-            <div style={styles.landingGeneratedTeamsMock}>
-              <div style={styles.landingMockLabel}>
-                {t.landingShowcaseGeneratedTeams}
-              </div>
-              <div style={styles.landingTeamMockCardGrid}>
-                {[1, 2].map((teamNumber) => (
-                  <div key={teamNumber} style={styles.landingTeamMockCard}>
-                    <strong>
-                      {tournamentText.teamLabel} {teamNumber}
-                    </strong>
-                    <div style={styles.landingTeamMockBars}>
-                      <span style={styles.landingTeamMockBar} />
-                      <span style={styles.landingTeamMockBar} />
-                      <span style={styles.landingTeamMockBar} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    if (type === "tournaments") {
-      return (
-        <div style={styles.landingMockScreen}>
-          <div style={styles.landingMockTopBar}>
-            <span>{tournamentText.tournamentSetupTitle}</span>
-            <strong>{t.landingShowcaseClasses}</strong>
-          </div>
-          <div style={styles.landingClassChipRow}>
-            {["4-manns", "5-manns"].map((label) => (
-              <span key={label} style={styles.landingClassChip}>
-                {getSeriesDisplayName(label)}
-              </span>
-            ))}
-          </div>
-          <div style={styles.landingSetupMockGrid}>
-            {[
-              [tournamentText.totalTeamsLabel, "16"],
-              [tournamentText.groupsLabel, "4"],
-              [tournamentText.qualifiersLabel, "2"],
-              [tournamentText.groupMinutesLabel, "15"],
-            ].map(([label, value]) => (
-              <div key={label} style={styles.landingSetupMockTile}>
-                <span>{label}</span>
-                <strong>{value}</strong>
-              </div>
-            ))}
-          </div>
-          <div style={styles.landingSetupActionMock}>
-            {tournamentText.buildUpdateSlots}
-          </div>
-        </div>
-      );
-    }
-
-    if (type === "schedule") {
-      return (
-        <div style={styles.landingMockScreen}>
-          <div style={styles.landingMockTopBar}>
-            <span>{tournamentText.scheduleTitle}</span>
-            <strong>LIVE</strong>
-          </div>
-          <div style={styles.landingScheduleMockTable}>
-            {[
-              ["09:00", `${t.courtLabel} 1`, "Blue - Nord", "21-16", "done"],
-              ["09:15", `${t.courtLabel} 2`, "Serve - Block", "Live", "live"],
-              ["09:30", `${t.courtLabel} 3`, "Team C - Team D", "Next", "next"],
-            ].map(([time, court, match, status, state]) => (
-              <div
-                key={`${time}-${court}`}
-                style={{
-                  ...styles.landingScheduleMockRow,
-                  ...(state === "done"
-                    ? styles.landingScheduleMockRowDone
-                    : {}),
-                  ...(state === "live"
-                    ? styles.landingScheduleMockRowLive
-                    : {}),
-                }}
-              >
-                <span>{time}</span>
-                <strong style={styles.landingScheduleMockCourt}>{court}</strong>
-                <span style={styles.landingScheduleMockMatch}>{match}</span>
-                <span style={styles.landingScheduleMockStatus}>{status}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    if (type === "public") {
-      return (
-        <div style={styles.landingPublicMock}>
-          <div style={styles.landingPublicHeroMock}>
-            <span style={styles.landingPublicLogoMock}>MTP</span>
-            <div style={styles.landingPublicHeroText}>
-              <strong style={styles.landingPublicHeroTitle}>{t.appTitle}</strong>
-              <span style={styles.landingPublicHeroSubtitle}>
-                {tournamentText.publicLinkReadonly}
-              </span>
-            </div>
-          </div>
-          <div style={styles.landingPublicClassRow}>
-            <span
-              style={{
-                ...styles.landingPublicClassPill,
-                ...styles.landingPublicClassActive,
-              }}
-            >
-              {getSeriesDisplayName("5-manns")} Live
-            </span>
-            <span style={styles.landingPublicClassPill}>
-              {getSeriesDisplayName("4-manns")} {t.landingShowcaseFinished}
-            </span>
-          </div>
-          <div style={styles.landingPublicScheduleMock}>
-            <div
-              style={{
-                ...styles.landingPublicMatchMock,
-                ...styles.landingPublicMatchLive,
-              }}
-            >
-              <span>09:15</span>
-              <strong style={styles.landingPublicMatchTitle}>Aces vs Nord</strong>
-              <span style={styles.landingPublicMatchStatus}>Live</span>
-            </div>
-            <div style={styles.landingPublicMatchMock}>
-              <span>09:30</span>
-              <strong style={styles.landingPublicMatchTitle}>Serve vs Blue</strong>
-              <span style={styles.landingPublicMatchStatus}>
-                {tournamentText.nextLabel}
-              </span>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    if (type === "finals") {
-      return (
-        <div style={styles.landingFinalsMock}>
-          <div style={styles.landingStandingsMock}>
-            <div style={styles.landingMockTopBar}>
-              <span>{tournamentText.standingsTitle}</span>
-              <strong>{tournamentText.groupLabel} A</strong>
-            </div>
-            {["Blue Spikers", "Nord Volley", "Serve Crew"].map(
-              (team, index) => (
-                <div key={team} style={styles.landingStandingMockRow}>
-                  <span>{index + 1}</span>
-                  <strong>{team}</strong>
-                  <span>{6 - index * 2}</span>
-                </div>
-              )
-            )}
-          </div>
-          <div style={styles.landingBracketMock}>
-            <div style={styles.landingBracketMockMatch}>Semi</div>
-            <div style={styles.landingBracketMockMatch}>Semi</div>
-            <div style={styles.landingBracketMockFinal}>
-              {tournamentText.final}
-            </div>
-          </div>
-        </div>
-      );
-    }
-
+  function renderLandingShowcaseVisual(slide) {
     return (
-      <div style={styles.landingThemeMock}>
-        <div style={styles.landingThemePoster}>
-          <div style={styles.landingThemeLogo}>MTP</div>
-          <strong style={styles.landingThemeTitle}>
-            {t.landingShowcaseCustomTheme}
-          </strong>
-          <div style={styles.landingThemeClassPills}>
-            <span style={styles.landingThemeClassPill}>
-              {getSeriesDisplayName("4-manns")}
-            </span>
-            <span style={styles.landingThemeClassPill}>
-              {getSeriesDisplayName("5-manns")}
-            </span>
-          </div>
+      <div style={styles.landingMockScreen}>
+        <div style={styles.landingMockTopBar}>
+          <span>{slide.kicker}</span>
+          <strong>{slide.marker}</strong>
         </div>
-        <div style={styles.landingThemeDots}>
-          {["#2563eb", "#38bdf8", "#22c55e", "#facc15"].map((color) => (
-            <span
-              key={color}
-              style={{ ...styles.landingThemeDot, background: color }}
-            />
+        <p style={styles.landingShowcaseSummary}>{slide.detail}</p>
+        <div style={styles.landingShowcaseStepList}>
+          {(slide.items || []).map((item) => (
+            <span key={item} style={styles.landingShowcaseStepChip}>
+              {item}
+            </span>
           ))}
         </div>
       </div>
@@ -11673,31 +11529,50 @@ const savedRound = readStorageWithTtl(
       {
         title: t.landingShowcaseCreateTeams,
         type: "teams",
+        kicker: t.teamBuilder,
+        marker: "1",
+        detail: "Pick players, set team count and generate balanced training teams.",
+        items: ["Players", "Selected count", "Generate"],
         tone: "linear-gradient(155deg, #ffffff 0%, #dbeafe 58%, #bfdbfe 100%)",
       },
       {
         title: t.landingShowcaseBuildTournaments,
         type: "tournaments",
+        kicker: tournamentText.tournamentSetupTitle,
+        marker: "2",
+        detail: "Create the tournament, classes, teams, schedule and public link.",
+        items: [
+          getSeriesDisplayName("4-manns"),
+          getSeriesDisplayName("5-manns"),
+          tournamentText.scheduleTitle,
+        ],
         tone: "linear-gradient(155deg, #ffffff 0%, #e0f2fe 58%, #bae6fd 100%)",
       },
       {
-        title: t.landingShowcaseLiveSchedule,
-        type: "schedule",
+        title: "Ask availability",
+        type: "availability",
+        kicker: "Player Hub",
+        marker: "3",
+        detail: "Captains ask availability and players answer with clear status.",
+        items: ["✓ Going", "? Maybe", "× No"],
         tone: "linear-gradient(155deg, #ffffff 0%, #eff6ff 52%, #c7d2fe 100%)",
+      },
+      {
+        title: "Submit roster",
+        type: "roster",
+        kicker: "Captain",
+        marker: "4",
+        detail: "Plan squads, name them and submit the roster for review.",
+        items: ["Squads", "Roster", "Approval"],
+        tone: "linear-gradient(155deg, #eff6ff 0%, #dbeafe 48%, #93c5fd 100%)",
       },
       {
         title: t.landingShowcasePublicLive,
         type: "public",
-        tone: "linear-gradient(155deg, #eff6ff 0%, #dbeafe 48%, #93c5fd 100%)",
-      },
-      {
-        title: t.landingShowcaseStandingsFinals,
-        type: "finals",
-        tone: "linear-gradient(155deg, #ffffff 0%, #ecfeff 54%, #bfdbfe 100%)",
-      },
-      {
-        title: t.landingShowcaseCustomTheme,
-        type: "theme",
+        kicker: tournamentText.publicPreviewTitle,
+        marker: "5",
+        detail: "Spectators follow live matches, results and standings publicly.",
+        items: ["Live", tournamentText.nextLabel, tournamentText.standingsTitle],
         tone: "linear-gradient(155deg, #ffffff 0%, #eef2ff 54%, #bfdbfe 100%)",
       },
     ];
@@ -11756,7 +11631,7 @@ const savedRound = readStorageWithTtl(
                 </span>
                 <h2 style={styles.landingShowcaseCardTitle}>{slide.title}</h2>
               </div>
-              {renderLandingShowcaseVisual(slide.type)}
+              {renderLandingShowcaseVisual(slide)}
             </article>
           ))}
         </div>
@@ -20916,6 +20791,34 @@ const styles = {
     fontWeight: "950",
     textTransform: "uppercase",
     letterSpacing: 0,
+  },
+
+  landingShowcaseSummary: {
+    margin: 0,
+    color: "#334155",
+    fontSize: "13px",
+    lineHeight: 1.42,
+    fontWeight: "800",
+  },
+
+  landingShowcaseStepList: {
+    display: "flex",
+    gap: "6px",
+    flexWrap: "wrap",
+    alignItems: "center",
+    minWidth: 0,
+  },
+
+  landingShowcaseStepChip: {
+    borderRadius: "999px",
+    padding: "7px 9px",
+    background: "rgba(255,255,255,0.78)",
+    border: "1px solid rgba(37,99,235,0.14)",
+    color: "#1e3a8a",
+    fontSize: "10px",
+    lineHeight: 1,
+    fontWeight: "950",
+    whiteSpace: "nowrap",
   },
 
   landingTeamBuilderMock: {
