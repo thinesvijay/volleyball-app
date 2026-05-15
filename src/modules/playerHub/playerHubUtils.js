@@ -60,6 +60,72 @@ export function normalizePlayerHubProfile(profile = {}) {
   };
 }
 
+export function normalizeContactEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+export function normalizeMobileNumber(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+export function isValidContactEmail(value) {
+  const email = normalizeContactEmail(value);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+export function isValidMobileNumber(value) {
+  const digitCount = String(value || "").replace(/\D/g, "").length;
+  return digitCount >= 8;
+}
+
+export function validateRequiredContactFields({ email, phone }) {
+  const normalizedEmail = normalizeContactEmail(email);
+  const normalizedPhone = normalizeMobileNumber(phone);
+
+  if (!normalizedEmail) {
+    return {
+      valid: false,
+      message: "Email is required.",
+      email: normalizedEmail,
+      phone: normalizedPhone,
+    };
+  }
+
+  if (!isValidContactEmail(normalizedEmail)) {
+    return {
+      valid: false,
+      message: "Enter a valid email.",
+      email: normalizedEmail,
+      phone: normalizedPhone,
+    };
+  }
+
+  if (!normalizedPhone) {
+    return {
+      valid: false,
+      message: "Mobile number is required.",
+      email: normalizedEmail,
+      phone: normalizedPhone,
+    };
+  }
+
+  if (!isValidMobileNumber(normalizedPhone)) {
+    return {
+      valid: false,
+      message: "Enter a valid mobile number.",
+      email: normalizedEmail,
+      phone: normalizedPhone,
+    };
+  }
+
+  return {
+    valid: true,
+    message: "",
+    email: normalizedEmail,
+    phone: normalizedPhone,
+  };
+}
+
 export function getPlayerHubProfileTypeOptions() {
   return ["Player", "Captain"];
 }

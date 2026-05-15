@@ -4,6 +4,7 @@ import {
   getPlayerHubProfileDefaults,
   getPlayerHubProfileTypeOptions,
   normalizePlayerHubProfile,
+  validateRequiredContactFields,
 } from "./playerHubUtils";
 
 const playerHubCopy = {
@@ -6318,13 +6319,32 @@ export default function PlayerHubPage({
     event.preventDefault();
     if (!saveMyPlayerProfile || profileStatus === "saving") return;
 
+    const contactValidation = validateRequiredContactFields({
+      email: myProfile.email,
+      phone: myProfile.phone,
+    });
+
+    if (!contactValidation.valid) {
+      setProfileStatus("error");
+      setProfileMessage(contactValidation.message);
+      setActiveProfileEditorTab("basic");
+      setShowProfileEditor(true);
+      return;
+    }
+
+    const profileToSave = {
+      ...myProfile,
+      email: contactValidation.email,
+      phone: contactValidation.phone,
+    };
+
     setProfileStatus("saving");
     setProfileMessage(copy.profileSaving);
 
     try {
-      const savedProfile = await saveMyPlayerProfile(myProfile);
+      const savedProfile = await saveMyPlayerProfile(profileToSave);
       const normalizedProfile = normalizePlayerHubProfile({
-        ...myProfile,
+        ...profileToSave,
         ...(savedProfile || {}),
         username,
       });
@@ -11895,6 +11915,7 @@ export default function PlayerHubPage({
 
           <form
             onSubmit={handleSaveMyProfile}
+            noValidate
             style={{
               ...playerHubStyles.profileEditorPanel,
               display: profileEditorOpen ? "grid" : "none",
@@ -11978,11 +11999,12 @@ export default function PlayerHubPage({
                     onChange={(event) =>
                       updateMyProfileField("email", event.target.value)
                     }
-                    placeholder="Optional"
+                    placeholder="name@example.com"
+                    required
                   />
                 </label>
                 <label style={playerHubStyles.profileField}>
-                  <span style={playerHubStyles.profileLabel}>Phone</span>
+                  <span style={playerHubStyles.profileLabel}>Mobile number</span>
                   <input
                     type="tel"
                     style={playerHubStyles.profileInput}
@@ -11990,8 +12012,12 @@ export default function PlayerHubPage({
                     onChange={(event) =>
                       updateMyProfileField("phone", event.target.value)
                     }
-                    placeholder="Optional"
+                    placeholder="+47 123 45 678"
+                    required
                   />
+                  <span style={playerHubStyles.profileMessage}>
+                    Used for team/tournament contact. Not shown publicly.
+                  </span>
                 </label>
               </div>
             </section>

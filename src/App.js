@@ -41,6 +41,9 @@ import {
   getTournamentGroupColor,
   getTournamentSourceGroupCode,
 } from "./utils/tournamentUtils";
+import {
+  validateRequiredContactFields,
+} from "./modules/playerHub/playerHubUtils";
 
 const API =
   "https://script.google.com/macros/s/AKfycbx9FWReNsr6vJam6b02OCf96K482opSh_SPZVSeBqoTs65M7S2E1ZGZXt9qGUMzpE2dDw/exec";
@@ -8633,7 +8636,12 @@ export default function App() {
     const firstName = String(playerRegistration.firstName || "").trim();
     const lastName = String(playerRegistration.lastName || "").trim();
     const displayName = [firstName, lastName].filter(Boolean).join(" ");
-    const email = String(playerRegistration.email || "").trim().toLowerCase();
+    const contactValidation = validateRequiredContactFields({
+      email: playerRegistration.email,
+      phone: playerRegistration.phone,
+    });
+    const email = contactValidation.email;
+    const phone = contactValidation.phone;
     const password = String(playerRegistration.password || "").trim();
 
     if (!firstName || !lastName) {
@@ -8663,13 +8671,13 @@ export default function App() {
       return;
     }
 
-    if (!password) {
-      setPlayerRegistrationMessage("Password is required.");
+    if (!contactValidation.valid) {
+      setPlayerRegistrationMessage(contactValidation.message);
       return;
     }
 
-    if (email && !email.includes("@")) {
-      setPlayerRegistrationMessage("Please enter a valid email address.");
+    if (!password) {
+      setPlayerRegistrationMessage("Password is required.");
       return;
     }
 
@@ -8691,7 +8699,7 @@ export default function App() {
           lastName,
           displayName,
           email,
-          phone: playerRegistration.phone,
+          phone,
           password,
           country: playerRegistration.country,
           freeAgent: playerRegistration.freeAgent,
@@ -11963,6 +11971,7 @@ const savedRound = readStorageWithTtl(
                     ...(isMobile ? styles.landingRegisterFormStacked : {}),
                   }}
                   onSubmit={registerPlayerAccountFromLanding}
+                  noValidate
                 >
                   <div style={styles.landingRegisterHeader}>
                     <strong style={styles.landingRegisterTitle}>
@@ -12012,16 +12021,20 @@ const savedRound = readStorageWithTtl(
                     autoComplete="family-name"
                     required
                   />
-                  <input
-                    style={styles.landingInput}
-                    type="email"
-                    value={playerRegistration.email}
-                    onChange={(event) =>
-                      updatePlayerRegistrationField("email", event.target.value)
-                    }
-                    placeholder="Email optional"
-                    autoComplete="email"
-                  />
+                  <label style={styles.landingRegisterField}>
+                    <span style={styles.landingRegisterFieldLabel}>Email</span>
+                    <input
+                      style={styles.landingInput}
+                      type="email"
+                      value={playerRegistration.email}
+                      onChange={(event) =>
+                        updatePlayerRegistrationField("email", event.target.value)
+                      }
+                      placeholder="name@example.com"
+                      autoComplete="email"
+                      required
+                    />
+                  </label>
                   <input
                     style={styles.landingInput}
                     type="password"
@@ -12036,15 +12049,25 @@ const savedRound = readStorageWithTtl(
                     autoComplete="new-password"
                     required
                   />
-                  <input
-                    style={styles.landingInput}
-                    value={playerRegistration.phone}
-                    onChange={(event) =>
-                      updatePlayerRegistrationField("phone", event.target.value)
-                    }
-                    placeholder="Phone optional"
-                    autoComplete="tel"
-                  />
+                  <label style={styles.landingRegisterField}>
+                    <span style={styles.landingRegisterFieldLabel}>
+                      Mobile number
+                    </span>
+                    <input
+                      style={styles.landingInput}
+                      type="tel"
+                      value={playerRegistration.phone}
+                      onChange={(event) =>
+                        updatePlayerRegistrationField("phone", event.target.value)
+                      }
+                      placeholder="+47 123 45 678"
+                      autoComplete="tel"
+                      required
+                    />
+                    <span style={styles.landingRegisterHelperText}>
+                      Used for team/tournament contact. Not shown publicly.
+                    </span>
+                  </label>
                   <input
                     style={styles.landingInput}
                     value={playerRegistration.country}
@@ -21884,6 +21907,25 @@ const styles = {
   landingRegisterHelper: {
     color: "#475569",
     fontSize: "11px",
+    lineHeight: 1.35,
+    fontWeight: "800",
+  },
+
+  landingRegisterField: {
+    display: "grid",
+    gap: "5px",
+    minWidth: 0,
+  },
+
+  landingRegisterFieldLabel: {
+    color: "#1e3a8a",
+    fontSize: "11px",
+    fontWeight: "950",
+  },
+
+  landingRegisterHelperText: {
+    color: "#64748b",
+    fontSize: "10px",
     lineHeight: 1.35,
     fontWeight: "800",
   },
