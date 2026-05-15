@@ -106,7 +106,8 @@ async function resetApp(page) {
   await page.reload();
 }
 
-async function login(page, credentials) {
+async function login(page, credentials, options = {}) {
+  const { expectPlayerHub = true } = options;
   await resetApp(page);
   await expect(page.getByText("Make Teams Pro").first()).toBeVisible();
 
@@ -145,14 +146,16 @@ async function login(page, credentials) {
       );
     });
 
-  await expect(page.getByTestId("module-tab-player-hub"))
-    .toBeVisible({ timeout: 15_000 })
-    .catch(async () => {
-      const diagnostic = await getLoginDiagnostic(page);
-      throw new Error(
-        `Login finished but Player Hub module tab was not visible. ${diagnostic}`
-      );
-    });
+  if (expectPlayerHub) {
+    await expect(page.getByTestId("module-tab-player-hub"))
+      .toBeVisible({ timeout: 15_000 })
+      .catch(async () => {
+        const diagnostic = await getLoginDiagnostic(page);
+        throw new Error(
+          `Login finished but Player Hub module tab was not visible. ${diagnostic}`
+        );
+      });
+  }
 }
 
 async function openPlayerHub(page) {
@@ -164,16 +167,26 @@ async function openPlayerHub(page) {
   await expect(page.getByText("Player Hub").first()).toBeVisible();
 }
 
+async function openAdminConsole(page) {
+  const tab = page.getByTestId("module-tab-admin-console");
+  await expect(tab).toBeVisible({ timeout: 15_000 });
+  await tab.click();
+  await expect(page.getByTestId("player-hub-root")).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.getByText("Admin Console").first()).toBeVisible();
+}
+
 async function visibleLocator(locator) {
   return (await locator.count()) > 0 && (await locator.first().isVisible().catch(() => false));
 }
 
-async function expectActionDrawer(page, openName, closeName, expectedText) {
-  await page.getByRole("button", { name: openName, exact: true }).click();
+async function expectActionDrawer(page, openName, closeName, expectedText, scope = page) {
+  await scope.getByRole("button", { name: openName, exact: true }).click();
   await expect(page.getByText(expectedText).first()).toBeVisible({
     timeout: 10_000,
   });
-  await page.getByRole("button", { name: closeName, exact: true }).click();
+  await scope.getByRole("button", { name: closeName, exact: true }).click();
   await expect(page.getByText(expectedText).first()).not.toBeVisible();
 }
 
@@ -296,14 +309,22 @@ test("captain can open Team Control action drawers", async ({
     page,
     "Add internal need",
     "Close need",
-    "Internal only"
+    "Internal only",
+    teamControl
   );
-  await expectActionDrawer(page, "Publish player ad", "Close ad", "Select tournament");
+  await expectActionDrawer(
+    page,
+    "Publish player ad",
+    "Close ad",
+    "Select tournament",
+    teamControl
+  );
   await expectActionDrawer(
     page,
     "Ask availability",
     "Close plan",
-    "Ask confirmed members"
+    "Ask confirmed members",
+    teamControl
   );
 
   const hasPlanAction = await visibleLocator(
@@ -325,8 +346,8 @@ test("admin can review submitted roster drafts", async ({ page }, testInfo) => {
   test.skip(!hasCredentials(adminCredentials), authSkipReason);
 
   const runtimeErrors = collectRuntimeErrors(page);
-  await login(page, adminCredentials);
-  await openPlayerHub(page);
+  await login(page, adminCredentials, { expectPlayerHub: false });
+  await openAdminConsole(page);
 
   await expect(page.getByText("Admin dashboard").first()).toBeVisible({
     timeout: 20_000,

@@ -4490,6 +4490,7 @@ Object.assign(playerHubStyles, {
 export default function PlayerHubPage({
   username = "",
   isAdmin = false,
+  adminOnlyMode = false,
   canReviewRosterDrafts = false,
   loadPlayerHubSnapshot,
   loadEventComments,
@@ -5775,6 +5776,11 @@ export default function PlayerHubPage({
   );
 
   useEffect(() => {
+    if (adminOnlyMode) {
+      setSnapshotInitialLoadComplete(true);
+      return undefined;
+    }
+
     let cancelled = false;
     let fallbackStarted = false;
 
@@ -5864,6 +5870,7 @@ export default function PlayerHubPage({
     };
   }, [
     applyPlayerHubSnapshot,
+    adminOnlyMode,
     loadAccessRequests,
     loadActiveClubTeams,
     loadConfirmedTeams,
@@ -11084,17 +11091,21 @@ export default function PlayerHubPage({
     : `${adminNeedsReviewCards.length || adminPrimaryReviewCards.length} open`;
 
   const canOpenAdminHubTab = isAdmin && adminDashboardCards.length > 0;
-  const hubTabs = [
-    { id: "home", label: "Home" },
-    { id: "events", label: "Events" },
-    { id: "team", label: "Team" },
-    { id: "players", label: "Players" },
-    canOpenAdminHubTab ? { id: "admin", label: "Admin" } : null,
-  ].filter(Boolean);
-  const showHubHome = activeHubTab === "home";
-  const showHubEvents = activeHubTab === "events";
-  const showHubTeam = activeHubTab === "team";
-  const showHubPlayers = activeHubTab === "players";
+  const hubTabs = adminOnlyMode
+    ? [canOpenAdminHubTab ? { id: "admin", label: "Admin" } : null].filter(
+        Boolean
+      )
+    : [
+        { id: "home", label: "Home" },
+        { id: "events", label: "Events" },
+        { id: "team", label: "Team" },
+        { id: "players", label: "Players" },
+        canOpenAdminHubTab ? { id: "admin", label: "Admin" } : null,
+      ].filter(Boolean);
+  const showHubHome = !adminOnlyMode && activeHubTab === "home";
+  const showHubEvents = !adminOnlyMode && activeHubTab === "events";
+  const showHubTeam = !adminOnlyMode && activeHubTab === "team";
+  const showHubPlayers = !adminOnlyMode && activeHubTab === "players";
   const showHubAdmin = activeHubTab === "admin" && canOpenAdminHubTab;
   const showPlayerEventArea = showHubEvents;
   const showTeamOverviewArea = showHubTeam;
@@ -11170,10 +11181,15 @@ export default function PlayerHubPage({
   }
 
   useEffect(() => {
-    if (activeHubTab === "admin" && !canOpenAdminHubTab) {
-      setActiveHubTab("home");
+    if (adminOnlyMode && canOpenAdminHubTab && activeHubTab !== "admin") {
+      setActiveHubTab("admin");
+      return;
     }
-  }, [activeHubTab, canOpenAdminHubTab]);
+
+    if (activeHubTab === "admin" && !canOpenAdminHubTab) {
+      setActiveHubTab(adminOnlyMode ? "" : "home");
+    }
+  }, [activeHubTab, adminOnlyMode, canOpenAdminHubTab]);
 
   function openAdminDashboardPanel(card) {
     const isClosing = openAdminPanel === card.id;
@@ -11681,9 +11697,13 @@ export default function PlayerHubPage({
       <section style={playerHubStyles.hero}>
         <div style={playerHubStyles.heroTitleRow}>
           <div style={playerHubStyles.titleBlock}>
-            <h2 style={playerHubStyles.title}>Player Hub</h2>
+            <h2 style={playerHubStyles.title}>
+              {adminOnlyMode ? "Admin Console" : "Player Hub"}
+            </h2>
             <p style={playerHubStyles.subtitle}>
-              Club. Squad. Roster.
+              {adminOnlyMode
+                ? "Review inbox and admin tools."
+                : "Club. Squad. Roster."}
             </p>
           </div>
         </div>
