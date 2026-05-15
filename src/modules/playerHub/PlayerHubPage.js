@@ -7282,7 +7282,6 @@ export default function PlayerHubPage({
     const stats = tournamentPlanStats(event, []);
     const hasStats = responseStatsHaveCounts(stats);
     const cardKey = bundle?.key || eventIdentityKey(event);
-    const canComment = Boolean(eventPlanId(event));
     const canRespond = Boolean(availability) && !rosterIsViewOnly;
     const dateText = eventShortDateText(event);
     const eventKicker = hasRosterState
@@ -7377,7 +7376,7 @@ export default function PlayerHubPage({
             <div style={playerHubStyles.eventSecondaryActions}>
               <details style={playerHubStyles.eventPreferenceDetails}>
                 <summary style={playerHubStyles.eventPreferenceSummary}>
-                  {hasPlayerNote || preferredSquad ? "Edit note" : "Add note"}
+                  Note
                 </summary>
                 <div style={playerHubStyles.eventPreferencePanel}>
                   <span style={playerHubStyles.eventResponseHint}>
@@ -7430,17 +7429,6 @@ export default function PlayerHubPage({
                   </div>
                 </div>
               </details>
-              {canComment ? (
-                <button
-                  type="button"
-                  style={playerHubStyles.feedTinyAction}
-                  onClick={() => toggleEventComments(event)}
-                >
-                  {expandedEventCommentPlanId === eventPlanId(event)
-                    ? "Hide comments"
-                    : "Comment"}
-                </button>
-              ) : null}
             </div>
           </>
         ) : rosterIsViewOnly ? (
@@ -7452,38 +7440,14 @@ export default function PlayerHubPage({
             >
               View roster
             </button>
-            {canComment ? (
-              <button
-                type="button"
-                style={playerHubStyles.feedTinyAction}
-                onClick={() => toggleEventComments(event)}
-              >
-                {expandedEventCommentPlanId === eventPlanId(event)
-                  ? "Hide comments"
-                  : "Comment"}
-              </button>
-            ) : null}
           </div>
         ) : (
           <div style={playerHubStyles.eventActionBar}>
             {availability?.playerNote ? (
               <span style={playerHubStyles.chip}>{availability.playerNote}</span>
             ) : null}
-            {canComment ? (
-              <button
-                type="button"
-                style={playerHubStyles.feedTinyAction}
-                onClick={() => toggleEventComments(event)}
-              >
-                {expandedEventCommentPlanId === eventPlanId(event)
-                  ? "Hide comments"
-                  : "Comment"}
-              </button>
-            ) : null}
           </div>
         )}
-
-        {renderEventCommentsDrawer(event)}
       </section>
     );
   }
@@ -8231,8 +8195,6 @@ export default function PlayerHubPage({
         ? "Choose a tournament and ask confirmed members."
         : "Coming soon.";
 
-    const primaryAction = captainRosterPrimaryAction(flow, rosterCurrentStep);
-
     return (
       <section
         style={playerHubStyles.captainRosterFlowCard}
@@ -8268,17 +8230,7 @@ export default function PlayerHubPage({
               {rosterCurrentStep?.detail || "Roster work is clear."}
             </span>
           </div>
-          <button
-            type="button"
-            style={{
-              ...playerHubStyles.captainChecklistPrimaryAction,
-              ...(primaryAction.disabled ? playerHubStyles.adminDisabledButton : {}),
-            }}
-            disabled={primaryAction.disabled}
-            onClick={primaryAction.onClick}
-          >
-            {primaryAction.label}
-          </button>
+          <span style={playerHubStyles.chip}>Use Team control</span>
         </div>
 
         <div style={playerHubStyles.captainRosterFlowStepGrid}>
@@ -9318,16 +9270,21 @@ export default function PlayerHubPage({
               style={playerHubStyles.adminActionButton}
               onClick={() => toggleTeamNeedInterests(need)}
             >
-              {expandedTeamNeedInterestId === need.needId ? "Hide" : "View"}
+              {expandedTeamNeedInterestId === need.needId ? "Hide" : "Open"}
             </button>
             {need.status === "OPEN" ? (
-              <button
-                type="button"
-                style={playerHubStyles.adminActionButton}
-                onClick={() => handleCloseTeamNeed(need)}
-              >
-                Close
-              </button>
+              <details style={playerHubStyles.captainActionMore}>
+                <summary style={playerHubStyles.captainChecklistSummary}>
+                  More
+                </summary>
+                <button
+                  type="button"
+                  style={playerHubStyles.adminActionButton}
+                  onClick={() => handleCloseTeamNeed(need)}
+                >
+                  Close
+                </button>
+              </details>
             ) : null}
           </div>
         </article>
@@ -10725,21 +10682,11 @@ export default function PlayerHubPage({
     ...(canManageTeamProfile
       ? [["Submitted rosters", passportStats.rosterSubmittedCount]]
       : []),
-    ["Ad interests", passportStats.playerAdsInterestsCount],
   ].filter(([label, value]) => {
-    if (label === "Ad interests") return value > 0 || myTeamNeedInterests.length > 0;
     if (label === "Locked rosters") return value > 0 || passportStats.rosterLockedCount > 0;
     if (label === "Needs changes") return value > 0;
     return true;
   });
-  const passportTeamPeople = teamMembers.filter((member) => {
-    if (!member) return false;
-    const status = passportText(member?.memberStatus, "ACTIVE").toUpperCase();
-    return status !== "REMOVED" && status !== "ARCHIVED";
-  });
-  const showPassportTeamPeople = Boolean(
-    primaryConfirmedTeam || canManageTeamProfile || passportTeamPeople.length
-  );
   const dedupedTournamentPlans = uniqueEventItems(tournamentPlans);
   const homeQuickStats = [
     ["Teams", passportStats.teamMembershipCount],
@@ -10747,6 +10694,9 @@ export default function PlayerHubPage({
     ["Going", passportStats.goingResponsesCount],
     ["Pending", passportStats.pendingResponsesCount],
   ];
+  const homeQuickStatsHaveValue = homeQuickStats.some(
+    ([, value]) => Number(value) > 0
+  );
   const pendingAvailabilityBundle = playerDashboardEvents.find((bundle) => {
     const status = normalizeTournamentAvailabilityStatus(
       bundle?.availability?.responseStatus ||
@@ -10860,6 +10810,10 @@ export default function PlayerHubPage({
               target: "events",
               status: "Clear",
             };
+  const showHomeNextActionCard = !(
+    profileEditorOpen && homeNextAction.target === "profile"
+  );
+  const showHomeQuickStats = homeProfileComplete || homeQuickStatsHaveValue;
   const managedTeamName =
     teamProfile?.clubTeamName ||
     homeTeamCard?.clubTeamName ||
@@ -11440,6 +11394,26 @@ export default function PlayerHubPage({
 
   function renderTeamRosterVisibilityBoard() {
     if (!showTeamRosterVisibilityBoard) return null;
+
+    if (!teamRosterVisibilityItems.length) {
+      return (
+        <details
+          style={playerHubStyles.teamRosterVisibilityPanel}
+          data-testid="team-roster-visibility"
+        >
+          <summary style={playerHubStyles.captainChecklistSummary}>
+            Tournament rosters
+            <span style={playerHubStyles.chip}>0</span>
+          </summary>
+          <div style={playerHubStyles.teamRosterEmpty}>
+            <strong>No approved rosters visible yet.</strong>
+            <span>
+              Roster names appear here after teams are submitted and approved.
+            </span>
+          </div>
+        </details>
+      );
+    }
 
     return (
       <section
@@ -12115,16 +12089,18 @@ export default function PlayerHubPage({
             </div>
           </form>
 
-          <section style={playerHubStyles.homeQuickStatsGrid} aria-label="Quick stats">
-            {homeQuickStats.map(([label, value]) => (
-              <article key={label} style={playerHubStyles.homeQuickStatCard}>
-                <strong style={playerHubStyles.homeQuickStatValue}>
-                  {value}
-                </strong>
-                <span style={playerHubStyles.homeQuickStatLabel}>{label}</span>
-              </article>
-            ))}
-          </section>
+          {showHomeQuickStats ? (
+            <section style={playerHubStyles.homeQuickStatsGrid} aria-label="Quick stats">
+              {homeQuickStats.map(([label, value]) => (
+                <article key={label} style={playerHubStyles.homeQuickStatCard}>
+                  <strong style={playerHubStyles.homeQuickStatValue}>
+                    {value}
+                  </strong>
+                  <span style={playerHubStyles.homeQuickStatLabel}>{label}</span>
+                </article>
+              ))}
+            </section>
+          ) : null}
 
           <details style={playerHubStyles.accountDetails}>
             <summary style={playerHubStyles.accountSummary}>
@@ -12297,6 +12273,7 @@ export default function PlayerHubPage({
         </section>
 
         <section style={playerHubStyles.homeActionStack}>
+          {showHomeNextActionCard ? (
           <article style={playerHubStyles.homeNextActionCard}>
             <div style={playerHubStyles.homeCardHeader}>
               <div style={playerHubStyles.profileMeta}>
@@ -12330,6 +12307,7 @@ export default function PlayerHubPage({
               {homeNextAction.button}
             </button>
           </article>
+          ) : null}
 
           {canManageTeamProfile ? (
             <article style={playerHubStyles.homePreviewCard}>
@@ -13665,87 +13643,6 @@ export default function PlayerHubPage({
                 )}
               </article>
 
-              {showPassportTeamPeople ? (
-                <article style={playerHubStyles.passportPanel}>
-                  <div style={playerHubStyles.homeCardHeader}>
-                    <div style={playerHubStyles.profileMeta}>
-                      <div style={playerHubStyles.sectionTitle}>Team people</div>
-                      <div style={playerHubStyles.cardText}>
-                        {profileTeamLabel || "Connected team"}
-                      </div>
-                    </div>
-                    <span style={playerHubStyles.chip}>
-                      {passportTeamPeople.length || "Team"}
-                    </span>
-                  </div>
-                  {passportTeamPeople.length ? (
-                    <div style={playerHubStyles.teamCompactList}>
-                      {passportTeamPeople.map((member) => {
-                        const updating =
-                          teamMemberUpdatingId === member.teamMemberId;
-                        const memberStatus = passportText(
-                          member.memberStatus,
-                          "ACTIVE"
-                        ).toUpperCase();
-                        const memberStatusLabel =
-                          memberStatus === "ACTIVE"
-                            ? "Confirmed"
-                            : memberStatus || "Confirmed";
-
-                        return (
-                          <div
-                            key={member.teamMemberId || member.playerUsername}
-                            style={playerHubStyles.teamCompactRow}
-                          >
-                            <div style={playerHubStyles.compactRowMain}>
-                              <strong style={playerHubStyles.compactRowTitle}>
-                                {member.playerDisplayName ||
-                                  member.playerUsername ||
-                                  "Player"}
-                              </strong>
-                              <span style={playerHubStyles.compactRowMeta}>
-                                {member.playerCountry || "No country"} /{" "}
-                                {member.playerClubTeamName ||
-                                  profileTeamLabel ||
-                                  "No fixed club/team"}
-                              </span>
-                            </div>
-                            <div style={playerHubStyles.teamControlActionsRow}>
-                              <span style={playerHubStyles.chip}>
-                                {memberStatusLabel}
-                              </span>
-                              {canManageTeamProfile &&
-                              removeTeamMember &&
-                              member.teamMemberId ? (
-                                <button
-                                  type="button"
-                                  style={{
-                                    ...playerHubStyles.adminActionButton,
-                                    ...playerHubStyles.adminDangerButton,
-                                    ...(updating
-                                      ? playerHubStyles.adminDisabledButton
-                                      : {}),
-                                  }}
-                                  disabled={updating}
-                                  onClick={() => handleRemoveTeamMember(member)}
-                                >
-                                  {updating ? "Removing..." : "Remove"}
-                                </button>
-                              ) : null}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div style={playerHubStyles.passportEmpty}>
-                      {canManageTeamProfile
-                        ? "No confirmed teammates yet."
-                        : "Teammates appear here when member data is available for your team."}
-                    </div>
-                  )}
-                </article>
-              ) : null}
             </div>
           </div>
         </section>
@@ -13758,7 +13655,10 @@ export default function PlayerHubPage({
         <div style={playerHubStyles.profileHeader}>
           <div style={playerHubStyles.profileMeta}>
             <div style={playerHubStyles.sectionTitle}>
-              Player ads
+              Team opportunities
+            </div>
+            <div style={playerHubStyles.cardText}>
+              Player ad responses and open team needs.
             </div>
           </div>
           <span style={playerHubStyles.chip}>
