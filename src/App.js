@@ -365,7 +365,8 @@ function getUserAccessStorageUsername(username) {
 
 function normalizeUserAccess(user = {}) {
   const access = user.access || {};
-  const roleAdmin = String(user.role || "").toLowerCase() === "admin";
+  const role = String(user.role || "").toLowerCase();
+  const roleAdmin = role === "admin";
   const admin =
     roleAdmin ||
     readAccessBoolean(
@@ -376,6 +377,12 @@ function normalizeUserAccess(user = {}) {
     access.teamBuilder !== undefined || user.canUseTeamBuilder !== undefined;
   const hasTournamentsValue =
     access.tournaments !== undefined || user.canUseTournaments !== undefined;
+  const hasPlayerHubValue =
+    access.playerHub !== undefined ||
+    access.player !== undefined ||
+    user.canUsePlayerHub !== undefined ||
+    user.canUsePlayer !== undefined;
+  const playerLikeRole = ["player", "captain", "team_captain"].includes(role);
 
   return {
     teamBuilder: admin
@@ -389,6 +396,21 @@ function normalizeUserAccess(user = {}) {
       : readAccessBoolean(
           access.tournaments ?? user.canUseTournaments,
           hasTournamentsValue ? false : false
+        ),
+    playerHub: admin
+      ? readAccessBoolean(
+          access.playerHub ??
+            access.player ??
+            user.canUsePlayerHub ??
+            user.canUsePlayer,
+          playerLikeRole
+        )
+      : readAccessBoolean(
+          access.playerHub ??
+            access.player ??
+            user.canUsePlayerHub ??
+            user.canUsePlayer,
+          hasPlayerHubValue ? false : true
         ),
     admin,
   };
@@ -406,6 +428,10 @@ function canUseTournaments(user) {
   return normalizeUserAccess(user).tournaments;
 }
 
+function canUsePlayerHub(user) {
+  return normalizeUserAccess(user).playerHub;
+}
+
 function normalizeUserWithAccess(user = {}) {
   const access = normalizeUserAccess(user);
 
@@ -414,6 +440,7 @@ function normalizeUserWithAccess(user = {}) {
     access,
     canUseTeamBuilder: access.teamBuilder,
     canUseTournaments: access.tournaments,
+    canUsePlayerHub: access.playerHub,
     isAdmin: access.admin,
   };
 }
@@ -424,6 +451,7 @@ function getFrontendAccessKey(user = {}) {
     `role:${String(safeUser.role || "guest").toLowerCase()}`,
     `tb:${safeUser.canUseTeamBuilder ? 1 : 0}`,
     `tour:${safeUser.canUseTournaments ? 1 : 0}`,
+    `ph:${safeUser.canUsePlayerHub ? 1 : 0}`,
     `admin:${safeUser.isAdmin ? 1 : 0}`,
   ].join("|");
 }
@@ -663,10 +691,12 @@ function getDefaultAuth() {
     access: {
       teamBuilder: false,
       tournaments: false,
+      playerHub: false,
       admin: false,
     },
     canUseTeamBuilder: false,
     canUseTournaments: false,
+    canUsePlayerHub: false,
   };
 }
 
@@ -1054,79 +1084,6 @@ function getTournamentSeries(tournament) {
 
 const DEFAULT_TOURNAMENT_SERIES_ID = "series-default";
 const SERIES_PUBLIC_STATUSES = ["hidden", "live", "completed"];
-const TOURNAMENT_FORMAT_PRESETS = [
-  {
-    id: "4-side-group-knockout",
-    title: "4-side group + knockout",
-    seriesLabel: "4-side",
-    playersOnCourt: 4,
-    rosterText: "4 on court, reserves optional",
-    groupStage: "Round robin",
-    advancement: "Winner + runner-up",
-    knockout: "Semi-final + final",
-    thirdPlace: "Optional 3rd place",
-    series: [
-      {
-        id: "series-4-side",
-        name: "4-side",
-        playersPerTeam: 4,
-      },
-    ],
-  },
-  {
-    id: "5-side-group-knockout",
-    title: "5-side group + knockout",
-    seriesLabel: "5-side",
-    playersOnCourt: 5,
-    rosterText: "5 on court, reserves optional",
-    groupStage: "Round robin",
-    advancement: "Winner + runner-up",
-    knockout: "Semi-final + final",
-    thirdPlace: "Optional 3rd place",
-    series: [
-      {
-        id: "series-5-side",
-        name: "5-side",
-        playersPerTeam: 5,
-      },
-    ],
-  },
-  {
-    id: "combined-4-5",
-    title: "4-side + 5-side combined tournament",
-    seriesLabel: "4-side + 5-side",
-    playersOnCourt: "4 / 5",
-    rosterText: "Separate classes inside one tournament",
-    groupStage: "Round robin per class",
-    advancement: "Winner + runner-up",
-    knockout: "Semi-final + final",
-    thirdPlace: "Optional 3rd place",
-    series: [
-      {
-        id: "series-4-side",
-        name: "4-side",
-        playersPerTeam: 4,
-      },
-      {
-        id: "series-5-side",
-        name: "5-side",
-        playersPerTeam: 5,
-      },
-    ],
-  },
-  {
-    id: "custom",
-    title: "Custom",
-    seriesLabel: "Manual setup",
-    playersOnCourt: "Custom",
-    rosterText: "Keep manual tournament settings",
-    groupStage: "Organizer decides",
-    advancement: "Organizer decides",
-    knockout: "Manual",
-    thirdPlace: "Optional",
-    series: [],
-  },
-];
 
 function slugifySeriesId(value, fallback = "series") {
   const slug = String(value || "")
@@ -2630,16 +2587,6 @@ export default function App() {
     useState("all");
   const [activeTournamentSetupSeriesId, setActiveTournamentSetupSeriesId] =
     useState("");
-  const [activeMatchControlFilter, setActiveMatchControlFilter] =
-    useState("all");
-  const [activeMatchControlCourt, setActiveMatchControlCourt] =
-    useState("all");
-  const [activeTeamInterestFilter, setActiveTeamInterestFilter] =
-    useState("all");
-  const [activeRegistrationBoardFilter, setActiveRegistrationBoardFilter] =
-    useState("all");
-  const [selectedRegistrationBoardId, setSelectedRegistrationBoardId] =
-    useState("");
   const [matchFinishWarnings, setMatchFinishWarnings] = useState({});
   const tournamentAutosaveTimerRef = useRef(null);
   const manualGroupEditingRef = useRef(false);
@@ -2696,6 +2643,7 @@ export default function App() {
         access: parsed.access || {},
         canUseTeamBuilder: parsed.canUseTeamBuilder,
         canUseTournaments: parsed.canUseTournaments,
+        canUsePlayerHub: parsed.canUsePlayerHub,
         isAdmin: parsed.isAdmin,
         admin: parsed.admin,
       });
@@ -2708,11 +2656,21 @@ export default function App() {
     [auth]
   );
   const currentUserIsAdmin = isAdminUser(currentUser);
-  const hasTeamBuilderAccess = canUseTeamBuilder(currentUser);
+  const rawTeamBuilderAccess = canUseTeamBuilder(currentUser);
   const hasTournamentAccess = canUseTournaments(currentUser);
-  const hasPlayerHubAccess = Boolean(auth.loggedIn);
+  const hasPlayerHubAccess = Boolean(
+    auth.loggedIn && canUsePlayerHub(currentUser)
+  );
+  const hasAdminConsoleAccess = Boolean(auth.loggedIn && currentUserIsAdmin);
+  const isAdminOnlyUser = Boolean(
+    auth.loggedIn && currentUserIsAdmin && !hasPlayerHubAccess
+  );
+  const hasTeamBuilderAccess = Boolean(rawTeamBuilderAccess && !isAdminOnlyUser);
   const hasAnyModuleAccess =
-    hasTeamBuilderAccess || hasTournamentAccess || hasPlayerHubAccess;
+    hasTeamBuilderAccess ||
+    hasTournamentAccess ||
+    hasPlayerHubAccess ||
+    hasAdminConsoleAccess;
   const playerHubTournamentOptions = useMemo(() => {
     const optionsById = new Map();
     const addTournamentOption = (tournament) => {
@@ -5136,192 +5094,6 @@ export default function App() {
     );
   }
 
-  function hasTournamentPresetSetupData(tournament) {
-    if (!tournament) return false;
-    const hasKnockoutData = (knockout = {}) =>
-      Boolean(
-        (knockout.quarterFinals || []).length ||
-          (knockout.semiFinals || []).length ||
-          knockout.final ||
-          knockout.thirdPlace
-      );
-    const hasSeriesSetupData = (Array.isArray(tournament.series)
-      ? tournament.series
-      : []
-    ).some(
-      (series) =>
-        (Array.isArray(series.groups) && series.groups.length > 0) ||
-        (Array.isArray(series.matches) && series.matches.length > 0) ||
-        (Array.isArray(series.teams) && series.teams.length > 0) ||
-        hasKnockoutData(series.knockout || {})
-    );
-
-    return Boolean(
-      (Array.isArray(tournament.teams) && tournament.teams.length > 0) ||
-        (Array.isArray(tournament.groups) && tournament.groups.length > 0) ||
-        (Array.isArray(tournament.matches) && tournament.matches.length > 0) ||
-        hasKnockoutData(tournament.knockout || {}) ||
-        hasSeriesSetupData
-    );
-  }
-
-  function applyTournamentFormatPreset(presetId) {
-    if (!activeTournament) return;
-
-    const preset =
-      TOURNAMENT_FORMAT_PRESETS.find((item) => item.id === presetId) ||
-      TOURNAMENT_FORMAT_PRESETS.find((item) => item.id === "custom");
-    if (!preset) return;
-
-    if (preset.id === "custom") {
-      updateActiveTournament({ formatPreset: "custom" });
-      setTournamentActionMessage("Custom format selected.");
-      return;
-    }
-
-    const hasSetupData = hasTournamentPresetSetupData(activeTournament);
-    if (hasSetupData) {
-      const message =
-        "This tournament already has setup data. Applying a preset may update classes/groups.";
-      const confirmed =
-        typeof window !== "undefined" ? window.confirm(message) : false;
-      if (!confirmed) {
-        setTournamentActionMessage("Preset not applied.");
-        return;
-      }
-    }
-
-    const firstPresetSeries = preset.series[0] || {};
-    const firstPresetSeriesId = firstPresetSeries.id || "";
-
-    setActiveTournamentSetupSeriesId(firstPresetSeriesId);
-    setActiveTournamentSeriesFilter(firstPresetSeriesId || "all");
-
-    setTournaments((prev) =>
-      prev.map((tournament) => {
-        if (tournament.id !== activeTournament.id) return tournament;
-
-        const safeTournament = applyTournamentDefaults(tournament);
-        const existingClasses = getTournamentSeriesClasses(
-          safeTournament,
-          language
-        );
-        const nextSeries = preset.series.map((seriesPreset, index) => {
-          const existingSeries =
-            existingClasses.find(
-              (series) => String(series.id || "") === String(seriesPreset.id)
-            ) ||
-            existingClasses.find(
-              (series) =>
-                Number(series.playersPerTeam || series.teamSize || 0) ===
-                Number(seriesPreset.playersPerTeam || 0)
-            ) ||
-            null;
-          const groupCount = Math.max(
-            1,
-            Number(existingSeries?.groupCount || safeTournament.groupCount || 2)
-          );
-          const totalTeams = Math.max(
-            2,
-            Number(existingSeries?.totalTeams || safeTournament.totalTeams || 10)
-          );
-          const teamsPerGroup = Math.max(
-            1,
-            Number(
-              existingSeries?.teamsPerGroup ||
-                safeTournament.teamsPerGroup ||
-                Math.ceil(totalTeams / groupCount)
-            )
-          );
-          const normalizedSeries = normalizeTournamentSeriesItem(
-            {
-              ...(existingSeries || {}),
-              id: seriesPreset.id,
-              name: seriesPreset.name,
-              playersPerTeam: seriesPreset.playersPerTeam,
-              teamSize: seriesPreset.playersPerTeam,
-              format: "group-stage",
-              totalTeams,
-              maxTeams: existingSeries?.maxTeams || totalTeams,
-              groupCount,
-              teamsPerGroup,
-              qualifiersPerGroup: 2,
-              bracketSize: Math.max(2, groupCount * 2),
-              groupMatchMinutes:
-                existingSeries?.groupMatchMinutes ||
-                safeTournament.groupMatchMinutes ||
-                12,
-              playoffMatchMinutes:
-                existingSeries?.playoffMatchMinutes ||
-                safeTournament.playoffMatchMinutes ||
-                15,
-              groups: Array.isArray(existingSeries?.groups)
-                ? existingSeries.groups
-                : [],
-              matches: Array.isArray(existingSeries?.matches)
-                ? existingSeries.matches
-                : [],
-              knockout: existingSeries?.knockout || {},
-              publicStatus: "live",
-              scheduleMode: index === 0 ? "afterPrevious" : "afterPrevious",
-              manualOrder: index,
-              startTime: existingSeries?.startTime || safeTournament.startTime || "",
-            },
-            index,
-            safeTournament,
-            language
-          );
-          const seriesGroups = normalizedSeries.groups.length
-            ? normalizedSeries.groups
-            : buildManualGroups(
-                {
-                  ...safeTournament,
-                  totalTeams,
-                  groupCount,
-                  teamsPerGroup,
-                },
-                normalizedSeries
-              );
-
-          return {
-            ...normalizedSeries,
-            groups: seriesGroups,
-            bracketSize: Math.max(2, groupCount * 2),
-          };
-        });
-        const primarySeries = nextSeries[0] || {};
-
-        return {
-          ...safeTournament,
-          formatPreset: preset.id,
-          format: "group-stage",
-          seriesScheduleMode:
-            preset.id === "combined-4-5"
-              ? "fourFirst"
-              : safeTournament.seriesScheduleMode || "fourFirst",
-          series: nextSeries,
-          className: primarySeries.name || safeTournament.className || "",
-          seriesName: primarySeries.name || safeTournament.seriesName || "",
-          playersPerTeam:
-            primarySeries.playersPerTeam || safeTournament.playersPerTeam || "",
-          teamSize: primarySeries.teamSize || safeTournament.teamSize || "",
-          totalTeams: primarySeries.totalTeams || safeTournament.totalTeams || 10,
-          maxTeams: primarySeries.maxTeams || safeTournament.maxTeams || "",
-          groupCount: primarySeries.groupCount || safeTournament.groupCount || 2,
-          teamsPerGroup:
-            primarySeries.teamsPerGroup || safeTournament.teamsPerGroup || 5,
-          qualifiersPerGroup: 2,
-          bracketSize: Math.max(
-            2,
-            Number(primarySeries.groupCount || safeTournament.groupCount || 2) * 2
-          ),
-        };
-      })
-    );
-
-    setTournamentActionMessage(`${preset.title} applied.`);
-  }
-
   const buildManualGroups = useCallback((tournament, series = null) => {
     const safeGroupCount = Math.max(
       1,
@@ -5441,6 +5213,74 @@ export default function App() {
       })
     );
     setTournamentActionMessage(tournamentText.buildUpdateSlots);
+  }
+
+  function updateManualGroupSlot(groupIndex, slotIndex, value) {
+    if (!activeTournament) return;
+
+    markManualGroupEditing();
+
+    setTournaments((prev) =>
+      prev.map((tournament) =>
+        tournament.id !== activeTournament.id
+          ? tournament
+          : (() => {
+              const selectedSeries = getTournamentSeriesById(
+                tournament,
+                activeTournamentSetupSeriesId,
+                language
+              );
+              const sourceGroups =
+                hasExplicitTournamentSeries(tournament) && selectedSeries
+                  ? selectedSeries.groups
+                  : tournament.groups;
+              const existingGroups = Array.isArray(sourceGroups)
+                ? sourceGroups
+                : [];
+              if (!existingGroups[groupIndex]) return tournament;
+
+              const groups = existingGroups.map((group, currentGroupIndex) => {
+                if (currentGroupIndex !== groupIndex) return group;
+
+                const existingTeams = Array.isArray(group.teams)
+                  ? group.teams
+                  : [];
+                if (!existingTeams[slotIndex]) return group;
+
+                return {
+                  ...group,
+                  teams: existingTeams.map((team, currentSlotIndex) =>
+                    currentSlotIndex === slotIndex
+                      ? {
+                          ...team,
+                          name: value,
+                        }
+                      : team
+                  ),
+                };
+              });
+
+              if (hasExplicitTournamentSeries(tournament) && selectedSeries) {
+                return {
+                  ...tournament,
+                  series: (tournament.series || []).map((series) =>
+                    String(series.id) !== String(selectedSeries.id)
+                      ? series
+                      : {
+                          ...series,
+                          groups,
+                        }
+                  ),
+                };
+              }
+
+              return {
+                ...tournament,
+                groups,
+              };
+            })()
+      )
+    );
   }
 
   function addTournamentSeries(preset = {}) {
@@ -8644,9 +8484,6 @@ export default function App() {
     setPromotionVisibilityError("");
     setActiveTournamentSeriesFilter("all");
     setActiveTournamentSetupSeriesId("");
-    setActiveTeamInterestFilter("all");
-    setActiveRegistrationBoardFilter("all");
-    setSelectedRegistrationBoardId("");
   }, [activeTournamentId]);
 
   useEffect(() => {
@@ -8966,6 +8803,7 @@ export default function App() {
         access: profile?.access || {},
         canUseTeamBuilder: profile?.canUseTeamBuilder,
         canUseTournaments: profile?.canUseTournaments,
+        canUsePlayerHub: profile?.canUsePlayerHub,
         isAdmin: profile?.isAdmin,
         admin: profile?.admin,
       });
@@ -9005,7 +8843,8 @@ export default function App() {
       setCreatedTrainerInfo(null);
       setPlayerActionMessage("");
 
-      if (canUseTeamBuilder(nextAuth)) {
+      const nextAuthIsAdminOnly = isAdminUser(nextAuth) && !canUsePlayerHub(nextAuth);
+      if (canUseTeamBuilder(nextAuth) && !nextAuthIsAdminOnly) {
         await loadPlayers({
           username,
           password,
@@ -9016,6 +8855,8 @@ export default function App() {
         status: "ok",
         canUseTeamBuilder: canUseTeamBuilder(nextAuth),
         canUseTournaments: canUseTournaments(nextAuth),
+        canUsePlayerHub: canUsePlayerHub(nextAuth),
+        adminOnly: nextAuthIsAdminOnly,
       });
     } catch (error) {
       console.error("Could not log in:", error);
@@ -9791,6 +9632,8 @@ export default function App() {
       setTeams([]);
       if (hasTournamentAccess) {
         setActiveTab("tournament");
+      } else if (hasAdminConsoleAccess) {
+        setActiveTab("admin-console");
       } else if (auth.loggedIn) {
         setActiveTab("player-hub");
       } else {
@@ -9823,7 +9666,13 @@ const savedRound = readStorageWithTtl(
 
     setTeams([]);
     setActiveTab("players");
-  }, [auth, hasTeamBuilderAccess, hasTournamentAccess, language]);
+  }, [
+    auth,
+    hasAdminConsoleAccess,
+    hasTeamBuilderAccess,
+    hasTournamentAccess,
+    language,
+  ]);
 
   useEffect(() => {
     function handleResize() {
@@ -9838,27 +9687,48 @@ const savedRound = readStorageWithTtl(
     if (!auth.loggedIn || !hasAnyModuleAccess) return;
 
     const isTeamBuilderTab = activeTab === "players" || activeTab === "teams";
-    if (activeTab === "tournament" && !hasTournamentAccess) {
-      setActiveTab(
-        hasTeamBuilderAccess
-          ? teams.length
+    const fallbackTab = hasAdminConsoleAccess
+      ? "admin-console"
+      : hasPlayerHubAccess
+        ? "player-hub"
+        : hasTournamentAccess
+          ? "tournament"
+          : teams.length
             ? "teams"
-            : "players"
-          : "player-hub"
-      );
+            : "players";
+
+    if (isAdminOnlyUser && activeTab !== "admin-console") {
+      setActiveTab("admin-console");
+      return;
+    }
+
+    if (activeTab === "admin-console" && !hasAdminConsoleAccess) {
+      setActiveTab(fallbackTab);
+      return;
+    }
+
+    if (activeTab === "player-hub" && !hasPlayerHubAccess) {
+      setActiveTab(fallbackTab);
+      return;
+    }
+
+    if (activeTab === "tournament" && !hasTournamentAccess) {
+      setActiveTab(fallbackTab);
       return;
     }
 
     if (isTeamBuilderTab && !hasTeamBuilderAccess) {
-      setActiveTab(hasTournamentAccess ? "tournament" : "player-hub");
+      setActiveTab(fallbackTab);
     }
   }, [
     activeTab,
     auth.loggedIn,
+    hasAdminConsoleAccess,
     hasAnyModuleAccess,
     hasPlayerHubAccess,
     hasTeamBuilderAccess,
     hasTournamentAccess,
+    isAdminOnlyUser,
     teams.length,
   ]);
 
@@ -15067,10 +14937,6 @@ const savedRound = readStorageWithTtl(
       activeTournament,
       visibleSeriesClasses
     );
-    const allSeriesSections = getTournamentSeriesRenderSections(
-      activeTournament,
-      tournamentSeriesClasses
-    );
     const selectedSetupStandings =
       selectedSetupTournament?.format === "group-stage"
         ? computeTournamentStandings(selectedSetupTournament)
@@ -15136,6 +15002,9 @@ const savedRound = readStorageWithTtl(
         : tournamentMatches;
     const visibleCompletedMatchesCount =
       visibleTournamentMatches.filter(isMatchCompleted).length;
+    const visibleStartedMatchesCount = visibleTournamentMatches.filter(
+      (match) => getMatchDisplayStatus(match).status === "in_progress"
+    ).length;
     const visibleScheduledMatchesCount = visibleTournamentMatches.filter(
       (match) => getMatchDisplayStatus(match).status === "scheduled"
     ).length;
@@ -15147,34 +15016,6 @@ const savedRound = readStorageWithTtl(
       }[activeTournament?.format] ||
       activeTournament?.format ||
       "-";
-    const storedFormatPresetId = String(
-      activeTournament?.formatPreset || ""
-    ).trim();
-    const derivedFormatPresetId = (() => {
-      if (
-        storedFormatPresetId &&
-        TOURNAMENT_FORMAT_PRESETS.some((preset) => preset.id === storedFormatPresetId)
-      ) {
-        return storedFormatPresetId;
-      }
-
-      const classSizes = tournamentSeriesClasses
-        .map((series) => Number(series.playersPerTeam || series.teamSize || 0))
-        .filter(Boolean)
-        .sort((a, b) => a - b);
-      if (classSizes.includes(4) && classSizes.includes(5)) {
-        return "combined-4-5";
-      }
-      if (classSizes.length === 1 && classSizes[0] === 4) {
-        return "4-side-group-knockout";
-      }
-      if (classSizes.length === 1 && classSizes[0] === 5) {
-        return "5-side-group-knockout";
-      }
-      return "custom";
-    })();
-    const hasFormatPresetSetupData =
-      hasTournamentPresetSetupData(activeTournament);
     const tournamentSyncLabel =
       tournamentSyncStatus === "error"
         ? tournamentSyncMessage || tournamentText.tournamentSyncError
@@ -15334,394 +15175,6 @@ const savedRound = readStorageWithTtl(
         ? `Fortsett til ${getSeriesDisplayName(nextSetupSeries)}`
         : `Continue to ${getSeriesDisplayName(nextSetupSeries)}`
       : "";
-    const getDrawTeamName = (team) =>
-      String(team?.name || team?.teamName || team?.TeamName || "").trim();
-    const getDrawTeamMeta = (team) =>
-      [
-        team?.club,
-        team?.teamClub,
-        team?.country,
-        team?.Country,
-      ]
-        .map((item) => String(item || "").trim())
-        .filter(Boolean)
-        .filter((item, index, items) => items.indexOf(item) === index)
-        .join(" / ");
-    const getDrawTeamId = (team) =>
-      String(
-        team?.sourceTeamId ||
-          team?.teamId ||
-          team?.TeamId ||
-          team?.id ||
-          ""
-      ).trim();
-    const getDrawTeamNameKey = (team) =>
-      getDrawTeamName(team).toLowerCase();
-    const getDrawTeamKey = (team) => {
-      const teamId = getDrawTeamId(team);
-      if (teamId) return `id:${teamId.toLowerCase()}`;
-      return `name:${getDrawTeamNameKey(team)}`;
-    };
-    const isDrawTeamFilled = (team) => Boolean(getDrawTeamName(team));
-    const getDrawTeamStatus = (team) => {
-      const rawStatus = String(
-        team?.drawStatus ||
-          team?.readinessStatus ||
-          team?.rosterStatus ||
-          team?.interestStatus ||
-          team?.status ||
-          ""
-      )
-        .trim()
-        .toLowerCase();
-
-      if (team?.locked || rawStatus.includes("locked")) return "Locked";
-      if (
-        team?.confirmed ||
-        team?.approved ||
-        rawStatus.includes("confirmed") ||
-        rawStatus.includes("approved")
-      ) {
-        return "Confirmed";
-      }
-      if (
-        team?.submitted ||
-        team?.rosterSubmitted ||
-        rawStatus.includes("submitted")
-      ) {
-        return "Submitted";
-      }
-      if (
-        team?.interested ||
-        rawStatus.includes("interested") ||
-        rawStatus.includes("interest")
-      ) {
-        return "Interested";
-      }
-
-      return "";
-    };
-    const getDrawSlotCode = (group, slotIndex) =>
-      `${group?.code || getTournamentGroupCode(0)}${slotIndex + 1}`;
-    const getEmptyDrawSlot = (group, slotIndex, slot = {}) => ({
-      id:
-        slot.id ||
-        `${group?.id || group?.code || "group"}-slot-${getDrawSlotCode(
-          group,
-          slotIndex
-        )}`,
-      slot: slot.slot || getDrawSlotCode(group, slotIndex),
-      seriesId: group?.seriesId || slot.seriesId || "",
-      seriesName: group?.seriesName || slot.seriesName || "",
-      name: "",
-      club: "",
-    });
-    const createDrawSlotTeam = (team, group, slotIndex, slot = {}) => {
-      const teamId = getDrawTeamId(team);
-      return {
-        ...getEmptyDrawSlot(group, slotIndex, slot),
-        id:
-          teamId ||
-          slot.id ||
-          `${group?.id || group?.code || "group"}-slot-${getDrawSlotCode(
-            group,
-            slotIndex
-          )}`,
-        sourceTeamId: teamId,
-        teamId,
-        name: getDrawTeamName(team),
-        club: String(team?.club || team?.teamClub || "").trim(),
-        country: String(team?.country || team?.Country || "").trim(),
-        status: team?.status || "",
-        readinessStatus: team?.readinessStatus || "",
-        rosterStatus: team?.rosterStatus || "",
-        interestStatus: team?.interestStatus || "",
-        submitted: Boolean(team?.submitted),
-        rosterSubmitted: Boolean(team?.rosterSubmitted),
-        confirmed: Boolean(team?.confirmed),
-        approved: Boolean(team?.approved),
-        interested: Boolean(team?.interested),
-        locked: Boolean(team?.locked),
-      };
-    };
-    const drawTeamMatches = (left, right) => {
-      const leftKey = getDrawTeamKey(left);
-      const rightKey = getDrawTeamKey(right);
-      const leftName = getDrawTeamNameKey(left);
-      const rightName = getDrawTeamNameKey(right);
-
-      return Boolean(
-        (leftKey && rightKey && leftKey === rightKey) ||
-          (leftName && rightName && leftName === rightName)
-      );
-    };
-    const clearDrawTeamSlot = (group, team, slotIndex) =>
-      getEmptyDrawSlot(group, slotIndex, team);
-    const removeTeamFromDrawGroups = (groups, targetTeam) =>
-      groups.map((group) => ({
-        ...group,
-        teams: (group.teams || []).map((team, slotIndex) =>
-          drawTeamMatches(team, targetTeam)
-            ? clearDrawTeamSlot(group, team, slotIndex)
-            : team
-        ),
-      }));
-    const getFilledDrawTeams = (groups = manualPreviewGroups) =>
-      groups.flatMap((group) =>
-        (group.teams || [])
-          .filter(isDrawTeamFilled)
-          .map((team, slotIndex) => ({
-            ...team,
-            groupId: group.id,
-            groupCode: group.code || getTournamentGroupCode(0),
-            groupName: group.name,
-            slotIndex,
-          }))
-      );
-    const getUnassignedDrawTeams = (groups = manualPreviewGroups) => {
-      const assigned = getFilledDrawTeams(groups);
-      const assignedKeys = new Set(assigned.map(getDrawTeamKey));
-      const assignedNames = new Set(assigned.map(getDrawTeamNameKey));
-
-      return tournamentTeams.filter((team) => {
-        const teamName = getDrawTeamNameKey(team);
-        return (
-          getDrawTeamName(team) &&
-          !assignedKeys.has(getDrawTeamKey(team)) &&
-          !assignedNames.has(teamName)
-        );
-      });
-    };
-    const getDrawPool = (groups = manualPreviewGroups) => {
-      const pool = [];
-      const seenKeys = new Set();
-      const seenNames = new Set();
-      const addTeam = (team) => {
-        const name = getDrawTeamName(team);
-        if (!name) return;
-        const key = getDrawTeamKey(team);
-        const nameKey = getDrawTeamNameKey(team);
-        if (seenKeys.has(key) || seenNames.has(nameKey)) return;
-        seenKeys.add(key);
-        seenNames.add(nameKey);
-        pool.push(team);
-      };
-
-      tournamentTeams.forEach(addTeam);
-      getFilledDrawTeams(groups).forEach(addTeam);
-      return pool;
-    };
-    const getDrawGroupCount = (group) =>
-      (group.teams || []).filter(isDrawTeamFilled).length;
-    const drawUnassignedTeams = getUnassignedDrawTeams();
-    const drawGroupCounts = manualPreviewGroups.map(getDrawGroupCount);
-    const drawAssignedTeamCount = drawGroupCounts.reduce(
-      (sum, count) => sum + count,
-      0
-    );
-    const drawMinGroupCount = drawGroupCounts.length
-      ? Math.min(...drawGroupCounts)
-      : 0;
-    const drawMaxGroupCount = drawGroupCounts.length
-      ? Math.max(...drawGroupCounts)
-      : 0;
-    const drawHasUnevenGroups =
-      drawGroupCounts.length > 1 && drawMaxGroupCount - drawMinGroupCount > 1;
-    const drawWarnings = [
-      !manualPreviewGroups.length ? "No groups built yet" : "",
-      manualPreviewGroups.some((group) => getDrawGroupCount(group) === 0)
-        ? "No teams assigned"
-        : "",
-      manualPreviewGroups.some((group) => {
-        const count = getDrawGroupCount(group);
-        return count > 0 && count < Math.min(2, configuredTeamsPerGroup);
-      })
-        ? "Group has too few teams"
-        : "",
-      drawHasUnevenGroups ? "Groups are uneven" : "",
-      drawUnassignedTeams.length ? "Unassigned teams remain" : "",
-    ].filter(Boolean);
-    const getCurrentDrawContext = (tournament = activeTournament) => {
-      const series = getTournamentSeriesById(
-        tournament,
-        activeTournamentSetupSeriesId,
-        language
-      );
-      const sourceGroups =
-        hasExplicitTournamentSeries(tournament) && series
-          ? series.groups
-          : tournament?.groups;
-      const groups = Array.isArray(sourceGroups) && sourceGroups.length
-        ? sourceGroups
-        : buildManualGroups(tournament, series);
-
-      return { series, groups };
-    };
-    const applyTournamentDrawGroups = (nextGroups, message) => {
-      if (!activeTournament) return;
-      markManualGroupEditing();
-
-      setTournaments((prev) =>
-        prev.map((tournament) => {
-          if (tournament.id !== activeTournament.id) return tournament;
-
-          const selectedSeries = getTournamentSeriesById(
-            tournament,
-            activeTournamentSetupSeriesId,
-            language
-          );
-
-          if (hasExplicitTournamentSeries(tournament) && selectedSeries) {
-            return {
-              ...tournament,
-              series: (tournament.series || []).map((series) =>
-                String(series.id) !== String(selectedSeries.id)
-                  ? series
-                  : {
-                      ...series,
-                      groups: nextGroups,
-                    }
-              ),
-            };
-          }
-
-          return {
-            ...tournament,
-            groups: nextGroups,
-          };
-        })
-      );
-      setTournamentActionMessage(message);
-    };
-    const placeDrawTeamInGroup = (groups, team, targetGroupId) => {
-      const groupsWithoutTeam = removeTeamFromDrawGroups(groups, team);
-      const targetIndex = groupsWithoutTeam.findIndex(
-        (group) => String(group.id) === String(targetGroupId)
-      );
-      if (targetIndex === -1) return { groups, placed: false };
-
-      const targetGroup = groupsWithoutTeam[targetIndex];
-      const targetTeams = Array.isArray(targetGroup.teams)
-        ? [...targetGroup.teams]
-        : [];
-      let slotIndex = targetTeams.findIndex((slot) => !isDrawTeamFilled(slot));
-      if (slotIndex === -1) {
-        slotIndex = targetTeams.length;
-        targetTeams.push(getEmptyDrawSlot(targetGroup, slotIndex));
-      }
-
-      targetTeams[slotIndex] = createDrawSlotTeam(
-        team,
-        targetGroup,
-        slotIndex,
-        targetTeams[slotIndex]
-      );
-
-      return {
-        placed: true,
-        groups: groupsWithoutTeam.map((group, groupIndex) =>
-          groupIndex === targetIndex
-            ? {
-                ...group,
-                teams: targetTeams,
-              }
-            : group
-        ),
-      };
-    };
-    const assignDrawTeamToGroup = (team, targetGroupId) => {
-      const { groups } = getCurrentDrawContext();
-      const result = placeDrawTeamInGroup(groups, team, targetGroupId);
-      applyTournamentDrawGroups(
-        result.groups,
-        result.placed
-          ? `Assigned ${getDrawTeamName(team)}.`
-          : "Could not assign team."
-      );
-    };
-    const removeDrawTeamFromGroup = (team) => {
-      const { groups } = getCurrentDrawContext();
-      applyTournamentDrawGroups(
-        removeTeamFromDrawGroups(groups, team),
-        `Removed ${getDrawTeamName(team)} from the draw.`
-      );
-    };
-    const findLowestDrawGroupId = (groups) => {
-      if (!groups.length) return "";
-      return [...groups]
-        .sort((a, b) => {
-          const countDelta = getDrawGroupCount(a) - getDrawGroupCount(b);
-          return countDelta || String(a.code || "").localeCompare(b.code || "");
-        })[0]?.id;
-    };
-    const drawNextTournamentTeam = () => {
-      const { groups } = getCurrentDrawContext();
-      const unassigned = getUnassignedDrawTeams(groups);
-      if (!groups.length) {
-        setTournamentActionMessage("Build groups before drawing teams.");
-        return;
-      }
-      if (!unassigned.length) {
-        setTournamentActionMessage("No unassigned teams left.");
-        return;
-      }
-
-      const randomTeam =
-        unassigned[Math.floor(Math.random() * unassigned.length)];
-      const targetGroupId = findLowestDrawGroupId(groups);
-      const result = placeDrawTeamInGroup(groups, randomTeam, targetGroupId);
-      applyTournamentDrawGroups(
-        result.groups,
-        result.placed
-          ? `Drew ${getDrawTeamName(randomTeam)}.`
-          : "Could not draw team."
-      );
-    };
-    const autoBalanceTournamentDraw = () => {
-      const { groups } = getCurrentDrawContext();
-      const pool = getDrawPool(groups);
-      if (!groups.length) {
-        setTournamentActionMessage("Build groups before balancing teams.");
-        return;
-      }
-      if (!pool.length) {
-        setTournamentActionMessage("No teams to balance.");
-        return;
-      }
-
-      const clearedGroups = groups.map((group) => ({
-        ...group,
-        teams: (group.teams || []).map((team, slotIndex) =>
-          clearDrawTeamSlot(group, team, slotIndex)
-        ),
-      }));
-      let balancedGroups = clearedGroups;
-
-      pool.forEach((team) => {
-        const targetGroupId = findLowestDrawGroupId(balancedGroups);
-        const result = placeDrawTeamInGroup(
-          balancedGroups,
-          team,
-          targetGroupId
-        );
-        balancedGroups = result.groups;
-      });
-
-      applyTournamentDrawGroups(balancedGroups, "Groups auto-balanced.");
-    };
-    const clearTournamentDraw = () => {
-      if (!window.confirm("Clear all group assignments for this class?")) return;
-      const { groups } = getCurrentDrawContext();
-      applyTournamentDrawGroups(
-        groups.map((group) => ({
-          ...group,
-          teams: (group.teams || []).map((team, slotIndex) =>
-            clearDrawTeamSlot(group, team, slotIndex)
-          ),
-        })),
-        "Group draw cleared."
-      );
-    };
     const statCards = [
       {
         label: tournamentText.slotsLabel,
@@ -15748,2200 +15201,6 @@ const savedRound = readStorageWithTtl(
         accent: "#ea580c",
       },
     ];
-
-    const tournamentDateLabel = activeTournament
-      ? formatPublicTournamentDate(activeTournament)
-      : "-";
-    const tournamentLocationLabel =
-      [
-        activeTournament?.locationName,
-        activeTournament?.city,
-        activeTournament?.country,
-      ]
-        .map((item) => String(item || "").trim())
-        .filter(Boolean)
-        .join(", ") || "Location not set";
-    const rosterDeadlineLabel = (value) => {
-      const raw = String(value || "").trim();
-      if (!raw) return "";
-      const parsed = new Date(raw);
-      if (!Number.isNaN(parsed.getTime())) {
-        return parsed.toLocaleString(
-          language === "no" ? "nb-NO" : language === "dk" ? "da-DK" : "en-US",
-          {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          }
-        );
-      }
-      return raw.replace("T", " ").slice(0, 16);
-    };
-    const defaultRosterDeadline = rosterDeadlineLabel(activeRosterLock.deadlineIso);
-    const hasAnyRosterDeadline = Boolean(
-      activeRosterLock.deadlineIso ||
-        Object.values(activeRosterLock.appliesToSeries || {}).some(Boolean)
-    );
-    const getSeriesRosterDeadline = (series) =>
-      rosterDeadlineLabel(
-        activeRosterLock.appliesToSeries?.[series.id] ||
-          activeRosterLock.deadlineIso
-      );
-    const getSeriesSection = (series) =>
-      allSeriesSections.find(
-        (section) => String(section.series.id) === String(series.id)
-      ) || null;
-    const getSeriesFilledSlots = (section) =>
-      (section?.groups || []).reduce(
-        (sum, group) =>
-          sum +
-          (group.teams || []).filter((team) => String(team.name || "").trim())
-            .length,
-        0
-      );
-    const getSeriesSlotCount = (section) =>
-      (section?.groups || []).reduce(
-        (sum, group) => sum + (group.teams || []).length,
-        0
-      );
-    const getSeriesSetupStatus = (series) => {
-      const section = getSeriesSection(series);
-      const filled = getSeriesFilledSlots(section);
-      const slots = getSeriesSlotCount(section) || Number(series.totalTeams || 0);
-      if (!filled) return "Missing";
-      if (slots && filled >= slots) return "Done";
-      return "Next";
-    };
-    const setupSteps = [
-      {
-        label: "Basic info",
-        status: !String(activeTournament?.name || "").trim()
-          ? "Missing"
-          : activeTournament?.startDate || activeTournament?.locationName
-            ? "Done"
-            : "Next",
-        detail:
-          activeTournament?.startDate || activeTournament?.locationName
-            ? tournamentDateLabel
-            : "Add date or venue",
-      },
-      {
-        label: "Series",
-        status: tournamentSeriesClasses.length ? "Done" : "Missing",
-        detail: `${tournamentSeriesClasses.length || 0} active`,
-      },
-      {
-        label: "Teams",
-        status:
-          overviewFilledSlotCount >= overviewConfiguredTotalTeams
-            ? "Done"
-            : overviewFilledSlotCount > 0
-              ? "Next"
-              : "Missing",
-        detail: `${overviewFilledSlotCount}/${overviewConfiguredTotalTeams}`,
-      },
-      {
-        label: "Groups",
-        status: visibleGroups.length ? "Done" : "Missing",
-        detail: `${visibleGroups.length} groups`,
-      },
-      {
-        label: "Schedule",
-        status: tournamentMatches.length
-          ? "Done"
-          : visibleGroups.length
-            ? "Next"
-            : "Missing",
-        detail: `${tournamentMatches.length} matches`,
-      },
-      {
-        label: "Roster lock",
-        status: activeRosterLock.enabled
-          ? hasAnyRosterDeadline
-            ? "Done"
-            : "Missing"
-          : "Optional",
-        detail: activeRosterLock.enabled
-          ? defaultRosterDeadline || "Deadline missing"
-          : "Not enabled",
-      },
-      {
-        label: "Publish",
-        status: isBackendPublished
-          ? "Done"
-          : tournamentMatches.length
-            ? "Next"
-            : "Missing",
-        detail: isBackendPublished ? "Live link active" : "Draft",
-      },
-    ];
-    const groupHealthWarnings = allSeriesSections.flatMap((section) => {
-      const groups = section.groups || [];
-      if (!groups.length) {
-        return [
-          {
-            series: getSeriesDisplayName(section.series),
-            text: "No groups built yet",
-          },
-        ];
-      }
-
-      const filledCounts = groups.map(
-        (group) =>
-          (group.teams || []).filter((team) => String(team.name || "").trim())
-            .length
-      );
-      const warnings = [];
-      if (filledCounts.some((count) => count < 2)) {
-        warnings.push({
-          series: getSeriesDisplayName(section.series),
-          text: "Too few teams in a group",
-        });
-      }
-      if (new Set(filledCounts).size > 1) {
-        warnings.push({
-          series: getSeriesDisplayName(section.series),
-          text: "Uneven groups",
-        });
-      }
-      return warnings;
-    });
-    const getSetupStatusStyle = (status) => ({
-      ...styles.tournamentSetupStatusChipV2,
-      ...(status === "Done" ? styles.tournamentSetupStatusDoneV2 : {}),
-      ...(status === "Next" ? styles.tournamentSetupStatusNextV2 : {}),
-      ...(status === "Missing" ? styles.tournamentSetupStatusMissingV2 : {}),
-      ...(status === "Optional" ? styles.tournamentSetupStatusOptionalV2 : {}),
-    });
-    const teamInterestStatusRank = {
-      Interested: 1,
-      Asking: 2,
-      Submitted: 3,
-      "Change requested": 4,
-      "Needs review": 5,
-      Approved: 6,
-      Locked: 7,
-      Late: 8,
-    };
-    const teamInterestAggregateSource =
-      activeTournament?.teamInterestCounts ||
-      activeTournament?.publicTeamInterestCounts ||
-      activeTournament?.publicReadiness ||
-      activeTournament?.readinessCounts ||
-      {};
-    const safeTeamInterestNumber = (...values) => {
-      const value = values.find((item) => item !== undefined && item !== null);
-      const parsed = Number(value);
-      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-    };
-    const getTeamInterestAggregateCounts = () => ({
-      interested: safeTeamInterestNumber(
-        teamInterestAggregateSource.interested,
-        teamInterestAggregateSource.interestedTeams,
-        teamInterestAggregateSource.teamInterest
-      ),
-      asking: safeTeamInterestNumber(
-        teamInterestAggregateSource.availabilityActive,
-        teamInterestAggregateSource.availabilityActiveTeams,
-        teamInterestAggregateSource.availabilityAsked,
-        teamInterestAggregateSource.asking
-      ),
-      submitted: safeTeamInterestNumber(
-        teamInterestAggregateSource.rosterSubmitted,
-        teamInterestAggregateSource.rosterSubmittedTeams,
-        teamInterestAggregateSource.submitted
-      ),
-      approved: safeTeamInterestNumber(
-        teamInterestAggregateSource.confirmed,
-        teamInterestAggregateSource.confirmedTeams,
-        teamInterestAggregateSource.approved,
-        teamInterestAggregateSource.approvedTeams
-      ),
-      locked: safeTeamInterestNumber(
-        teamInterestAggregateSource.locked,
-        teamInterestAggregateSource.lockedTeams
-      ),
-      needsReview: safeTeamInterestNumber(
-        teamInterestAggregateSource.needsReview,
-        teamInterestAggregateSource.needsReviewTeams,
-        teamInterestAggregateSource.pendingReview,
-        teamInterestAggregateSource.pendingReviewTeams
-      ),
-      late: safeTeamInterestNumber(
-        teamInterestAggregateSource.late,
-        teamInterestAggregateSource.lateChanges,
-        teamInterestAggregateSource.lateChangeTeams,
-        teamInterestAggregateSource.changeRequested,
-        teamInterestAggregateSource.changeRequestedTeams
-      ),
-    });
-    const getTeamInterestRawStatus = (source = {}) =>
-      String(
-        source.readinessStatus ||
-          source.rosterStatus ||
-          source.interestStatus ||
-          source.availabilityStatus ||
-          source.planStatus ||
-          source.status ||
-          ""
-      )
-        .trim()
-        .toLowerCase();
-    const getTeamInterestStatus = (source = {}, fallback = "Interested") => {
-      const rawStatus = getTeamInterestRawStatus(source);
-      if (
-        source.late ||
-        source.lateChange ||
-        source.lateChangeRequested ||
-        source.afterRosterLock ||
-        rawStatus.includes("late")
-      ) {
-        return "Late";
-      }
-      if (
-        source.changeRequested ||
-        source.revisionRequested ||
-        rawStatus.includes("change requested") ||
-        rawStatus.includes("revision") ||
-        rawStatus.includes("rejected")
-      ) {
-        return "Change requested";
-      }
-      if (
-        source.needsReview ||
-        source.requiresReview ||
-        source.pendingReview ||
-        rawStatus.includes("needs review") ||
-        rawStatus.includes("pending review") ||
-        rawStatus.includes("review")
-      ) {
-        return "Needs review";
-      }
-      if (source.locked || rawStatus.includes("locked")) return "Locked";
-      if (
-        source.approved ||
-        source.confirmed ||
-        rawStatus.includes("approved") ||
-        rawStatus.includes("confirmed")
-      ) {
-        return "Approved";
-      }
-      if (
-        source.submitted ||
-        source.rosterSubmitted ||
-        rawStatus.includes("submitted")
-      ) {
-        return "Submitted";
-      }
-      if (
-        source.availabilityActive ||
-        source.availabilityAsked ||
-        source.askingAvailability ||
-        rawStatus.includes("availability") ||
-        rawStatus.includes("asking") ||
-        rawStatus.includes("pending")
-      ) {
-        return "Asking";
-      }
-      if (
-        source.interested ||
-        rawStatus.includes("interested") ||
-        rawStatus.includes("interest")
-      ) {
-        return "Interested";
-      }
-      return fallback;
-    };
-    const getTeamInterestName = (source = {}) =>
-      String(
-        source.teamName ||
-          source.TeamName ||
-          source.name ||
-          source.clubTeamName ||
-          source.clubName ||
-          source.team ||
-          ""
-      ).trim();
-    const getTeamInterestSeriesId = (source = {}, context = {}) =>
-      String(
-        source.seriesId ||
-          source.classId ||
-          source.activeSeriesId ||
-          context.seriesId ||
-          ""
-      ).trim();
-    const getTeamInterestSeriesName = (source = {}, context = {}) =>
-      String(
-        source.seriesName ||
-          source.className ||
-          source.activeSeriesName ||
-          context.seriesName ||
-          ""
-      ).trim();
-    const formatTeamInterestTimestamp = (value) => {
-      const raw = String(value || "").trim();
-      if (!raw) return "";
-      const parsed = new Date(raw);
-      if (!Number.isNaN(parsed.getTime())) {
-        return parsed.toLocaleString(
-          language === "no" ? "nb-NO" : language === "dk" ? "da-DK" : "en-US",
-          {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          }
-        );
-      }
-      return raw.replace("T", " ").slice(0, 16);
-    };
-    const getTeamInterestTimestamp = (source = {}, keys = []) =>
-      formatTeamInterestTimestamp(
-        keys.map((key) => source?.[key]).find(Boolean) || ""
-      );
-    const getTeamInterestPlayerCount = (source = {}) => {
-      const explicitCount = [
-        source.playerCount,
-        source.playersCount,
-        source.rosterPlayerCount,
-        source.rosterCount,
-        source.confirmedPlayerCount,
-      ].find((value) => value !== undefined && value !== null && value !== "");
-      const parsedCount = Number(explicitCount);
-      if (Number.isFinite(parsedCount) && parsedCount >= 0) return parsedCount;
-
-      const playerList = [
-        source.players,
-        source.rosterPlayers,
-        source.playerNames,
-        source.rosterPlayerNames,
-        source.roster,
-        source.members,
-      ].find((value) => Array.isArray(value));
-      return Array.isArray(playerList) ? playerList.length : null;
-    };
-    const getTeamRosterPlayers = (source = {}) => {
-      const list = [
-        source.rosterPlayers,
-        source.roster,
-        source.players,
-        source.playerNames,
-        source.rosterPlayerNames,
-        source.members,
-      ].find((value) => Array.isArray(value));
-
-      return (Array.isArray(list) ? list : [])
-        .map((player, index) => {
-          if (typeof player === "string") {
-            return {
-              id: `${player}-${index}`,
-              name: player,
-              status: "",
-            };
-          }
-
-          const name = String(
-            player?.displayName ||
-              player?.playerName ||
-              player?.name ||
-              player?.username ||
-              player?.fullName ||
-              ""
-          ).trim();
-          if (!name) return null;
-
-          return {
-            id: String(player?.playerId || player?.username || name || index),
-            name,
-            status: String(
-              player?.status || player?.responseStatus || player?.availabilityStatus || ""
-            ).trim(),
-          };
-        })
-        .filter(Boolean);
-    };
-    const getSourceDuplicateWarnings = (source = {}) =>
-      [
-        source.duplicateWarnings,
-        source.duplicates,
-        source.warnings,
-        source.rosterWarnings,
-      ]
-        .flatMap((value) => {
-          if (Array.isArray(value)) return value;
-          if (typeof value === "string" && value.trim()) return [value];
-          return [];
-        })
-        .map((item) =>
-          typeof item === "string"
-            ? item
-            : String(item?.message || item?.warning || item?.name || "").trim()
-        )
-        .filter(Boolean);
-    const normalizeTeamInterestEntry = (
-      source = {},
-      origin = "team",
-      context = {}
-    ) => {
-      const name = getTeamInterestName(source);
-      if (!name) return null;
-
-      const seriesId = getTeamInterestSeriesId(source, context);
-      const seriesName = getTeamInterestSeriesName(source, context);
-      const series =
-        tournamentSeriesClasses.find(
-          (item) => String(item.id) === String(seriesId)
-        ) ||
-        tournamentSeriesClasses.find(
-          (item) =>
-            String(getSeriesDisplayName(item)).toLowerCase() ===
-            String(seriesName).toLowerCase()
-        ) ||
-        null;
-      const teamId = String(
-        source.teamId ||
-          source.TeamId ||
-          source.sourceTeamId ||
-          source.planId ||
-          source.rosterId ||
-          source.rosterDraftId ||
-          source.id ||
-          ""
-      ).trim();
-      const status = getTeamInterestStatus(
-        source,
-        origin === "roster" ? "Submitted" : "Interested"
-      );
-      const submittedAt =
-        source.submittedAt ||
-        source.rosterSubmittedAt ||
-        source.submittedTime ||
-        source.updatedAt ||
-        source.createdAt ||
-        "";
-      const reviewedAt = getTeamInterestTimestamp(source, [
-        "reviewedAt",
-        "approvedAt",
-        "rejectedAt",
-        "changeRequestedAt",
-      ]);
-      const lockedAt = getTeamInterestTimestamp(source, ["lockedAt"]);
-      const captainLabel = String(
-        source.captainName ||
-          source.captainUsername ||
-          source.contactName ||
-          source.contact ||
-          source.registeredBy ||
-          ""
-      ).trim();
-      const rawDeadline = series
-        ? activeRosterLock.appliesToSeries?.[series.id] ||
-          activeRosterLock.deadlineIso
-        : activeRosterLock.deadlineIso;
-      const deadline = series
-        ? getSeriesRosterDeadline(series)
-        : activeRosterLock.enabled
-          ? defaultRosterDeadline
-          : "";
-      const submittedTimeMs = Date.parse(
-        source.changedAt ||
-          source.lastChangedAt ||
-          source.updatedAt ||
-          submittedAt ||
-          ""
-      );
-      const deadlineTimeMs = Date.parse(rawDeadline || "");
-      const lateByDeadline = Boolean(
-        activeRosterLock.enabled &&
-          deadlineTimeMs &&
-          submittedTimeMs &&
-          !Number.isNaN(deadlineTimeMs) &&
-          !Number.isNaN(submittedTimeMs) &&
-          submittedTimeMs > deadlineTimeMs
-      );
-      const displayStatus =
-        lateByDeadline && !["Approved", "Locked"].includes(status)
-          ? "Late"
-          : status;
-
-      return {
-        id:
-          teamId ||
-          `${seriesId || seriesName || "series"}-${name}`.toLowerCase(),
-        name,
-        status: displayStatus,
-        origin,
-        seriesId: series?.id || seriesId,
-        seriesName: series ? getSeriesDisplayName(series) : seriesName,
-        playerCount: getTeamInterestPlayerCount(source),
-        rosterPlayers: getTeamRosterPlayers(source),
-        submittedAt: formatTeamInterestTimestamp(submittedAt),
-        submittedBy: String(source.submittedBy || source.createdBy || "").trim(),
-        reviewedAt,
-        reviewedBy: String(
-          source.reviewedBy || source.approvedBy || source.rejectedBy || ""
-        ).trim(),
-        lockedAt,
-        lockedBy: String(source.lockedBy || "").trim(),
-        lockReason: String(source.lockReason || source.lockedReason || "").trim(),
-        duplicateWarnings: getSourceDuplicateWarnings(source),
-        source,
-        captainLabel,
-        deadline,
-        rawDeadline,
-        lateByDeadline,
-        rosterId: String(source.rosterId || source.rosterDraftId || "").trim(),
-        planId: String(source.planId || source.tournamentPlanId || "").trim(),
-        updatedAt: formatTeamInterestTimestamp(
-          source.updatedAt || source.changedAt || source.lastChangedAt || ""
-        ),
-        hasRosterSignal: Boolean(
-          source.rosterId ||
-            source.rosterDraftId ||
-            source.rosterPlayers ||
-            source.roster ||
-            source.rosterSubmitted ||
-            source.submitted ||
-            status === "Submitted" ||
-            status === "Approved" ||
-            status === "Locked" ||
-            status === "Late" ||
-            status === "Needs review" ||
-            status === "Change requested"
-        ),
-        hasAvailabilitySignal: Boolean(
-          source.availabilityActive ||
-            source.availabilityAsked ||
-            source.askingAvailability ||
-            status === "Asking"
-        ),
-      };
-    };
-    const mergeTeamInterestEntries = (entries) => {
-      const byKey = new Map();
-      entries.filter(Boolean).forEach((entry) => {
-        const key =
-          entry.id ||
-          `${entry.seriesId || entry.seriesName || "series"}-${entry.name}`.toLowerCase();
-        const existing = byKey.get(key);
-        if (!existing) {
-          byKey.set(key, entry);
-          return;
-        }
-
-        const nextStatus =
-          (teamInterestStatusRank[entry.status] || 0) >
-          (teamInterestStatusRank[existing.status] || 0)
-            ? entry.status
-            : existing.status;
-        byKey.set(key, {
-          ...existing,
-          ...entry,
-          status: nextStatus,
-          playerCount:
-            entry.playerCount !== null && entry.playerCount !== undefined
-              ? Math.max(Number(existing.playerCount || 0), Number(entry.playerCount))
-              : existing.playerCount,
-          submittedAt: entry.submittedAt || existing.submittedAt,
-          submittedBy: entry.submittedBy || existing.submittedBy,
-          reviewedAt: entry.reviewedAt || existing.reviewedAt,
-          reviewedBy: entry.reviewedBy || existing.reviewedBy,
-          lockedAt: entry.lockedAt || existing.lockedAt,
-          lockedBy: entry.lockedBy || existing.lockedBy,
-          lockReason: entry.lockReason || existing.lockReason,
-          rosterId: entry.rosterId || existing.rosterId,
-          planId: entry.planId || existing.planId,
-          rosterPlayers:
-            entry.rosterPlayers?.length >= existing.rosterPlayers?.length
-              ? entry.rosterPlayers
-              : existing.rosterPlayers,
-          duplicateWarnings: Array.from(
-            new Set([
-              ...(existing.duplicateWarnings || []),
-              ...(entry.duplicateWarnings || []),
-            ])
-          ),
-          captainLabel: entry.captainLabel || existing.captainLabel,
-          deadline: entry.deadline || existing.deadline,
-          hasRosterSignal: existing.hasRosterSignal || entry.hasRosterSignal,
-          hasAvailabilitySignal:
-            existing.hasAvailabilitySignal || entry.hasAvailabilitySignal,
-        });
-      });
-
-      return Array.from(byKey.values()).sort((left, right) => {
-        const rankDiff =
-          (teamInterestStatusRank[right.status] || 0) -
-          (teamInterestStatusRank[left.status] || 0);
-        if (rankDiff) return rankDiff;
-        return left.name.localeCompare(right.name);
-      });
-    };
-    const collectTeamInterestRows = () => {
-      const rows = [];
-      const addRows = (items, origin, context = {}) => {
-        if (!Array.isArray(items)) return;
-        items.forEach((item) => {
-          const entry = normalizeTeamInterestEntry(item, origin, context);
-          if (entry) rows.push(entry);
-        });
-      };
-      const rootSources = [
-        ["teams", "team"],
-        ["teamInterests", "interest"],
-        ["interestedTeams", "interest"],
-        ["teamRegistrations", "registration"],
-        ["registrations", "registration"],
-        ["tournamentPlans", "plan"],
-        ["teamPlans", "plan"],
-        ["plans", "plan"],
-        ["rosterDrafts", "roster"],
-        ["rosters", "roster"],
-        ["rosterStatuses", "roster"],
-      ];
-
-      rootSources.forEach(([key, origin]) => addRows(activeTournament?.[key], origin));
-      rootSources.forEach(([key, origin]) =>
-        addRows(activeTournament?.playerHub?.[key], origin)
-      );
-
-      allSeriesSections.forEach((section) => {
-        const context = {
-          seriesId: section.series.id,
-          seriesName: getSeriesDisplayName(section.series),
-        };
-        rootSources.forEach(([key, origin]) => addRows(section.series?.[key], origin, context));
-        (section.groups || []).forEach((group) =>
-          addRows(group.teams, "group", context)
-        );
-      });
-
-      return mergeTeamInterestEntries(rows);
-    };
-    const allTeamInterestRows = collectTeamInterestRows();
-    const classFilteredTeamInterestRows = allTeamInterestRows.filter((entry) => {
-      if (
-        !hasExplicitTournamentSeries(activeTournament) ||
-        activeTournamentSeriesFilter === "all"
-      ) {
-        return true;
-      }
-      return String(entry.seriesId || "") === String(activeTournamentSeriesFilter);
-    });
-    const teamInterestStatusMatchesFilter = (entry) => {
-      if (activeTeamInterestFilter === "all") return true;
-      if (activeTeamInterestFilter === "late") {
-        return ["Late", "Change requested"].includes(entry.status);
-      }
-      if (activeTeamInterestFilter === "approved") {
-        return entry.status === "Approved";
-      }
-      if (activeTeamInterestFilter === "locked") return entry.status === "Locked";
-      if (activeTeamInterestFilter === "submitted") {
-        return entry.status === "Submitted";
-      }
-      if (activeTeamInterestFilter === "interested") {
-        return entry.status === "Interested";
-      }
-      return true;
-    };
-    const visibleTeamInterestRows = classFilteredTeamInterestRows.filter(
-      teamInterestStatusMatchesFilter
-    );
-    const countTeamInterestRows = (rows) =>
-      rows.reduce(
-        (counts, entry) => ({
-          interested:
-            counts.interested + (entry.status === "Interested" ? 1 : 0),
-          asking: counts.asking + (entry.status === "Asking" ? 1 : 0),
-          submitted: counts.submitted + (entry.status === "Submitted" ? 1 : 0),
-          approved: counts.approved + (entry.status === "Approved" ? 1 : 0),
-          locked: counts.locked + (entry.status === "Locked" ? 1 : 0),
-          needsReview:
-            counts.needsReview +
-            (entry.status === "Needs review" || entry.status === "Submitted"
-              ? 1
-              : 0),
-          late:
-            counts.late +
-            (entry.status === "Late" ||
-            entry.status === "Change requested" ||
-            entry.lateByDeadline
-              ? 1
-              : 0),
-        }),
-        {
-          interested: 0,
-          asking: 0,
-          submitted: 0,
-          approved: 0,
-          locked: 0,
-          needsReview: 0,
-          late: 0,
-        }
-      );
-    const aggregateTeamInterestCounts = getTeamInterestAggregateCounts();
-    const rowTeamInterestCounts = countTeamInterestRows(
-      classFilteredTeamInterestRows
-    );
-    const hasAggregateTeamInterestSignal = Object.values(
-      aggregateTeamInterestCounts
-    ).some((value) => Number(value || 0) > 0);
-    const teamInterestSummaryCounts =
-      hasAggregateTeamInterestSignal && activeTournamentSeriesFilter === "all"
-        ? aggregateTeamInterestCounts
-        : rowTeamInterestCounts;
-    const teamInterestSummaryItems = [
-      {
-        key: "interested",
-        label: tournamentText.interestedTeamsLabel,
-        value: teamInterestSummaryCounts.interested,
-      },
-      {
-        key: "asking",
-        label: "Asking availability",
-        value: teamInterestSummaryCounts.asking,
-      },
-      {
-        key: "submitted",
-        label: tournamentText.rosterSubmittedLabel,
-        value: teamInterestSummaryCounts.submitted,
-      },
-      {
-        key: "approved",
-        label: "Confirmed / Approved",
-        value: teamInterestSummaryCounts.approved,
-      },
-      {
-        key: "locked",
-        label: tournamentText.lockedTeamsLabel,
-        value: teamInterestSummaryCounts.locked,
-      },
-      {
-        key: "needs-review",
-        label: "Needs review",
-        value: teamInterestSummaryCounts.needsReview,
-      },
-      {
-        key: "late",
-        label: "Late changes",
-        value: teamInterestSummaryCounts.late,
-      },
-    ];
-    const teamInterestFilterOptions = [
-      { id: "all", label: "All" },
-      { id: "interested", label: "Interested" },
-      { id: "submitted", label: "Submitted" },
-      { id: "approved", label: "Approved" },
-      { id: "locked", label: "Locked" },
-      { id: "late", label: "Late / needs review" },
-    ];
-    const getTeamInterestStatusStyle = (status) => ({
-      ...styles.tournamentTeamInterestStatusChipV1,
-      ...(status === "Interested"
-        ? styles.tournamentTeamInterestStatusInterestedV1
-        : {}),
-      ...(status === "Asking"
-        ? styles.tournamentTeamInterestStatusAskingV1
-        : {}),
-      ...(status === "Submitted"
-        ? styles.tournamentTeamInterestStatusSubmittedV1
-        : {}),
-      ...(status === "Needs review"
-        ? styles.tournamentTeamInterestStatusNeedsReviewV1
-        : {}),
-      ...(status === "Approved"
-        ? styles.tournamentTeamInterestStatusApprovedV1
-        : {}),
-      ...(status === "Locked"
-        ? styles.tournamentTeamInterestStatusLockedV1
-        : {}),
-      ...(status === "Late" || status === "Change requested"
-        ? styles.tournamentTeamInterestStatusLateV1
-        : {}),
-    });
-    const openTeamInterestPlan = (entry) => {
-      setActiveTournamentView("groups");
-      if (entry.seriesId) {
-        setActiveTournamentSeriesFilter(entry.seriesId);
-        setActiveTournamentSetupSeriesId(entry.seriesId);
-      }
-    };
-    const openTeamInterestPlayerHub = () => {
-      if (hasPlayerHubAccess) setActiveTab("player-hub");
-    };
-    const renderTournamentTeamInterestBoard = () => (
-      <div style={styles.tournamentTeamInterestBoardV1}>
-        <div style={styles.tournamentSectionHeader}>
-          <div>
-            <div style={styles.tournamentEyebrow}>Team interest</div>
-            <div style={styles.tournamentSectionTitle}>
-              {tournamentText.teamReadinessTitle}
-            </div>
-            <div style={styles.tournamentMutedText}>
-              {tournamentText.teamReadinessSubtitle}
-            </div>
-          </div>
-          <span style={styles.tournamentStatusBadge}>
-            {visibleTeamInterestRows.length}/{classFilteredTeamInterestRows.length}
-          </span>
-        </div>
-
-        <div style={styles.tournamentTeamInterestSummaryGridV1}>
-          {teamInterestSummaryItems.map((item) => (
-            <div
-              key={`team-interest-summary-${item.key}`}
-              style={styles.tournamentTeamInterestSummaryCardV1}
-            >
-              <strong>{item.value}</strong>
-              <span>{item.label}</span>
-            </div>
-          ))}
-        </div>
-
-        <div style={styles.tournamentTeamInterestFilterRowV1}>
-          {teamInterestFilterOptions.map((option) => (
-            <button
-              key={`team-interest-filter-${option.id}`}
-              type="button"
-              style={{
-                ...styles.tournamentMatchControlFilterButtonV2,
-                ...(activeTeamInterestFilter === option.id
-                  ? styles.tournamentMatchControlFilterButtonActiveV2
-                  : {}),
-              }}
-              onClick={() => setActiveTeamInterestFilter(option.id)}
-            >
-              {option.label}
-            </button>
-          ))}
-
-          {hasTournamentClassFilters && (
-            <>
-              <button
-                type="button"
-                style={{
-                  ...styles.tournamentMatchControlFilterButtonV2,
-                  ...(activeTournamentSeriesFilter === "all"
-                    ? styles.tournamentMatchControlFilterButtonActiveV2
-                    : {}),
-                }}
-                onClick={() => setActiveTournamentSeriesFilter("all")}
-              >
-                {tournamentText.allClassesLabel}
-              </button>
-              {tournamentSeriesClasses.map((series) => (
-                <button
-                  key={`team-interest-series-${series.id}`}
-                  type="button"
-                  style={{
-                    ...styles.tournamentMatchControlFilterButtonV2,
-                    ...(String(activeTournamentSeriesFilter) === String(series.id)
-                      ? styles.tournamentMatchControlFilterButtonActiveV2
-                      : {}),
-                  }}
-                  onClick={() => {
-                    setActiveTournamentSeriesFilter(series.id);
-                    setActiveTournamentSetupSeriesId(series.id);
-                  }}
-                >
-                  {getSeriesShortLabel(series)}
-                </button>
-              ))}
-            </>
-          )}
-        </div>
-
-        {visibleTeamInterestRows.length > 0 ? (
-          <div style={styles.tournamentTeamInterestListV1}>
-            {visibleTeamInterestRows.map((entry) => (
-              <article
-                key={`team-interest-row-${entry.id}`}
-                style={styles.tournamentTeamInterestCardV1}
-              >
-                <div style={styles.tournamentTeamInterestCardTopV1}>
-                  <div style={styles.tournamentTeamInterestNameBlockV1}>
-                    <strong>{entry.name}</strong>
-                    <span>
-                      {entry.seriesName || "Class not set"}
-                      {entry.captainLabel ? ` - ${entry.captainLabel}` : ""}
-                    </span>
-                  </div>
-                  <span style={getTeamInterestStatusStyle(entry.status)}>
-                    {entry.status}
-                  </span>
-                </div>
-
-                <div style={styles.tournamentTeamInterestMetaRowV1}>
-                  {entry.seriesName && (
-                    <span style={styles.tournamentTeamInterestMetaChipV1}>
-                      {entry.seriesName}
-                    </span>
-                  )}
-                  {entry.playerCount !== null &&
-                    entry.playerCount !== undefined && (
-                      <span style={styles.tournamentTeamInterestMetaChipV1}>
-                        {entry.playerCount} players
-                      </span>
-                    )}
-                  {entry.submittedAt && (
-                    <span style={styles.tournamentTeamInterestMetaChipV1}>
-                      Submitted {entry.submittedAt}
-                    </span>
-                  )}
-                  {activeRosterLock.enabled && entry.deadline && (
-                    <span style={styles.tournamentTeamInterestMetaChipWarnV1}>
-                      Lock {entry.deadline}
-                    </span>
-                  )}
-                </div>
-
-                <div style={styles.tournamentTeamInterestActionsV1}>
-                  <button
-                    type="button"
-                    style={styles.secondaryButtonCompact}
-                    onClick={() => openTeamInterestPlan(entry)}
-                  >
-                    Open plan
-                  </button>
-                  {entry.hasAvailabilitySignal && hasPlayerHubAccess && (
-                    <button
-                      type="button"
-                      style={styles.secondaryButtonCompact}
-                      onClick={openTeamInterestPlayerHub}
-                    >
-                      View availability
-                    </button>
-                  )}
-                  {entry.hasRosterSignal && currentUserIsAdmin && hasPlayerHubAccess && (
-                    <button
-                      type="button"
-                      style={styles.primaryButtonSmall}
-                      onClick={openTeamInterestPlayerHub}
-                    >
-                      Review roster
-                    </button>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : hasAggregateTeamInterestSignal ? (
-          <div style={styles.tournamentMutedPanel}>
-            Team readiness counts are available, but team rows are not loaded in
-            this workspace.
-          </div>
-        ) : (
-          <div style={styles.tournamentMutedPanel}>
-            <strong>No team interest yet.</strong>
-            <span>
-              Teams appear here when captains start availability or roster
-              planning.
-            </span>
-          </div>
-        )}
-
-        <div style={styles.tournamentMutedText}>
-          {tournamentText.publicCountsPrivacyNote}
-        </div>
-      </div>
-    );
-    const buildRegistrationDuplicateWarnings = (entry, rows) => {
-      const warnings = [...(entry.duplicateWarnings || [])];
-      const normalizedPlayers = (entry.rosterPlayers || [])
-        .map((player) => ({
-          key: String(player.id || player.name || "").trim().toLowerCase(),
-          name: player.name,
-        }))
-        .filter((player) => player.key);
-      const seenInRoster = new Map();
-
-      normalizedPlayers.forEach((player) => {
-        if (seenInRoster.has(player.key)) {
-          warnings.push(`${player.name} appears twice on this roster.`);
-        }
-        seenInRoster.set(player.key, player.name);
-      });
-
-      normalizedPlayers.forEach((player) => {
-        const otherTeams = rows
-          .filter((row) => row.id !== entry.id && row.seriesId === entry.seriesId)
-          .filter((row) =>
-            (row.rosterPlayers || []).some(
-              (other) =>
-                String(other.id || other.name || "").trim().toLowerCase() ===
-                player.key
-            )
-          )
-          .map((row) => row.name)
-          .filter(Boolean);
-
-        if (otherTeams.length) {
-          warnings.push(
-            `${player.name} also appears on ${Array.from(
-              new Set(otherTeams)
-            ).join(", ")}.`
-          );
-        }
-      });
-
-      return Array.from(new Set(warnings));
-    };
-    const registrationBoardRows = classFilteredTeamInterestRows.map((entry) => ({
-      ...entry,
-      duplicateWarnings: buildRegistrationDuplicateWarnings(
-        entry,
-        classFilteredTeamInterestRows
-      ),
-    }));
-    const registrationBoardCounts = countTeamInterestRows(registrationBoardRows);
-    const registrationBoardSummaryItems = [
-      {
-        key: "interested",
-        label: "Teams interested",
-        value: registrationBoardCounts.interested,
-      },
-      {
-        key: "asking",
-        label: "Availability active",
-        value: registrationBoardCounts.asking,
-      },
-      {
-        key: "submitted",
-        label: "Rosters submitted",
-        value: registrationBoardCounts.submitted,
-      },
-      {
-        key: "approved",
-        label: "Approved",
-        value: registrationBoardCounts.approved,
-      },
-      {
-        key: "locked",
-        label: "Locked",
-        value: registrationBoardCounts.locked,
-      },
-      {
-        key: "needs-review",
-        label: "Needs review",
-        value: registrationBoardCounts.needsReview,
-      },
-      {
-        key: "late",
-        label: "Late changes",
-        value: registrationBoardCounts.late,
-      },
-    ];
-    const registrationBoardFilterOptions = [
-      { id: "all", label: "All" },
-      { id: "interested", label: "Interested" },
-      { id: "submitted", label: "Submitted" },
-      { id: "approved", label: "Approved" },
-      { id: "locked", label: "Locked" },
-      { id: "needs-review", label: "Needs review" },
-      { id: "late", label: "Late" },
-    ];
-    const registrationBoardStatusMatchesFilter = (entry) => {
-      if (activeRegistrationBoardFilter === "all") return true;
-      if (activeRegistrationBoardFilter === "late") {
-        return (
-          entry.status === "Late" ||
-          entry.status === "Change requested" ||
-          entry.lateByDeadline
-        );
-      }
-      if (activeRegistrationBoardFilter === "needs-review") {
-        return (
-          entry.status === "Needs review" ||
-          entry.status === "Submitted" ||
-          entry.status === "Change requested" ||
-          entry.duplicateWarnings?.length > 0 ||
-          entry.lateByDeadline
-        );
-      }
-      if (activeRegistrationBoardFilter === "approved") {
-        return entry.status === "Approved";
-      }
-      if (activeRegistrationBoardFilter === "locked") {
-        return entry.status === "Locked";
-      }
-      if (activeRegistrationBoardFilter === "submitted") {
-        return entry.status === "Submitted";
-      }
-      if (activeRegistrationBoardFilter === "interested") {
-        return entry.status === "Interested";
-      }
-      return true;
-    };
-    const visibleRegistrationBoardRows = registrationBoardRows.filter(
-      registrationBoardStatusMatchesFilter
-    );
-    const selectedRegistrationBoardEntry =
-      registrationBoardRows.find(
-        (entry) => String(entry.id) === String(selectedRegistrationBoardId)
-      ) || visibleRegistrationBoardRows[0] || null;
-    const rosterLockSeriesSummary = activeRosterLock.enabled
-      ? tournamentSeriesClasses
-          .map(
-            (series) =>
-              `${getSeriesShortLabel(series)}: ${
-                getSeriesRosterDeadline(series) || defaultRosterDeadline || "enabled"
-              }`
-          )
-          .join(" / ")
-      : "Roster lock disabled";
-    const renderRegistrationBoardDetails = (entry) => {
-      if (!entry) {
-        return (
-          <div style={styles.tournamentRegistrationDetailsV2}>
-            <div style={styles.tournamentMutedPanel}>
-              Select a registration to review roster details.
-            </div>
-          </div>
-        );
-      }
-
-      const duplicateWarnings = entry.duplicateWarnings || [];
-      const safeRosterPlayers = entry.rosterPlayers || [];
-
-      return (
-        <aside
-          style={{
-            ...styles.tournamentRegistrationDetailsV2,
-            ...(isMobile ? { position: "static" } : {}),
-          }}
-        >
-          <div style={styles.tournamentSectionHeader}>
-            <div>
-              <div style={styles.tournamentEyebrow}>Roster review</div>
-              <div style={styles.tournamentSectionTitle}>{entry.name}</div>
-              <div style={styles.tournamentMutedText}>
-                {entry.seriesName || "Class not set"}
-              </div>
-            </div>
-            <span style={getTeamInterestStatusStyle(entry.status)}>
-              {entry.status}
-            </span>
-          </div>
-
-          <div style={styles.tournamentTeamInterestMetaRowV1}>
-            {entry.submittedAt && (
-              <span style={styles.tournamentTeamInterestMetaChipV1}>
-                Submitted {entry.submittedAt}
-                {entry.submittedBy ? ` by ${entry.submittedBy}` : ""}
-              </span>
-            )}
-            {entry.reviewedAt && (
-              <span style={styles.tournamentTeamInterestMetaChipV1}>
-                Reviewed {entry.reviewedAt}
-                {entry.reviewedBy ? ` by ${entry.reviewedBy}` : ""}
-              </span>
-            )}
-            {entry.lockedAt && (
-              <span style={styles.tournamentTeamInterestMetaChipV1}>
-                Locked {entry.lockedAt}
-                {entry.lockedBy ? ` by ${entry.lockedBy}` : ""}
-              </span>
-            )}
-            {entry.lockReason && (
-              <span style={styles.tournamentTeamInterestMetaChipWarnV1}>
-                Reason: {entry.lockReason}
-              </span>
-            )}
-            {entry.lateByDeadline && (
-              <span style={styles.tournamentTeamInterestMetaChipWarnV1}>
-                Late change
-              </span>
-            )}
-          </div>
-
-          {duplicateWarnings.length > 0 && (
-            <div style={styles.tournamentRegistrationWarningBoxV2}>
-              <strong>Duplicate warning</strong>
-              {duplicateWarnings.map((warning) => (
-                <span key={`registration-warning-${entry.id}-${warning}`}>
-                  {warning}
-                </span>
-              ))}
-            </div>
-          )}
-
-          <div style={styles.tournamentRegistrationRosterListV2}>
-            <div style={styles.tournamentMiniTitle}>Roster players</div>
-            {safeRosterPlayers.length ? (
-              safeRosterPlayers.map((player) => (
-                <div
-                  key={`registration-player-${entry.id}-${player.id}`}
-                  style={styles.tournamentRegistrationPlayerRowV2}
-                >
-                  <strong>{player.name}</strong>
-                  {player.status ? <span>{player.status}</span> : null}
-                </div>
-              ))
-            ) : (
-              <div style={styles.tournamentMutedPanel}>
-                No roster player list is loaded for this team.
-              </div>
-            )}
-          </div>
-
-          <div style={styles.tournamentTeamInterestActionsV1}>
-            <button
-              type="button"
-              style={styles.secondaryButtonCompact}
-              onClick={() => openTeamInterestPlan(entry)}
-            >
-              Open plan
-            </button>
-            {entry.hasAvailabilitySignal && hasPlayerHubAccess && (
-              <button
-                type="button"
-                style={styles.secondaryButtonCompact}
-                onClick={openTeamInterestPlayerHub}
-              >
-                View availability
-              </button>
-            )}
-            {entry.hasRosterSignal && currentUserIsAdmin && hasPlayerHubAccess && (
-              <button
-                type="button"
-                style={styles.primaryButtonSmall}
-                onClick={openTeamInterestPlayerHub}
-              >
-                Review roster
-              </button>
-            )}
-          </div>
-        </aside>
-      );
-    };
-    const renderTournamentRegistrationBoard = () => (
-      <div style={styles.tournamentRegistrationBoardV2}>
-        <div style={styles.tournamentSectionHeader}>
-          <div>
-            <div style={styles.tournamentEyebrow}>Registration board</div>
-            <div style={styles.tournamentSectionTitle}>
-              Registration + roster review
-            </div>
-            <div style={styles.tournamentMutedText}>
-              After deadline, changes require organizer/admin approval.
-            </div>
-          </div>
-          <span
-            style={
-              activeRosterLock.enabled
-                ? styles.tournamentTeamInterestMetaChipWarnV1
-                : styles.tournamentTeamInterestMetaChipV1
-            }
-          >
-            {rosterLockSeriesSummary}
-          </span>
-        </div>
-
-        <div style={styles.tournamentTeamInterestSummaryGridV1}>
-          {registrationBoardSummaryItems.map((item) => (
-            <div
-              key={`registration-summary-${item.key}`}
-              style={styles.tournamentTeamInterestSummaryCardV1}
-            >
-              <strong>{item.value}</strong>
-              <span>{item.label}</span>
-            </div>
-          ))}
-        </div>
-
-        <div style={styles.tournamentTeamInterestFilterRowV1}>
-          {registrationBoardFilterOptions.map((option) => (
-            <button
-              key={`registration-filter-${option.id}`}
-              type="button"
-              style={{
-                ...styles.tournamentMatchControlFilterButtonV2,
-                ...(activeRegistrationBoardFilter === option.id
-                  ? styles.tournamentMatchControlFilterButtonActiveV2
-                  : {}),
-              }}
-              onClick={() => setActiveRegistrationBoardFilter(option.id)}
-            >
-              {option.label}
-            </button>
-          ))}
-
-          {hasTournamentClassFilters &&
-            tournamentSeriesClasses.map((series) => (
-              <button
-                key={`registration-series-${series.id}`}
-                type="button"
-                style={{
-                  ...styles.tournamentMatchControlFilterButtonV2,
-                  ...(String(activeTournamentSeriesFilter) === String(series.id)
-                    ? styles.tournamentMatchControlFilterButtonActiveV2
-                    : {}),
-                }}
-                onClick={() => {
-                  setActiveTournamentSeriesFilter(series.id);
-                  setActiveTournamentSetupSeriesId(series.id);
-                }}
-              >
-                {getSeriesShortLabel(series)}
-              </button>
-            ))}
-          {hasTournamentClassFilters && (
-            <button
-              type="button"
-              style={{
-                ...styles.tournamentMatchControlFilterButtonV2,
-                ...(activeTournamentSeriesFilter === "all"
-                  ? styles.tournamentMatchControlFilterButtonActiveV2
-                  : {}),
-              }}
-              onClick={() => setActiveTournamentSeriesFilter("all")}
-            >
-              {tournamentText.allClassesLabel}
-            </button>
-          )}
-        </div>
-
-        {visibleRegistrationBoardRows.length ? (
-          <div
-            style={{
-              ...styles.tournamentRegistrationBoardLayoutV2,
-              ...(isMobile ? styles.tournamentRegistrationBoardLayoutMobileV2 : {}),
-            }}
-          >
-            <div style={styles.tournamentTeamInterestListV1}>
-              {visibleRegistrationBoardRows.map((entry) => {
-                const isSelected =
-                  String(selectedRegistrationBoardEntry?.id || "") ===
-                  String(entry.id);
-                const duplicateWarnings = entry.duplicateWarnings || [];
-
-                return (
-                  <article
-                    key={`registration-row-${entry.id}`}
-                    style={{
-                      ...styles.tournamentTeamInterestCardV1,
-                      ...(isSelected
-                        ? styles.tournamentRegistrationCardSelectedV2
-                        : {}),
-                    }}
-                  >
-                    <div style={styles.tournamentTeamInterestCardTopV1}>
-                      <div style={styles.tournamentTeamInterestNameBlockV1}>
-                        <strong>{entry.name}</strong>
-                        <span>
-                          {entry.seriesName || "Class not set"}
-                          {entry.captainLabel ? ` - ${entry.captainLabel}` : ""}
-                        </span>
-                      </div>
-                      <span style={getTeamInterestStatusStyle(entry.status)}>
-                        {entry.status}
-                      </span>
-                    </div>
-
-                    <div style={styles.tournamentTeamInterestMetaRowV1}>
-                      {entry.playerCount !== null &&
-                        entry.playerCount !== undefined && (
-                          <span style={styles.tournamentTeamInterestMetaChipV1}>
-                            {entry.playerCount} players
-                          </span>
-                        )}
-                      {entry.submittedAt && (
-                        <span style={styles.tournamentTeamInterestMetaChipV1}>
-                          Submitted {entry.submittedAt}
-                        </span>
-                      )}
-                      {entry.reviewedAt && (
-                        <span style={styles.tournamentTeamInterestMetaChipV1}>
-                          Reviewed {entry.reviewedAt}
-                        </span>
-                      )}
-                      {entry.lockedAt && (
-                        <span style={styles.tournamentTeamInterestMetaChipV1}>
-                          Locked {entry.lockedAt}
-                        </span>
-                      )}
-                      {activeRosterLock.enabled && entry.deadline && (
-                        <span style={styles.tournamentTeamInterestMetaChipWarnV1}>
-                          Deadline {entry.deadline}
-                        </span>
-                      )}
-                      {(entry.lateByDeadline || entry.status === "Late") && (
-                        <span style={styles.tournamentTeamInterestMetaChipWarnV1}>
-                          Late change
-                        </span>
-                      )}
-                      {duplicateWarnings.length > 0 && (
-                        <span style={styles.tournamentTeamInterestMetaChipWarnV1}>
-                          Duplicate warning
-                        </span>
-                      )}
-                    </div>
-
-                    <div style={styles.tournamentTeamInterestActionsV1}>
-                      <button
-                        type="button"
-                        style={styles.primaryButtonSmall}
-                        onClick={() => setSelectedRegistrationBoardId(entry.id)}
-                      >
-                        Review / Open
-                      </button>
-                      {entry.hasRosterSignal && currentUserIsAdmin && hasPlayerHubAccess && (
-                        <button
-                          type="button"
-                          style={styles.secondaryButtonCompact}
-                          onClick={openTeamInterestPlayerHub}
-                        >
-                          Admin review
-                        </button>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-
-            {renderRegistrationBoardDetails(selectedRegistrationBoardEntry)}
-          </div>
-        ) : (
-          <div style={styles.tournamentMutedPanel}>
-            <strong>No team registrations yet.</strong>
-            <span>
-              Teams appear here when captains start availability or submit
-              rosters.
-            </span>
-          </div>
-        )}
-      </div>
-    );
-    const renderTournamentSetupProgress = () => (
-      <div style={styles.tournamentSetupProgressCardV2}>
-        <div style={styles.tournamentSectionHeader}>
-          <div>
-            <div style={styles.tournamentEyebrow}>Setup flow</div>
-            <div style={styles.tournamentSectionTitle}>Tournament builder</div>
-          </div>
-          <span style={styles.tournamentStatusBadge}>
-            {setupSteps.filter((step) => step.status === "Done").length}/
-            {setupSteps.length}
-          </span>
-        </div>
-        <div style={styles.tournamentSetupStepListV2}>
-          {setupSteps.map((step, index) => (
-            <div key={step.label} style={styles.tournamentSetupStepRowV2}>
-              <span style={styles.tournamentSetupStepNumberV2}>{index + 1}</span>
-              <span style={styles.tournamentSetupStepTextV2}>
-                <strong>{step.label}</strong>
-                <small>{step.detail}</small>
-              </span>
-              <span style={getSetupStatusStyle(step.status)}>{step.status}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-    const renderTournamentFormatPresets = () => (
-      <div style={styles.tournamentFormatPresetPanelV1}>
-        <div style={styles.tournamentSectionHeader}>
-          <div>
-            <div style={styles.tournamentEyebrow}>Format presets</div>
-            <div style={styles.tournamentSectionTitle}>
-              Tamil volleyball setup
-            </div>
-          </div>
-          <span style={styles.tournamentStatusBadge}>
-            {derivedFormatPresetId === "custom" ? "Custom" : "Preset"}
-          </span>
-        </div>
-
-        {hasFormatPresetSetupData && (
-          <div style={styles.tournamentFormatPresetWarningV1}>
-            This tournament already has setup data. Applying a preset may update
-            classes/groups.
-          </div>
-        )}
-
-        <div style={styles.tournamentFormatPresetGridV1}>
-          {TOURNAMENT_FORMAT_PRESETS.map((preset) => {
-            const isActive = derivedFormatPresetId === preset.id;
-
-            return (
-              <div
-                key={`format-preset-${preset.id}`}
-                style={{
-                  ...styles.tournamentFormatPresetCardV1,
-                  ...(isActive ? styles.tournamentFormatPresetCardActiveV1 : {}),
-                }}
-              >
-                <div style={styles.tournamentSeriesSetupTopV2}>
-                  <div>
-                    <div style={styles.tournamentMiniTitle}>{preset.title}</div>
-                    <div style={styles.tournamentMutedText}>
-                      {preset.rosterText}
-                    </div>
-                  </div>
-                  <span
-                    style={
-                      isActive
-                        ? getSetupStatusStyle("Done")
-                        : getSetupStatusStyle("Optional")
-                    }
-                  >
-                    {isActive ? "Selected" : "Ready"}
-                  </span>
-                </div>
-
-                <div style={styles.tournamentFormatPresetChipRowV1}>
-                  <span style={styles.tournamentFormatPresetChipV1}>
-                    {preset.seriesLabel}
-                  </span>
-                  <span style={styles.tournamentFormatPresetChipV1}>
-                    {preset.playersOnCourt} on court
-                  </span>
-                  <span style={styles.tournamentFormatPresetChipV1}>
-                    Roster lock optional
-                  </span>
-                </div>
-
-                <div style={styles.tournamentFormatPresetDetailGridV1}>
-                  {[
-                    ["Group stage", preset.groupStage],
-                    ["Advancement", preset.advancement],
-                    ["Knockout", preset.knockout],
-                    ["3rd place", preset.thirdPlace],
-                  ].map(([label, value]) => (
-                    <span
-                      key={`${preset.id}-${label}`}
-                      style={styles.tournamentFormatPresetDetailV1}
-                    >
-                      <strong>{label}</strong>
-                      {value}
-                    </span>
-                  ))}
-                </div>
-
-                <div style={styles.tournamentInlineActions}>
-                  <button
-                    type="button"
-                    style={
-                      isActive
-                        ? styles.secondaryButtonCompact
-                        : styles.primaryButtonSmall
-                    }
-                    onClick={() => applyTournamentFormatPreset(preset.id)}
-                  >
-                    {isActive
-                      ? "Selected"
-                      : preset.id === "custom"
-                        ? "Use custom"
-                        : "Apply preset"}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-    const renderTournamentOrganizerHeader = () => (
-      <div style={styles.tournamentOrganizerHeaderV2}>
-        <div style={styles.tournamentOrganizerHeaderMainV2}>
-          <div style={styles.tournamentEyebrow}>Organizer control center</div>
-          <h2 style={styles.tournamentOrganizerTitleV2}>
-            {activeTournament.name}
-          </h2>
-          <div style={styles.tournamentOrganizerMetaV2}>
-            <span>{tournamentDateLabel}</span>
-            <span>{tournamentLocationLabel}</span>
-          </div>
-          <div style={styles.tournamentOrganizerChipRowV2}>
-            <span style={styles.tournamentOrganizerStatusChipV2}>
-              {formatLabel}
-            </span>
-            <span
-              style={{
-                ...styles.tournamentOrganizerStatusChipV2,
-                ...(isPublished ? styles.tournamentOrganizerStatusLiveV2 : {}),
-              }}
-            >
-              {isPublished ? tournamentText.published : tournamentText.unpublished}
-            </span>
-            <span
-              style={{
-                ...styles.tournamentOrganizerStatusChipV2,
-                ...(isBackendPublished
-                  ? styles.tournamentOrganizerStatusLiveV2
-                  : {}),
-              }}
-            >
-              {isBackendPublished ? "Public live" : "Public draft"}
-            </span>
-            <span
-              style={{
-                ...styles.tournamentOrganizerStatusChipV2,
-                ...(activeRosterLock.enabled
-                  ? styles.tournamentOrganizerStatusWarnV2
-                  : {}),
-              }}
-            >
-              {activeRosterLock.enabled
-                ? `Roster lock ${defaultRosterDeadline || "enabled"}`
-                : "Roster lock optional"}
-            </span>
-            <span
-              style={{
-                ...styles.tournamentOrganizerStatusChipV2,
-                ...(tournamentSyncStatus === "error"
-                  ? styles.tournamentSetupStatusMissingV2
-                  : {}),
-              }}
-              title={tournamentSyncMessage}
-            >
-              {tournamentSyncLabel}
-            </span>
-          </div>
-        </div>
-        <div style={styles.tournamentOrganizerSeriesChipsV2}>
-          {tournamentSeriesClasses.map((series) => (
-            <button
-              key={`header-series-${series.id}`}
-              type="button"
-              style={styles.tournamentOrganizerSeriesChipV2}
-              onClick={() => {
-                setActiveTournamentSeriesFilter(series.id);
-                setActiveTournamentSetupSeriesId(series.id);
-                setActiveTournamentView("groups");
-              }}
-            >
-              {getSeriesShortLabel(series)}
-            </button>
-          ))}
-        </div>
-        <div style={styles.tournamentHeroActions}>
-          <button
-            style={styles.tournamentLightButton}
-            onClick={() => setShowTournamentSetupPanel((prev) => !prev)}
-          >
-            {shouldShowTournamentSetupPanel
-              ? tournamentText.hideSetup
-              : tournamentText.editSetup}
-          </button>
-          {isBackendPublished ? (
-            <button
-              style={styles.primaryButtonSmall}
-              onClick={openActiveTournamentPublicPreview}
-            >
-              {tournamentText.openLivePreview}
-            </button>
-          ) : (
-            <button style={styles.primaryButtonSmall} onClick={publishTournament}>
-              {tournamentText.publishLiveView}
-            </button>
-          )}
-        </div>
-      </div>
-    );
-    const renderTournamentSeriesSetupCards = () => (
-      <div style={styles.tournamentOrganizerCardV2}>
-        <div style={styles.tournamentSectionHeader}>
-          <div>
-            <div style={styles.tournamentEyebrow}>Series</div>
-            <div style={styles.tournamentSectionTitle}>Class setup</div>
-          </div>
-          <span style={styles.tournamentStatusBadge}>
-            {tournamentSeriesClasses.length} active
-          </span>
-        </div>
-        <div style={styles.tournamentSeriesSetupGridV2}>
-          {tournamentSeriesClasses.map((series) => {
-            const section = getSeriesSection(series);
-            const filled = getSeriesFilledSlots(section);
-            const slots =
-              getSeriesSlotCount(section) || Number(series.totalTeams || 0);
-            const status = getSeriesSetupStatus(series);
-            const deadline = getSeriesRosterDeadline(series);
-            const isHidden = series.publicStatus === "hidden";
-
-            return (
-              <div key={`series-card-${series.id}`} style={styles.tournamentSeriesSetupCardV2}>
-                <div style={styles.tournamentSeriesSetupTopV2}>
-                  <div>
-                    <div style={styles.tournamentMiniTitle}>
-                      {getSeriesDisplayName(series)}
-                    </div>
-                    <div style={styles.tournamentMutedText}>
-                      {getSeriesPlayersPerTeam(series) || "-"} players per team
-                    </div>
-                  </div>
-                  <span style={getSetupStatusStyle(status)}>{status}</span>
-                </div>
-                <div style={styles.tournamentSeriesMetricGridV2}>
-                  <span>
-                    <strong>{filled}/{slots || series.totalTeams || 0}</strong>
-                    Teams
-                  </span>
-                  <span>
-                    <strong>{section?.groups?.length || series.groupCount || 0}</strong>
-                    Groups
-                  </span>
-                  <span>
-                    <strong>{deadline || "Off"}</strong>
-                    Roster lock
-                  </span>
-                </div>
-                <div style={styles.tournamentInlineActions}>
-                  <button
-                    type="button"
-                    style={styles.secondaryButtonCompact}
-                    onClick={() => {
-                      setShowTournamentSetupPanel(true);
-                      setActiveTournamentSetupSeriesId(series.id);
-                    }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    style={styles.secondaryButtonCompact}
-                    onClick={() => {
-                      setActiveTournamentSeriesFilter(series.id);
-                      setActiveTournamentSetupSeriesId(series.id);
-                      setActiveTournamentView("groups");
-                    }}
-                  >
-                    Open
-                  </button>
-                  {hasExplicitTournamentSeries(activeTournament) && (
-                    <button
-                      type="button"
-                      style={styles.secondaryButtonCompact}
-                      onClick={() =>
-                        updateTournamentSeriesPublicStatus(
-                          series.id,
-                          isHidden ? "live" : "hidden"
-                        )
-                      }
-                    >
-                      {isHidden ? "Show" : "Hide"}
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-    const renderTournamentFormatHelper = () => (
-      <div style={styles.tournamentOrganizerCardV2}>
-        <div style={styles.tournamentSectionHeader}>
-          <div>
-            <div style={styles.tournamentEyebrow}>Format</div>
-            <div style={styles.tournamentSectionTitle}>How the flow works</div>
-          </div>
-        </div>
-        <div style={styles.tournamentFormatHelperGridV2}>
-          {[
-            ["Group stage", "All teams meet in group"],
-            ["Advancement", "Winner/runner-up"],
-            ["Knockout", "Semifinals/final"],
-            ["3rd place", activeTournament?.thirdPlaceMatch ? "Enabled" : "Optional"],
-          ].map(([title, text]) => (
-            <div key={title} style={styles.tournamentFormatHelperItemV2}>
-              <strong>{title}</strong>
-              <span>{text}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-    const renderTournamentRosterLockSummary = () => (
-      <div style={styles.tournamentStatusRailNote}>
-        <strong>Roster lock</strong>
-        <span>
-          {activeRosterLock.enabled
-            ? defaultRosterDeadline || "Enabled, deadline missing"
-            : "Disabled"}
-        </span>
-        <small>
-          Changes after deadline require organizer/admin approval.
-        </small>
-        {tournamentSeriesClasses.length > 1 && (
-          <div style={styles.tournamentRosterLockSeriesListV2}>
-            {tournamentSeriesClasses.map((series) => (
-              <span key={`rail-lock-${series.id}`}>
-                {getSeriesShortLabel(series)}: {getSeriesRosterDeadline(series) || "default"}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-    const renderTournamentPublicControls = () => (
-      <div style={styles.tournamentStatusRailNote}>
-        <strong>{tournamentText.publicLinkTitle}</strong>
-        <span>
-          {isBackendPublished
-            ? tournamentText.publicLinkActive
-            : tournamentText.publicLinkUnavailable}
-        </span>
-        <div style={styles.tournamentOrganizerChipRowV2}>
-          <span
-            style={{
-              ...styles.tournamentOrganizerStatusChipV2,
-              ...(isPromotionListed ? styles.tournamentOrganizerStatusLiveV2 : {}),
-            }}
-          >
-            {isPromotionListed ? "Listed" : "Unlisted"}
-          </span>
-          <span
-            style={{
-              ...styles.tournamentOrganizerStatusChipV2,
-              ...(isBackendPublished ? styles.tournamentOrganizerStatusLiveV2 : {}),
-            }}
-          >
-            {isBackendPublished ? "Follow live ready" : "Draft link"}
-          </span>
-        </div>
-        {isBackendPublished && publicUrl && (
-          <span style={styles.tournamentPublicUrlTextV2}>{publicUrl}</span>
-        )}
-      </div>
-    );
-    const renderTournamentDrawWarnings = () =>
-      drawWarnings.length ? (
-        <div style={styles.tournamentWarningListV2}>
-          {drawWarnings.map((warning) => (
-            <span key={`draw-warning-${warning}`} style={styles.tournamentWarningChipV2}>
-              {warning}
-            </span>
-          ))}
-        </div>
-      ) : null;
-    const renderTournamentDrawClassTabs = () =>
-      tournamentSeriesClasses.length > 1 ? (
-        <div style={styles.tournamentSubTabs}>
-          {tournamentSeriesClasses.map((series) => (
-            <button
-              key={`draw-series-${series.id}`}
-              type="button"
-              style={{
-                ...styles.tournamentSubTab,
-                ...(String(selectedSetupSeries?.id || "") === String(series.id)
-                  ? styles.tournamentSubTabActive
-                  : {}),
-              }}
-              onClick={() => {
-                setActiveTournamentSetupSeriesId(series.id);
-                setActiveTournamentSeriesFilter(series.id);
-              }}
-            >
-              {getSeriesDisplayName(series)}
-            </button>
-          ))}
-        </div>
-      ) : null;
-    const renderTournamentDrawMetricGrid = () => (
-      <div style={styles.tournamentDrawMetricGridV1}>
-        {[
-          ["Series", selectedSetupSeries ? getSeriesShortLabel(selectedSetupSeries) : "-"],
-          ["Teams", drawAssignedTeamCount || tournamentTeams.length],
-          ["Groups", manualPreviewGroups.length],
-          ["Per group", configuredTeamsPerGroup],
-          ["Unassigned", drawUnassignedTeams.length],
-        ].map(([label, value]) => (
-          <div key={`draw-metric-${label}`} style={styles.tournamentDrawMetricV1}>
-            <span>{label}</span>
-            <strong>{value}</strong>
-          </div>
-        ))}
-      </div>
-    );
-    const renderTournamentDrawSetupCard = ({ compact = false } = {}) => (
-      <div
-        style={
-          compact
-            ? styles.tournamentDrawSetupCardCompactV1
-            : styles.tournamentDrawSetupCardV1
-        }
-      >
-        <div style={styles.tournamentSectionHeader}>
-          <div>
-            <div style={styles.tournamentEyebrow}>Group draw</div>
-            <div style={styles.tournamentSectionTitle}>
-              {selectedSetupSeries
-                ? getSeriesDisplayName(selectedSetupSeries)
-                : tournamentText.groupsTab}
-            </div>
-          </div>
-          <span
-            style={{
-              ...styles.tournamentOrganizerStatusChipV2,
-              ...(drawHasUnevenGroups ? styles.tournamentOrganizerStatusWarnV2 : {}),
-            }}
-          >
-            {drawHasUnevenGroups ? "Uneven" : "Ready"}
-          </span>
-        </div>
-
-        {renderTournamentDrawClassTabs()}
-        {renderTournamentDrawMetricGrid()}
-        {renderTournamentDrawWarnings()}
-
-        <div style={styles.tournamentDrawActionRowV1}>
-          <button
-            type="button"
-            style={styles.primaryButtonSmall}
-            onClick={drawNextTournamentTeam}
-            disabled={!drawUnassignedTeams.length || !manualPreviewGroups.length}
-          >
-            Draw next team
-          </button>
-          <button
-            type="button"
-            style={styles.secondaryButtonCompact}
-            onClick={autoBalanceTournamentDraw}
-          >
-            Auto-balance
-          </button>
-          <button
-            type="button"
-            style={styles.secondaryButtonCompact}
-            onClick={() => {
-              setActiveTournamentSeriesFilter(
-                selectedSetupSeries?.id || activeTournamentSeriesFilter
-              );
-              setActiveTournamentView("groups");
-            }}
-          >
-            Open draw
-          </button>
-          <button
-            type="button"
-            style={styles.dangerButtonCompact}
-            onClick={clearTournamentDraw}
-          >
-            Clear draw
-          </button>
-        </div>
-
-        {manualSlotsComplete && selectedSetupSeries && compact && (
-          <div style={styles.tournamentDrawActionRowV1}>
-            <button
-              type="button"
-              style={styles.primaryButtonSmall}
-              onClick={() =>
-                setTournamentActionMessage(doneWithSelectedClassLabel)
-              }
-            >
-              {doneWithSelectedClassLabel}
-            </button>
-            {nextSetupSeries && (
-              <button
-                type="button"
-                style={styles.secondaryButtonCompact}
-                onClick={() => {
-                  setActiveTournamentSetupSeriesId(nextSetupSeries.id);
-                  setActiveTournamentSeriesFilter(nextSetupSeries.id);
-                }}
-              >
-                {continueToNextClassLabel}
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    );
-    const renderTournamentDrawTeamChip = (team, options = {}) => {
-      const { group = null, unassigned = false } = options;
-      const status = getDrawTeamStatus(team);
-      const meta = getDrawTeamMeta(team);
-      const currentGroupId = group?.id || team?.groupId || "";
-      const targetGroups = manualPreviewGroups.filter(
-        (item) => String(item.id) !== String(currentGroupId)
-      );
-
-      return (
-        <div
-          key={`${unassigned ? "unassigned" : currentGroupId}-${
-            getDrawTeamKey(team) || getDrawTeamName(team)
-          }`}
-          style={styles.tournamentDrawTeamChipV1}
-        >
-          <div style={styles.tournamentDrawTeamMainV1}>
-            <strong>{getDrawTeamName(team) || "-"}</strong>
-            {meta && <span>{meta}</span>}
-          </div>
-          {status && (
-            <span
-              style={{
-                ...styles.tournamentDrawTeamStatusV1,
-                ...(status === "Locked"
-                  ? styles.tournamentDrawTeamStatusLockedV1
-                  : {}),
-                ...(status === "Confirmed"
-                  ? styles.tournamentDrawTeamStatusConfirmedV1
-                  : {}),
-                ...(status === "Submitted"
-                  ? styles.tournamentDrawTeamStatusSubmittedV1
-                  : {}),
-              }}
-            >
-              {status}
-            </span>
-          )}
-          <div style={styles.tournamentDrawTeamActionsV1}>
-            {unassigned ? (
-              manualPreviewGroups.map((targetGroup) => (
-                <button
-                  key={`assign-${getDrawTeamKey(team)}-${targetGroup.id}`}
-                  type="button"
-                  style={styles.tournamentDrawGroupButtonV1}
-                  onClick={() => assignDrawTeamToGroup(team, targetGroup.id)}
-                  aria-label={`Assign ${getDrawTeamName(team)} to ${
-                    targetGroup.name
-                  }`}
-                >
-                  {targetGroup.code || targetGroup.name}
-                </button>
-              ))
-            ) : (
-              <>
-                {targetGroups.map((targetGroup) => (
-                  <button
-                    key={`move-${getDrawTeamKey(team)}-${targetGroup.id}`}
-                    type="button"
-                    style={styles.tournamentDrawGroupButtonV1}
-                    onClick={() => assignDrawTeamToGroup(team, targetGroup.id)}
-                    aria-label={`Move ${getDrawTeamName(team)} to ${
-                      targetGroup.name
-                    }`}
-                  >
-                    {targetGroup.code || targetGroup.name}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  style={{
-                    ...styles.tournamentDrawGroupButtonV1,
-                    ...styles.tournamentDrawRemoveButtonV1,
-                  }}
-                  onClick={() => removeDrawTeamFromGroup(team)}
-                >
-                  Remove
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      );
-    };
-    const renderTournamentDrawBoard = () => (
-      <div style={styles.tournamentSurface}>
-        {renderTournamentDrawSetupCard()}
-
-        <div
-          style={{
-            ...styles.tournamentDrawBoardV1,
-            ...(isMobile ? styles.tournamentDrawBoardMobileV1 : {}),
-          }}
-        >
-          <section style={styles.tournamentDrawUnassignedPanelV1}>
-            <div style={styles.tournamentDrawPanelHeaderV1}>
-              <div>
-                <div style={styles.tournamentEyebrow}>Unassigned</div>
-                <div style={styles.tournamentMiniTitle}>Team pool</div>
-              </div>
-              <span style={styles.tournamentStatusBadge}>
-                {drawUnassignedTeams.length}
-              </span>
-            </div>
-            <div style={styles.tournamentDrawTeamListV1}>
-              {drawUnassignedTeams.length ? (
-                drawUnassignedTeams.map((team) =>
-                  renderTournamentDrawTeamChip(team, { unassigned: true })
-                )
-              ) : (
-                <div style={styles.tournamentMutedPanel}>
-                  All registered teams are assigned.
-                </div>
-              )}
-            </div>
-          </section>
-
-          <section style={styles.tournamentDrawGroupsPanelV1}>
-            {manualPreviewGroups.map((group, groupIndex) => {
-              const groupCode = group.code || getTournamentGroupCode(groupIndex);
-              const groupColor = getTournamentGroupColor(groupCode);
-              const filledTeams = (group.teams || []).filter(isDrawTeamFilled);
-              const groupWarning =
-                filledTeams.length === 0
-                  ? "No teams assigned"
-                  : filledTeams.length < Math.min(2, configuredTeamsPerGroup)
-                    ? "Too few teams"
-                    : drawHasUnevenGroups
-                      ? "Check balance"
-                      : "Round robin ready";
-
-              return (
-                <div
-                  key={`draw-group-${group.id}`}
-                  style={{
-                    ...styles.tournamentDrawGroupCardV1,
-                    background: groupColor.soft,
-                    borderColor: groupColor.border,
-                  }}
-                >
-                  <div style={styles.tournamentGroupHeader}>
-                    <div>
-                      <div style={styles.tournamentMiniTitle}>{group.name}</div>
-                      <div style={styles.tournamentMutedText}>
-                        {filledTeams.length}/{(group.teams || []).length} teams
-                      </div>
-                    </div>
-                    <span
-                      style={{
-                        ...styles.tournamentTeamSeed,
-                        background: groupColor.soft,
-                        borderColor: groupColor.border,
-                        color: groupColor.text,
-                      }}
-                    >
-                      {groupCode}
-                    </span>
-                  </div>
-
-                  <span
-                    style={
-                      groupWarning === "Round robin ready"
-                        ? getSetupStatusStyle("Done")
-                        : groupWarning === "Check balance"
-                          ? getSetupStatusStyle("Next")
-                          : getSetupStatusStyle("Missing")
-                    }
-                  >
-                    {groupWarning}
-                  </span>
-
-                  <div style={styles.tournamentDrawTeamListV1}>
-                    {filledTeams.length ? (
-                      filledTeams.map((team) =>
-                        renderTournamentDrawTeamChip(team, { group })
-                      )
-                    ) : (
-                      <div style={styles.tournamentMutedText}>
-                        No teams assigned
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </section>
-        </div>
-      </div>
-    );
 
     const findKnockoutMatch = (label, knockoutOverride = displayKnockout) => {
       const knockout = knockoutOverride || {};
@@ -18135,363 +15394,6 @@ const savedRound = readStorageWithTtl(
               </div>
             );
           })}
-        </div>
-      );
-    };
-
-    const getKnockoutStageChipStyle = (status) => ({
-      ...styles.tournamentKnockoutStatusChipV1,
-      ...(status === "Completed" ? styles.tournamentSetupStatusDoneV2 : {}),
-      ...(status === "Ready" ? styles.tournamentSetupStatusNextV2 : {}),
-      ...(status === "In progress" ? styles.tournamentOrganizerStatusWarnV2 : {}),
-      ...(status === "Missing results" || status === "Missing groups"
-        ? styles.tournamentSetupStatusMissingV2
-        : {}),
-    });
-    const getSectionGroupMatches = (section, group) =>
-      (section.tournament.matches || []).filter((match) => {
-        const matchGroupId = String(match.groupId || "");
-        const matchGroupCode = String(match.groupCode || "");
-        return (
-          (matchGroupId && matchGroupId === String(group.id || "")) ||
-          (matchGroupCode && matchGroupCode === String(group.code || ""))
-        );
-      });
-    const getGroupAdvancementMeta = (section, group, groupIndex) => {
-      const groupCode = group.code || getTournamentGroupCode(groupIndex);
-      const teams = (group.teams || []).filter((team) =>
-        String(team.name || "").trim()
-      );
-      const expectedMatchCount =
-        teams.length > 1 ? (teams.length * (teams.length - 1)) / 2 : 0;
-      const groupMatches = getSectionGroupMatches(section, group);
-      const completedMatches = groupMatches.filter(isMatchCompleted);
-      const allResultsKnown =
-        expectedMatchCount > 0 && completedMatches.length >= expectedMatchCount;
-      const standing =
-        section.standings.find(
-          (item) => String(item.groupId || "") === String(group.id || "")
-        ) || {};
-
-      return {
-        group,
-        groupCode,
-        groupName: group.name || `Group ${groupCode}`,
-        teams,
-        expectedMatchCount,
-        completedMatches: completedMatches.length,
-        allResultsKnown,
-        winner:
-          allResultsKnown && standing.rows?.[0]?.teamName
-            ? standing.rows[0].teamName
-            : `Group ${groupCode} Winner`,
-        runnerUp:
-          allResultsKnown && standing.rows?.[1]?.teamName
-            ? standing.rows[1].teamName
-            : `Group ${groupCode} Runner-up`,
-      };
-    };
-    const getSectionAdvancementPreview = (section) =>
-      (section.groups || []).map((group, groupIndex) =>
-        getGroupAdvancementMeta(section, group, groupIndex)
-      );
-    const getSectionKnockoutMatches = (knockout = {}) =>
-      [
-        ...(knockout.quarterFinals || []),
-        ...(knockout.semiFinals || []),
-        knockout.final,
-        knockout.thirdPlace,
-      ].filter(Boolean);
-    const getSectionKnockoutStatus = (section) => {
-      const advancement = getSectionAdvancementPreview(section);
-      const hasEnoughGroups = advancement.length >= 2;
-      const groupsReady =
-        hasEnoughGroups &&
-        advancement.every((group) => group.teams.length >= 2);
-      if (!groupsReady) return "Missing groups";
-
-      const knockoutMatches = getSectionKnockoutMatches(
-        section.displayKnockout || {}
-      );
-      const finalMatch = section.displayKnockout?.final;
-      const thirdPlaceMatch = section.displayKnockout?.thirdPlace;
-      const finalComplete = finalMatch && isMatchCompleted(finalMatch);
-      const thirdComplete =
-        !activeTournament.thirdPlaceMatch ||
-        !thirdPlaceMatch ||
-        isMatchCompleted(thirdPlaceMatch);
-      if (finalComplete && thirdComplete) return "Completed";
-
-      const knockoutStarted = knockoutMatches.some(
-        (match) =>
-          isMatchCompleted(match) ||
-          getMatchDisplayStatus(match).status === "in_progress" ||
-          hasScoreValue(match.scoreA) ||
-          hasScoreValue(match.scoreB) ||
-          match.winnerSource
-      );
-      if (knockoutStarted) return "In progress";
-
-      const allGroupResultsKnown = advancement.every(
-        (group) => group.allResultsKnown
-      );
-      return allGroupResultsKnown ? "Ready" : "Missing results";
-    };
-    const getStageCompletionStatus = (matches = []) => {
-      const safeMatches = matches.filter(Boolean);
-      if (!safeMatches.length) return "Missing results";
-      if (safeMatches.every(isMatchCompleted)) return "Completed";
-      if (
-        safeMatches.some(
-          (match) =>
-            isMatchCompleted(match) ||
-            getMatchDisplayStatus(match).status === "in_progress" ||
-            hasScoreValue(match.scoreA) ||
-            hasScoreValue(match.scoreB) ||
-            match.winnerSource
-        )
-      ) {
-        return "In progress";
-      }
-      return "Ready";
-    };
-    const renderKnockoutStageChip = (label, status) => (
-      <span key={`${label}-${status}`} style={getKnockoutStageChipStyle(status)}>
-        {label}: {status}
-      </span>
-    );
-    const renderAdvancementSlot = (label, value, resolved) => (
-      <div key={label} style={styles.tournamentAdvancementSlotV1}>
-        <span>{label}</span>
-        <strong>{value}</strong>
-        <small>{resolved ? "From completed group results" : "Placeholder"}</small>
-      </div>
-    );
-    const getKnockoutPairingRuleLabel = (advancement = []) => {
-      const groupCodes = advancement
-        .map((group) => String(group.groupCode || "").trim())
-        .filter(Boolean);
-      const pairings = [];
-
-      for (let index = 0; index < groupCodes.length; index += 2) {
-        const groupA = groupCodes[index];
-        const groupB = groupCodes[index + 1];
-        if (!groupA || !groupB) continue;
-        pairings.push(`${groupA}1 vs ${groupB}2 / ${groupB}1 vs ${groupA}2`);
-      }
-
-      return pairings.length
-        ? pairings.slice(0, 2).join(" | ") + (pairings.length > 2 ? " ..." : "")
-        : "A1 vs B2 / B1 vs A2";
-    };
-    const renderKnockoutSetupCard = (section, advancement, status) => (
-      <div style={styles.tournamentKnockoutSetupCardV1}>
-        <div style={styles.tournamentSectionHeader}>
-          <div>
-            <div style={styles.tournamentEyebrow}>Knockout</div>
-            <div style={styles.tournamentSectionTitle}>
-              {getSeriesDisplayName(section.series)}
-            </div>
-          </div>
-          <span style={getKnockoutStageChipStyle(status)}>{status}</span>
-        </div>
-
-        <div style={styles.tournamentKnockoutRuleGridV1}>
-          {[
-            ["Class", getSeriesDisplayName(section.series)],
-            ["Groups", advancement.length],
-            ["Advancement", "Winner + runner-up"],
-            ["Semi rule", getKnockoutPairingRuleLabel(advancement)],
-            ["3rd place", activeTournament.thirdPlaceMatch ? "Enabled" : "Disabled"],
-          ].map(([label, value]) => (
-            <div key={`knockout-rule-${label}`} style={styles.tournamentDrawMetricV1}>
-              <span>{label}</span>
-              <strong>{value}</strong>
-            </div>
-          ))}
-        </div>
-
-        <label style={styles.tournamentKnockoutToggleV1}>
-          <input
-            type="checkbox"
-            checked={Boolean(activeTournament.thirdPlaceMatch)}
-            onChange={(event) =>
-              updateActiveTournament({
-                thirdPlaceMatch: event.target.checked,
-              })
-            }
-          />
-          <span>Play optional 3rd place match</span>
-        </label>
-      </div>
-    );
-    const renderAdvancementPreview = (advancement) => (
-      <div style={styles.tournamentKnockoutColumnV1}>
-        <div style={styles.tournamentBracketStageTitle}>Group stage</div>
-        <div style={styles.tournamentAdvancementGridV1}>
-          {advancement.flatMap((group) => [
-            renderAdvancementSlot(
-              `${group.groupName} Winner`,
-              group.winner,
-              group.allResultsKnown
-            ),
-            renderAdvancementSlot(
-              `${group.groupName} Runner-up`,
-              group.runnerUp,
-              group.allResultsKnown
-            ),
-          ])}
-        </div>
-      </div>
-    );
-    const renderKnockoutFlowSection = (section) => {
-      const sectionDisplayKnockout = section.displayKnockout || {};
-      const advancement = getSectionAdvancementPreview(section);
-      const status = getSectionKnockoutStatus(section);
-      const sectionContext = {
-        seriesId: hasExplicitTournamentSeries(activeTournament)
-          ? section.series.id
-          : "",
-        knockout: sectionDisplayKnockout,
-        matches: section.tournament.matches || [],
-        advancingTeamsByGroup: advancement.map((group) => ({
-          groupId: group.group.id,
-          groupName: group.groupName,
-          groupCode: group.groupCode,
-          winner: group.winner,
-          runnerUp: group.runnerUp,
-        })),
-      };
-      const semiStatus = getStageCompletionStatus(
-        sectionDisplayKnockout.semiFinals || []
-      );
-      const finalStatus = getStageCompletionStatus(
-        sectionDisplayKnockout.final ? [sectionDisplayKnockout.final] : []
-      );
-      const thirdStatus =
-        activeTournament.thirdPlaceMatch && sectionDisplayKnockout.thirdPlace
-          ? getStageCompletionStatus([sectionDisplayKnockout.thirdPlace])
-          : "Ready";
-
-      return (
-        <div
-          key={`knockout-flow-${section.series.id}`}
-          style={styles.tournamentKnockoutFlowCardV1}
-        >
-          {renderKnockoutSetupCard(section, advancement, status)}
-
-          <div style={styles.tournamentKnockoutChipRowV1}>
-            {renderKnockoutStageChip(
-              "Group stage",
-              status === "Missing groups"
-                ? "Missing groups"
-                : advancement.every((group) => group.allResultsKnown)
-                ? "Completed"
-                : "Missing results"
-            )}
-            {renderKnockoutStageChip("Semi-final", semiStatus)}
-            {renderKnockoutStageChip("Final", finalStatus)}
-            {activeTournament.thirdPlaceMatch &&
-              renderKnockoutStageChip("3rd place", thirdStatus)}
-          </div>
-
-          <div
-            style={{
-              ...styles.tournamentKnockoutFlowGridV1,
-              ...(isMobile ? styles.tournamentKnockoutFlowGridMobileV1 : {}),
-            }}
-          >
-            {renderAdvancementPreview(advancement)}
-
-            <div style={styles.tournamentKnockoutColumnV1}>
-              <div style={styles.tournamentBracketStageTitle}>Semi-finals</div>
-              {(sectionDisplayKnockout.semiFinals || []).length ? (
-                (sectionDisplayKnockout.semiFinals || []).map((match) =>
-                  section.hasStoredKnockout
-                    ? renderBracketMatch(
-                        match,
-                        "semiFinals",
-                        false,
-                        sectionContext
-                      )
-                    : renderBracketPreviewMatch(match, false, sectionContext)
-                )
-              ) : (
-                <div style={styles.tournamentMutedPanel}>
-                  Build groups to preview semifinals.
-                </div>
-              )}
-            </div>
-
-            <div style={styles.tournamentKnockoutColumnV1}>
-              <div style={styles.tournamentBracketStageTitle}>Finals</div>
-              {section.hasStoredKnockout
-                ? renderBracketMatch(
-                    sectionDisplayKnockout.final,
-                    "final",
-                    true,
-                    sectionContext
-                  )
-                : renderBracketPreviewMatch(
-                    sectionDisplayKnockout.final,
-                    true,
-                    sectionContext
-                  )}
-              {activeTournament.thirdPlaceMatch &&
-                sectionDisplayKnockout.thirdPlace && (
-                  section.hasStoredKnockout
-                    ? renderBracketMatch(
-                        sectionDisplayKnockout.thirdPlace,
-                        "thirdPlace",
-                        false,
-                        sectionContext
-                      )
-                    : renderBracketPreviewMatch(
-                        sectionDisplayKnockout.thirdPlace,
-                        false,
-                        sectionContext
-                      )
-                )}
-            </div>
-          </div>
-        </div>
-      );
-    };
-    const renderTournamentKnockoutFlow = () => {
-      const sectionsWithKnockout = visibleBracketSections.filter((section) =>
-        Boolean(
-          (section.displayKnockout?.quarterFinals || []).length ||
-            (section.displayKnockout?.semiFinals || []).length ||
-            section.displayKnockout?.final
-        )
-      );
-
-      return (
-        <div style={styles.tournamentSurface}>
-          <div style={styles.tournamentSectionHeader}>
-            <div>
-              <div style={styles.tournamentEyebrow}>Finals flow</div>
-              <div style={styles.tournamentSectionTitle}>
-                Knockout setup and preview
-              </div>
-            </div>
-            <button
-              style={styles.primaryButtonSmall}
-              onClick={generateTournamentKnockout}
-            >
-              {tournamentText.generateKnockout}
-            </button>
-          </div>
-
-          {sectionsWithKnockout.length ? (
-            <div style={styles.tournamentStandingsList}>
-              {sectionsWithKnockout.map(renderKnockoutFlowSection)}
-            </div>
-          ) : (
-            <div style={styles.tournamentMutedPanel}>
-              {tournamentText.noKnockoutYet}
-            </div>
-          )}
         </div>
       );
     };
@@ -18755,465 +15657,6 @@ const savedRound = readStorageWithTtl(
     );
     const courtBlockSummaries = getCourtBlockSummaries(activeTournament);
     const unplacedScheduleMatches = getUnplacedScheduleMatches(activeTournament);
-    const matchControlItems = displayHallScheduleBatches
-      .flatMap((batch, batchIndex) =>
-        (batch.items || []).map((item, courtIndex) =>
-          item
-            ? {
-                ...item,
-                controlBatchId: batch.id,
-                controlBatchNumber: batch.number,
-                controlBatchIndex: batchIndex,
-                controlCourt:
-                  item.scheduleCourt || item.court || courtIndex + 1,
-                controlCourtIndex: courtIndex,
-                controlTime:
-                  item.scheduleTime || item.startTime || batch.time || "",
-                controlDuration: item.durationMin || batch.duration || "",
-                controlOrder:
-                  Number.isFinite(Number(item.scheduleOrder))
-                    ? Number(item.scheduleOrder)
-                    : batchIndex * scheduleCourtCount + courtIndex,
-              }
-            : null
-        )
-      )
-      .filter(Boolean);
-    const matchControlStatusItems = matchControlItems.map((match) => {
-      const displayStatus = getMatchDisplayStatus(match);
-      const hasAnyScore =
-        hasScoreValue(match.scoreA) || hasScoreValue(match.scoreB);
-      const hasBothScores =
-        hasScoreValue(match.scoreA) && hasScoreValue(match.scoreB);
-      const missingScore = Boolean(
-        matchFinishWarnings[match.id] ||
-          ((displayStatus.status === "completed" ||
-            displayStatus.status === "in_progress" ||
-            hasAnyScore ||
-            match.scoreTouched) &&
-            !hasBothScores)
-      );
-
-      return {
-        ...match,
-        controlStatus: displayStatus.status,
-        controlStatusLabel: displayStatus.label,
-        controlMissingScore: missingScore,
-      };
-    });
-    const matchControlNextItems = matchControlStatusItems
-      .filter((match) => match.controlStatus === "scheduled")
-      .slice(0, 3);
-    const matchControlMissingScoreItems = matchControlStatusItems.filter(
-      (match) => match.controlMissingScore
-    );
-    const matchControlAvailableCourts = Array.from(
-      new Set(
-        matchControlStatusItems
-          .map((match) => Number(match.controlCourt || 0))
-          .filter((court) => Number.isFinite(court) && court > 0)
-      )
-    ).sort((a, b) => a - b);
-    const activeMatchControlSeriesLabel =
-      hasExplicitTournamentSeries(activeTournament)
-        ? activeTournamentSeriesFilter === "all"
-          ? tournamentText.allClassesLabel
-          : getSeriesDisplayName(
-              tournamentSeriesClasses.find(
-                (series) =>
-                  String(series.id) === String(activeTournamentSeriesFilter)
-              ) || activeTournamentSeriesFilter
-            )
-        : getSeriesDisplayName(selectedSetupSeries);
-    const matchControlFilterOptions = [
-      { id: "all", label: "All" },
-      { id: "live", label: "Live" },
-      { id: "next", label: "Next" },
-      { id: "scheduled", label: tournamentText.matchStatusScheduled },
-      { id: "finished", label: tournamentText.matchStatusCompleted },
-      { id: "missing", label: "Missing score" },
-    ];
-    const filteredMatchControlItems = matchControlStatusItems.filter((match) => {
-      const courtMatches =
-        activeMatchControlCourt === "all" ||
-        String(match.controlCourt || "") === String(activeMatchControlCourt);
-      if (!courtMatches) return false;
-
-      if (activeMatchControlFilter === "live") {
-        return match.controlStatus === "in_progress";
-      }
-      if (activeMatchControlFilter === "next") {
-        return matchControlNextItems.some((item) => item.id === match.id);
-      }
-      if (activeMatchControlFilter === "scheduled") {
-        return match.controlStatus === "scheduled";
-      }
-      if (activeMatchControlFilter === "finished") {
-        return match.controlStatus === "completed";
-      }
-      if (activeMatchControlFilter === "missing") {
-        return match.controlMissingScore;
-      }
-
-      return true;
-    });
-    const getMatchControlWinnerLabel = (match) => {
-      if (!isMatchCompleted(match)) return "";
-      const winnerId = String(match.winnerTeamId || "");
-      const teamAId = String(match.teamAId || match.teamA || "");
-      const teamBId = String(match.teamBId || match.teamB || "");
-      if (winnerId && winnerId === teamAId) return match.teamA || "";
-      if (winnerId && winnerId === teamBId) return match.teamB || "";
-
-      const scoreA = parseMatchScore(match.scoreA);
-      const scoreB = parseMatchScore(match.scoreB);
-      if (scoreA === null || scoreB === null) return "";
-      if (scoreA === scoreB) return language === "no" ? "Uavgjort" : "Draw";
-      return scoreA > scoreB ? match.teamA || "" : match.teamB || "";
-    };
-    const getMatchControlStageLabel = (match) => {
-      const phase = String(match.phase || match.stage || "").toLowerCase();
-      if (phase === "semifinal" || phase === "semifinals") return "Semi-final";
-      if (phase === "final") return tournamentText.final;
-      if (phase === "thirdplace" || phase === "third_place") {
-        return "3rd place";
-      }
-      if (isKnockoutMatch(match)) {
-        return match.round || tournamentText.knockoutLabel;
-      }
-      return match.groupName || match.round || tournamentText.groupsTab;
-    };
-    const getMatchControlStatusStyle = (status) => ({
-      ...styles.tournamentMatchControlStatusChipV2,
-      ...(status === "completed"
-        ? styles.tournamentMatchControlStatusDoneV2
-        : {}),
-      ...(status === "in_progress"
-        ? styles.tournamentMatchControlStatusLiveV2
-        : {}),
-    });
-    const renderMatchControlScore = (match, side) => {
-      const isSideA = side === "A";
-      const teamLabel = isSideA ? match.teamA : match.teamB;
-      const scoreValue = String(match?.[isSideA ? "scoreA" : "scoreB"] ?? "");
-
-      return (
-        <div style={styles.tournamentMatchControlScoreLineV2}>
-          <span>{teamLabel || "-"}</span>
-          <div style={styles.tournamentMatchControlScoreBoxV2}>
-            <button
-              type="button"
-              style={styles.tournamentMatchControlScoreButtonV2}
-              onClick={() => incrementMatchScore(match.id, side, -1)}
-              aria-label={`${teamLabel} decrease score`}
-            >
-              <SvgIcon type="minus" size={12} strokeWidth={2.6} />
-            </button>
-            <input
-              style={styles.tournamentMatchControlScoreInputV2}
-              inputMode="numeric"
-              value={scoreValue}
-              onChange={(event) =>
-                updateMatchScore(match.id, side, event.target.value)
-              }
-              placeholder="0"
-            />
-            <button
-              type="button"
-              style={styles.tournamentMatchControlScoreButtonV2}
-              onClick={() => incrementMatchScore(match.id, side, 1)}
-              aria-label={`${teamLabel} increase score`}
-            >
-              <SvgIcon type="plus" size={12} strokeWidth={2.6} />
-            </button>
-          </div>
-        </div>
-      );
-    };
-    const renderMatchControlCard = (match) => {
-      const isLive = match.controlStatus === "in_progress";
-      const isFinished = match.controlStatus === "completed";
-      const winnerLabel = getMatchControlWinnerLabel(match);
-      const stageLabel = getMatchControlStageLabel(match);
-
-      return (
-        <article
-          key={`match-control-${match.id}`}
-          style={{
-            ...styles.tournamentMatchControlCardV2,
-            ...(isLive ? styles.tournamentMatchControlCardLiveV2 : {}),
-          }}
-        >
-          <div style={styles.tournamentMatchControlCardTopV2}>
-            <div style={styles.tournamentMatchControlMetaV2}>
-              <span style={styles.tournamentMatchControlCourtChipV2}>
-                {tournamentText.courtLabel} {match.controlCourt || "-"}
-              </span>
-              <span>{match.controlTime || "-"}</span>
-              <span>{stageLabel}</span>
-              {match.seriesName && (
-                <span>{getSeriesShortLabel(match.seriesName)}</span>
-              )}
-            </div>
-            <span style={getMatchControlStatusStyle(match.controlStatus)}>
-              {isLive ? "Live" : match.controlStatusLabel}
-            </span>
-          </div>
-
-          {(isKnockoutMatch(match) || match.phase || match.stage === "knockout") && (
-            <div style={styles.tournamentMatchControlStageRowV2}>
-              {["semifinal", "final", "thirdPlace", "third_place"].some((stage) =>
-                String(match.phase || match.stage || "").includes(stage)
-              )
-                ? stageLabel
-                : tournamentText.knockoutLabel}
-            </div>
-          )}
-
-          <div
-            style={{
-              ...styles.tournamentMatchControlScoreGridV2,
-              ...(isLive ? styles.tournamentMatchControlScoreGridLiveV2 : {}),
-            }}
-          >
-            {renderMatchControlScore(match, "A")}
-            {renderMatchControlScore(match, "B")}
-          </div>
-
-          {(winnerLabel || match.controlMissingScore) && (
-            <div style={styles.tournamentMatchControlResultRowV2}>
-              {winnerLabel && (
-                <span style={styles.tournamentMatchControlWinnerChipV2}>
-                  {tournamentText.winnerLabel}: {winnerLabel}
-                </span>
-              )}
-              {match.controlMissingScore && (
-                <span style={styles.tournamentMatchControlWarningChipV2}>
-                  Missing score
-                </span>
-              )}
-            </div>
-          )}
-
-          <div style={styles.tournamentMatchControlActionsV2}>
-            {!isFinished && (
-              <button
-                type="button"
-                style={styles.teamBuilderActionButtonPrimaryV2}
-                onClick={() => confirmMatchCompleted(match.id)}
-              >
-                {tournamentText.markFinished}
-              </button>
-            )}
-            <button
-              type="button"
-              style={styles.teamBuilderActionButtonV2}
-              onClick={() =>
-                setActiveScheduleEditMatchId((current) =>
-                  current === match.id ? "" : match.id
-                )
-              }
-            >
-              Open match
-            </button>
-            <button
-              type="button"
-              style={styles.teamBuilderActionButtonV2}
-              onClick={() => startScheduleMoveMode(match.id, "swap")}
-            >
-              {language === "no" ? "Flytt" : "Move"}
-            </button>
-            {(isFinished || hasScoreValue(match.scoreA) || hasScoreValue(match.scoreB)) && (
-              <button
-                type="button"
-                style={styles.teamBuilderActionButtonDangerV2}
-                onClick={() => clearMatchResult(match.id)}
-              >
-                {tournamentText.clearResult}
-              </button>
-            )}
-          </div>
-        </article>
-      );
-    };
-    const renderMatchControlNextItem = (match) => (
-      <button
-        key={`next-up-${match.id}`}
-        type="button"
-        style={styles.tournamentMatchControlNextItemV2}
-        onClick={() => {
-          setActiveMatchControlFilter("next");
-          setActiveMatchControlCourt("all");
-          setActiveScheduleEditMatchId(match.id);
-        }}
-      >
-        <span>
-          {match.controlTime || "-"} / {tournamentText.courtLabel}{" "}
-          {match.controlCourt || "-"}
-        </span>
-        <strong>
-          {match.teamA || match.sourceA || "-"} {tournamentText.vsLabel}{" "}
-          {match.teamB || match.sourceB || "-"}
-        </strong>
-      </button>
-    );
-    const renderTournamentMatchControlRoom = () => (
-      <div style={styles.tournamentMatchControlShellV2}>
-        <div style={styles.tournamentMatchControlHeaderV2}>
-          <div>
-            <div style={styles.tournamentEyebrow}>Match control</div>
-            <div style={styles.tournamentSectionTitle}>Control room</div>
-          </div>
-          <button
-            style={styles.primaryButtonSmall}
-            onClick={generateTournamentMatches}
-          >
-            {tournamentText.generateBasicMatches}
-          </button>
-        </div>
-
-        <div style={styles.tournamentMatchControlSummaryGridV2}>
-          {[
-            ["Total", matchControlStatusItems.length],
-            [
-              "Live",
-              matchControlStatusItems.filter(
-                (match) => match.controlStatus === "in_progress"
-              ).length,
-            ],
-            ["Next", matchControlNextItems.length],
-            [
-              tournamentText.matchStatusCompleted,
-              matchControlStatusItems.filter(
-                (match) => match.controlStatus === "completed"
-              ).length,
-            ],
-            ["Missing scores", matchControlMissingScoreItems.length],
-            ["Class", activeMatchControlSeriesLabel || "-"],
-          ].map(([label, value]) => (
-            <div key={`match-control-summary-${label}`} style={styles.tournamentInfoTile}>
-              <span>{label}</span>
-              <strong>{value}</strong>
-            </div>
-          ))}
-        </div>
-
-        <div style={styles.tournamentMatchControlFilterRowV2}>
-          {matchControlFilterOptions.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              style={{
-                ...styles.tournamentMatchControlFilterButtonV2,
-                ...(activeMatchControlFilter === option.id
-                  ? styles.tournamentMatchControlFilterButtonActiveV2
-                  : {}),
-              }}
-              onClick={() => setActiveMatchControlFilter(option.id)}
-            >
-              {option.label}
-            </button>
-          ))}
-          {matchControlAvailableCourts.length > 1 && (
-            <select
-              style={styles.tournamentMatchControlCourtSelectV2}
-              value={activeMatchControlCourt}
-              onChange={(event) => setActiveMatchControlCourt(event.target.value)}
-              aria-label="Filter by court"
-            >
-              <option value="all">{tournamentText.courtsLabel}: All</option>
-              {matchControlAvailableCourts.map((court) => (
-                <option key={`match-control-court-${court}`} value={court}>
-                  {tournamentText.courtLabel} {court}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-
-        <div
-          style={{
-            ...styles.tournamentMatchControlLayoutV2,
-            ...(isMobile ? styles.tournamentMatchControlLayoutMobileV2 : {}),
-          }}
-        >
-          <div style={styles.tournamentMatchControlListV2}>
-            {filteredMatchControlItems.length ? (
-              filteredMatchControlItems.map(renderMatchControlCard)
-            ) : (
-              <div style={styles.tournamentMutedPanel}>
-                {tournamentText.noMatchesYet}
-              </div>
-            )}
-          </div>
-
-          <aside style={styles.tournamentMatchControlRailV2}>
-            <div style={styles.tournamentMatchControlRailCardV2}>
-              <div style={styles.tournamentMiniTitle}>
-                {tournamentText.nextMatchesTitle}
-              </div>
-              {matchControlNextItems.length ? (
-                <div style={styles.tournamentSnapshotList}>
-                  {matchControlNextItems.map(renderMatchControlNextItem)}
-                </div>
-              ) : (
-                <div style={styles.tournamentMutedText}>
-                  {tournamentText.noMatchesYet}
-                </div>
-              )}
-            </div>
-
-            <div style={styles.tournamentMatchControlRailCardV2}>
-              <div style={styles.tournamentMiniTitle}>Warnings</div>
-              {matchControlMissingScoreItems.length ? (
-                <div style={styles.tournamentWarningListV2}>
-                  {matchControlMissingScoreItems.slice(0, 4).map((match) => (
-                    <span
-                      key={`missing-score-${match.id}`}
-                      style={styles.tournamentWarningChipV2}
-                    >
-                      {match.controlTime || "-"} / {match.teamA}{" "}
-                      {tournamentText.vsLabel} {match.teamB}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <div style={styles.tournamentMutedText}>
-                  No missing scores.
-                </div>
-              )}
-            </div>
-
-            <div style={styles.tournamentMatchControlRailCardV2}>
-              <div style={styles.tournamentMiniTitle}>Public live</div>
-              <div style={styles.tournamentMutedText}>
-                {isBackendPublished
-                  ? "Live view is available for spectators."
-                  : "Publish to enable the spectator live view."}
-              </div>
-              <div style={styles.tournamentInlineActions}>
-                <button
-                  type="button"
-                  style={styles.secondaryButtonCompact}
-                  onClick={openActiveTournamentPublicPreview}
-                  disabled={!publicUrl}
-                >
-                  Follow live
-                </button>
-                <button
-                  type="button"
-                  style={styles.secondaryButtonCompact}
-                  onClick={copyActiveTournamentPublicUrl}
-                  disabled={!publicUrl}
-                >
-                  Copy link
-                </button>
-              </div>
-            </div>
-          </aside>
-        </div>
-      </div>
-    );
 
     const renderHallSchedulePreview = (limit = 12) => {
       return renderTournamentHallScheduleGrid({
@@ -19358,9 +15801,6 @@ const savedRound = readStorageWithTtl(
                   </button>
                 )}
               </div>
-
-              {activeTournament && renderTournamentSetupProgress()}
-              {activeTournament && renderTournamentFormatPresets()}
 
               {activeTournament && (
                 <>
@@ -19903,7 +16343,122 @@ const savedRound = readStorageWithTtl(
                     </div>
                   </div>
 
-                  {renderTournamentDrawSetupCard({ compact: true })}
+                  <div style={styles.tournamentSetupBlock}>
+                    <div style={styles.tournamentSectionHeader}>
+                      <div>
+                        <div style={styles.tournamentBlockTitle}>
+                          {tournamentText.manualGroupEntryTitle}
+                        </div>
+                        <div style={styles.tournamentSidebarNote}>
+                          {tournamentText.manualGroupEntryHint}
+                        </div>
+                      </div>
+                      <div style={styles.tournamentStatusBadge}>
+                        {filledSlotCount}/{configuredTotalTeams}
+                      </div>
+                    </div>
+
+                    <div style={styles.tournamentSubTabs}>
+                      {tournamentSeriesClasses.map((series) => (
+                        <button
+                          key={`manual-series-${series.id}`}
+                          type="button"
+                          style={{
+                            ...styles.tournamentSubTab,
+                            ...(String(selectedSetupSeries?.id || "") ===
+                            String(series.id)
+                              ? styles.tournamentSubTabActive
+                              : {}),
+                          }}
+                          onClick={() =>
+                            setActiveTournamentSetupSeriesId(series.id)
+                          }
+                        >
+                          {getSeriesDisplayName(series)}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div style={styles.tournamentSidebarSlotList}>
+                      {manualPreviewGroups.map((group, groupIndex) => {
+                        const groupColor = getTournamentGroupColor(group.code);
+
+                        return (
+                          <div
+                            key={`sidebar-${group.id}`}
+                            style={{
+                              ...styles.tournamentSidebarGroup,
+                              background: groupColor.soft,
+                              borderColor: groupColor.border,
+                            }}
+                          >
+                            <div style={styles.tournamentSidebarGroupHeader}>
+                              <strong>{group.name}</strong>
+                              <span>
+                                {(group.teams || []).length}{" "}
+                                {tournamentText.slotsLabel}
+                              </span>
+                            </div>
+                            {(group.teams || []).map((team, slotIndex) => (
+                              <div
+                                key={`${activeTournament.id}-sidebar-${groupIndex}-${slotIndex}`}
+                                style={styles.tournamentSidebarSlotRow}
+                              >
+                                <span
+                                  style={{
+                                    ...styles.tournamentTeamSeed,
+                                    background: groupColor.soft,
+                                    borderColor: groupColor.border,
+                                    color: groupColor.text,
+                                  }}
+                                >
+                                  {team.slot || `${group.code}${slotIndex + 1}`}
+                                </span>
+                                <input
+                                  style={styles.tournamentSlotInput}
+                                  value={team.name || ""}
+                                  onChange={(e) =>
+                                    updateManualGroupSlot(
+                                      groupIndex,
+                                      slotIndex,
+                                      e.target.value
+                                    )
+                                  }
+                                  placeholder=""
+                                  aria-label={team.slot || `${group.code}${slotIndex + 1}`}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {manualSlotsComplete && selectedSetupSeries && (
+                      <div style={styles.tournamentInlineActions}>
+                        <button
+                          type="button"
+                          style={styles.primaryButtonSmall}
+                          onClick={() =>
+                            setTournamentActionMessage(doneWithSelectedClassLabel)
+                          }
+                        >
+                          {doneWithSelectedClassLabel}
+                        </button>
+                        {nextSetupSeries && (
+                          <button
+                            type="button"
+                            style={styles.secondaryButtonCompact}
+                            onClick={() =>
+                              setActiveTournamentSetupSeriesId(nextSetupSeries.id)
+                            }
+                          >
+                            {continueToNextClassLabel}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
 
                   <button
                     style={styles.tournamentRegistrationToggle}
@@ -20081,13 +16636,51 @@ const savedRound = readStorageWithTtl(
             <main style={styles.tournamentMainPanel}>
               {activeTournament ? (
                 <>
-                  {renderTournamentOrganizerHeader()}
-
-                  <div style={styles.tournamentOrganizerOverviewGridV2}>
-                    {!shouldShowTournamentSetupPanel &&
-                      renderTournamentFormatPresets()}
-                    {renderTournamentSeriesSetupCards()}
-                    {renderTournamentFormatHelper()}
+                  <div style={styles.tournamentHero}>
+                    <div style={styles.tournamentHeroText}>
+                      <h2 style={styles.tournamentHeroTitle}>
+                        {activeTournament.name}
+                      </h2>
+                      <div style={styles.tournamentHeroMeta}>
+                        <span style={styles.tournamentHeroChip}>{formatLabel}</span>
+                        <span style={styles.tournamentHeroBadge}>
+                          {isPublished
+                            ? tournamentText.published
+                            : tournamentText.unpublished}
+                        </span>
+                        <span
+                          style={{
+                            ...styles.tournamentSyncBadge,
+                            ...(tournamentSyncStatus === "error"
+                              ? styles.tournamentSyncBadgeError
+                              : {}),
+                            ...(tournamentSyncStatus === "local"
+                              ? styles.tournamentSyncBadgeLocal
+                              : {}),
+                          }}
+                          title={tournamentSyncMessage}
+                        >
+                          {tournamentSyncLabel}
+                        </span>
+                      </div>
+                      {String(activeTournament.rules || "").trim() && (
+                        <p style={styles.tournamentHeroRules}>
+                          {activeTournament.rules}
+                        </p>
+                      )}
+                    </div>
+                    <div style={styles.tournamentHeroActions}>
+                      <button
+                        style={styles.tournamentLightButton}
+                        onClick={() =>
+                          setShowTournamentSetupPanel((prev) => !prev)
+                        }
+                      >
+                        {shouldShowTournamentSetupPanel
+                          ? tournamentText.hideSetup
+                          : tournamentText.editSetup}
+                      </button>
+                    </div>
                   </div>
 
                   <div
@@ -20193,19 +16786,6 @@ const savedRound = readStorageWithTtl(
                             </div>
                           </div>
 
-                          {groupHealthWarnings.length > 0 && (
-                            <div style={styles.tournamentWarningListV2}>
-                              {groupHealthWarnings.slice(0, 3).map((warning) => (
-                                <span
-                                  key={`${warning.series}-${warning.text}`}
-                                  style={styles.tournamentWarningChipV2}
-                                >
-                                  {warning.series}: {warning.text}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-
                           {visibleGroups.length > 0 ? (
                             <div style={styles.tournamentOverviewSeriesList}>
                               {visibleSeriesSections
@@ -20262,26 +16842,6 @@ const savedRound = readStorageWithTtl(
                                             {(group.teams || []).length}{" "}
                                             {tournamentText.slotsLabel}
                                           </div>
-                                          {filledTeams.length < 2 ? (
-                                            <span
-                                              style={getSetupStatusStyle("Missing")}
-                                            >
-                                              Too few teams
-                                            </span>
-                                          ) : filledTeams.length <
-                                            (group.teams || []).length ? (
-                                            <span
-                                              style={getSetupStatusStyle("Next")}
-                                            >
-                                              Open slots
-                                            </span>
-                                          ) : (
-                                            <span
-                                              style={getSetupStatusStyle("Done")}
-                                            >
-                                              Ready
-                                            </span>
-                                          )}
                                           <div style={styles.tournamentSnapshotList}>
                                             {(group.teams || []).map(
                                               (team, index) => (
@@ -20458,11 +17018,311 @@ const savedRound = readStorageWithTtl(
                       </div>
                     )}
 
-                    {activeTournamentView === "groups" &&
-                      renderTournamentDrawBoard()}
+                    {activeTournamentView === "groups" && (
+                      <div style={styles.tournamentSurface}>
+                        <div style={styles.tournamentSectionHeader}>
+                          <div>
+                            <div style={styles.tournamentEyebrow}>
+                              {tournamentText.groupsTab}
+                            </div>
+                            <div style={styles.tournamentSectionTitle}>
+                              {tournamentText.groupStagePreview}
+                            </div>
+                          </div>
+                          <div style={styles.tournamentStatusBadge}>
+                            {visibleFilledSlotCount}/
+                            {visibleConfiguredTotalTeams || configuredTotalTeams}
+                          </div>
+                        </div>
 
-                    {activeTournamentView === "bracket" &&
-                      renderTournamentKnockoutFlow()}
+                        {visibleGroups.length > 0 ? (
+                          <div
+                            style={{
+                              ...styles.tournamentGroupGrid,
+                              ...(isMobile ? styles.tournamentGroupGridMobile : {}),
+                            }}
+                        >
+                          {visibleGroups.map((group, groupIndex) => {
+                              const groupColor = getTournamentGroupColor(group.code);
+
+                              return (
+                                <div
+                                  key={group.id}
+                                  style={{
+                                    ...styles.tournamentGroupCard,
+                                    background: groupColor.soft,
+                                    borderColor: groupColor.border,
+                                  }}
+                                >
+                                  <div style={styles.tournamentGroupHeader}>
+                                    <div>
+                                      <div style={styles.tournamentMiniTitle}>
+                                        {group.name}
+                                      </div>
+                                      <div style={styles.tournamentMutedText}>
+                                        {tournamentText.manualPaperOrderLabel}
+                                      </div>
+                                    </div>
+                                    <div
+                                      style={{
+                                        ...styles.tournamentGroupCount,
+                                        background: groupColor.accent,
+                                      }}
+                                    >
+                                      {Array.isArray(group.teams)
+                                        ? group.teams.length
+                                        : 0}
+                                    </div>
+                                  </div>
+                                  {Array.isArray(group.teams) &&
+                                  group.teams.length > 0 ? (
+                                    <div style={styles.tournamentSnapshotList}>
+                                      {group.teams.map((team, slotIndex) => (
+                                        <div
+                                          key={`${activeTournament.id}-group-${groupIndex}-${slotIndex}`}
+                                          style={styles.tournamentGroupTeamRow}
+                                        >
+                                          <span
+                                            style={{
+                                              ...styles.tournamentTeamSeed,
+                                              background: groupColor.soft,
+                                              borderColor: groupColor.border,
+                                              color: groupColor.text,
+                                            }}
+                                          >
+                                            {team.slot || `${group.code}${slotIndex + 1}`}
+                                          </span>
+                                          <input
+                                            style={styles.tournamentSlotInput}
+                                            value={team.name || ""}
+                                            onChange={(e) =>
+                                              updateManualGroupSlot(
+                                                groupIndex,
+                                                slotIndex,
+                                                e.target.value
+                                              )
+                                            }
+                                            placeholder=""
+                                            aria-label={
+                                              team.slot || `${group.code}${slotIndex + 1}`
+                                            }
+                                          />
+                                          <strong>{team.club || "-"}</strong>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    <div style={styles.tournamentMutedText}>
+                                      {tournamentText.noTeamsYet}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div style={styles.tournamentMutedPanel}>
+                            {tournamentText.noGroupsYet}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {activeTournamentView === "bracket" && (
+                      <div style={styles.tournamentSurface}>
+                        <div style={styles.tournamentSectionHeader}>
+                          <div>
+                            <div style={styles.tournamentEyebrow}>
+                              {tournamentText.knockoutLabel}
+                            </div>
+                            <div style={styles.tournamentSectionTitle}>
+                              {tournamentText.knockoutPreview}
+                            </div>
+                          </div>
+                          <button
+                            style={styles.primaryButtonSmall}
+                            onClick={generateTournamentKnockout}
+                          >
+                            {tournamentText.generateKnockout}
+                          </button>
+                        </div>
+
+                        {visibleBracketSections.some(
+                          (section) =>
+                            (section.displayKnockout.quarterFinals || [])
+                              .length ||
+                            (section.displayKnockout.semiFinals || []).length
+                        ) ? (
+                          <div style={styles.tournamentStandingsList}>
+                            {visibleBracketSections.map((section) => {
+                              const sectionDisplayKnockout =
+                                section.displayKnockout || {};
+                              const hasSectionKnockout = Boolean(
+                                (sectionDisplayKnockout.quarterFinals || [])
+                                  .length ||
+                                  (sectionDisplayKnockout.semiFinals || []).length
+                              );
+                              if (!hasSectionKnockout) return null;
+
+                              const sectionAdvancingTeams = section.standings.map(
+                                (group, index) => {
+                                  const sourceGroup =
+                                    section.groups.find(
+                                      (item) => item.id === group.groupId
+                                    ) || {};
+
+                                  return {
+                                    groupId: group.groupId,
+                                    groupName: group.groupName,
+                                    groupCode:
+                                      sourceGroup.code ||
+                                      getTournamentGroupCode(index),
+                                    winner:
+                                      group.rows?.[0]?.teamName ||
+                                      `${group.groupName} ${tournamentText.winnerLabel}`,
+                                    runnerUp:
+                                      group.rows?.[1]?.teamName ||
+                                      `${group.groupName} ${tournamentText.runnerUpLabel}`,
+                                  };
+                                }
+                              );
+                              const sectionContext = {
+                                seriesId: hasExplicitTournamentSeries(activeTournament)
+                                  ? section.series.id
+                                  : "",
+                                knockout: sectionDisplayKnockout,
+                                matches: section.tournament.matches || [],
+                                advancingTeamsByGroup: sectionAdvancingTeams,
+                              };
+
+                              return (
+                                <div
+                                  key={`bracket-series-${section.series.id}`}
+                                  style={styles.tournamentStandingsCard}
+                                >
+                                  {hasExplicitTournamentSeries(activeTournament) && (
+                                    <div style={styles.tournamentMiniTitle}>
+                                      {getSeriesDisplayName(section.series)}
+                                    </div>
+                                  )}
+                                  <div
+                                    style={{
+                                      ...styles.tournamentBracketBoard,
+                                      ...(isMobile
+                                        ? styles.tournamentGroupGridMobile
+                                        : {}),
+                                    }}
+                                  >
+                                    {(sectionDisplayKnockout.quarterFinals || [])
+                                      .length > 0 && (
+                                      <div style={styles.tournamentBracketStage}>
+                                        <div
+                                          style={
+                                            styles.tournamentBracketStageTitle
+                                          }
+                                        >
+                                          {tournamentText.firstKnockoutLabel}
+                                        </div>
+                                        {sectionDisplayKnockout.quarterFinals.map(
+                                          (match) =>
+                                            section.hasStoredKnockout
+                                              ? renderBracketMatch(
+                                                  match,
+                                                  "quarterFinals",
+                                                  false,
+                                                  sectionContext
+                                                )
+                                              : renderBracketPreviewMatch(
+                                                  match,
+                                                  false,
+                                                  sectionContext
+                                                )
+                                        )}
+                                      </div>
+                                    )}
+
+                                    <div style={styles.tournamentBracketStage}>
+                                      <div
+                                        style={styles.tournamentBracketStageTitle}
+                                      >
+                                        {tournamentText.semiFinals}
+                                      </div>
+                                      {(
+                                        sectionDisplayKnockout.semiFinals || []
+                                      ).map((match) =>
+                                        section.hasStoredKnockout
+                                          ? renderBracketMatch(
+                                              match,
+                                              "semiFinals",
+                                              false,
+                                              sectionContext
+                                            )
+                                          : renderBracketPreviewMatch(
+                                              match,
+                                              false,
+                                              sectionContext
+                                            )
+                                      )}
+                                    </div>
+
+                                    <div style={styles.tournamentBracketStage}>
+                                      <div
+                                        style={styles.tournamentBracketStageTitle}
+                                      >
+                                        {tournamentText.final}
+                                      </div>
+                                      {section.hasStoredKnockout
+                                        ? renderBracketMatch(
+                                            sectionDisplayKnockout.final,
+                                            "final",
+                                            true,
+                                            sectionContext
+                                          )
+                                        : renderBracketPreviewMatch(
+                                            sectionDisplayKnockout.final,
+                                            true,
+                                            sectionContext
+                                          )}
+                                    </div>
+
+                                    {activeTournament.thirdPlaceMatch &&
+                                      sectionDisplayKnockout.thirdPlace && (
+                                        <div
+                                          style={styles.tournamentBracketStage}
+                                        >
+                                          <div
+                                            style={
+                                              styles.tournamentBracketStageTitle
+                                            }
+                                          >
+                                            {tournamentText.thirdPlace}
+                                          </div>
+                                          {section.hasStoredKnockout
+                                            ? renderBracketMatch(
+                                                sectionDisplayKnockout.thirdPlace,
+                                                "thirdPlace",
+                                                false,
+                                                sectionContext
+                                              )
+                                            : renderBracketPreviewMatch(
+                                                sectionDisplayKnockout.thirdPlace,
+                                                false,
+                                                sectionContext
+                                              )}
+                                        </div>
+                                      )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div style={styles.tournamentMutedPanel}>
+                            {tournamentText.noKnockoutYet}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {activeTournamentView === "matches" && (
                       <div style={styles.tournamentSurface}>
@@ -20475,13 +17335,13 @@ const savedRound = readStorageWithTtl(
                               {tournamentText.matchesTitle}
                             </div>
                           </div>
-                          <div style={styles.tournamentStatusBadge}>
-                            {matchControlStatusItems.length}{" "}
-                            {tournamentText.matchesTitle}
-                          </div>
+                          <button
+                            style={styles.primaryButtonSmall}
+                            onClick={generateTournamentMatches}
+                          >
+                            {tournamentText.generateBasicMatches}
+                          </button>
                         </div>
-
-                        {renderTournamentMatchControlRoom()}
 
                         <div style={styles.tournamentSchedulePanel}>
                           <div style={styles.tournamentSectionHeader}>
@@ -20782,14 +17642,31 @@ const savedRound = readStorageWithTtl(
                           )}
                           {renderHallSchedulePreview(18)}
                         </div>
+
+                        {visibleTournamentMatches.length > 0 ? (
+                          <div style={styles.tournamentMatchSummaryGrid}>
+                            <div style={styles.tournamentInfoTile}>
+                              <span>{tournamentText.matchStatusCompleted}</span>
+                              <strong>{visibleCompletedMatchesCount}</strong>
+                            </div>
+                            <div style={styles.tournamentInfoTile}>
+                              <span>{tournamentText.matchStatusStarted}</span>
+                              <strong>{visibleStartedMatchesCount}</strong>
+                            </div>
+                            <div style={styles.tournamentInfoTile}>
+                              <span>{tournamentText.matchStatusScheduled}</span>
+                              <strong>{visibleScheduledMatchesCount}</strong>
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={styles.tournamentMutedPanel}>
+                            {tournamentText.noMatchesYet}
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {activeTournamentView === "table" && (
-                      <>
-                      {renderTournamentTeamInterestBoard()}
-                      {renderTournamentRegistrationBoard()}
-
                       <div style={styles.tournamentSurface}>
                         <div style={styles.tournamentSectionHeader}>
                           <div>
@@ -20910,7 +17787,6 @@ const savedRound = readStorageWithTtl(
                           </div>
                         )}
                       </div>
-                      </>
                     )}
 
                     {activeTournamentView === "sharing" && (
@@ -21657,8 +18533,14 @@ const savedRound = readStorageWithTtl(
                   )}
                 </div>
 
-                {renderTournamentPublicControls()}
-                {renderTournamentRosterLockSummary()}
+                <div style={styles.tournamentStatusRailNote}>
+                  <strong>{tournamentText.publicLinkTitle}</strong>
+                  <span>
+                    {isBackendPublished
+                      ? tournamentText.publicLinkActive
+                      : tournamentText.publicLinkUnavailable}
+                  </span>
+                </div>
               </aside>
             ) : null}
           </div>
@@ -21676,7 +18558,9 @@ const savedRound = readStorageWithTtl(
   }
 
   const activeMainModule =
-    activeTab === "tournament"
+    activeTab === "admin-console"
+      ? "admin"
+      : activeTab === "tournament"
       ? "tournament"
       : activeTab === "player-hub"
         ? "player-hub"
@@ -21684,7 +18568,8 @@ const savedRound = readStorageWithTtl(
   const availableModuleCount =
     (hasTeamBuilderAccess ? 1 : 0) +
     (hasTournamentAccess ? 1 : 0) +
-    (hasPlayerHubAccess ? 1 : 0);
+    (hasPlayerHubAccess ? 1 : 0) +
+    (hasAdminConsoleAccess ? 1 : 0);
 
   return (
     <div style={styles.app}>
@@ -22283,16 +19168,34 @@ const savedRound = readStorageWithTtl(
                 Player & Team Hub
               </button>
             )}
+
+            {hasAdminConsoleAccess && (
+              <button
+                type="button"
+                data-testid="module-tab-admin-console"
+                style={{
+                  ...styles.tabButton,
+                  ...(activeMainModule === "admin"
+                    ? styles.tabButtonActive
+                    : {}),
+                }}
+                onClick={() => setActiveTab("admin-console")}
+              >
+                Admin
+              </button>
+            )}
           </div>
         ) : (
           <div style={styles.lockedCard}>{t.noModuleAccess}</div>
         )}
 
-        {hasPlayerHubAccess && activeTab === "player-hub" && (
+        {((hasPlayerHubAccess && activeTab === "player-hub") ||
+          (hasAdminConsoleAccess && activeTab === "admin-console")) && (
           <div style={styles.section}>
             <PlayerHubPage
               username={auth.username}
               isAdmin={currentUserIsAdmin}
+              adminOnlyMode={activeTab === "admin-console"}
               canReviewRosterDrafts={currentUserIsAdmin}
               loadMyPlayerProfile={loadMyPlayerProfile}
               loadEventComments={loadEventComments}
@@ -31296,89 +28199,6 @@ Object.assign(styles, {
     ...styles.tournamentDashboardShellMobile,
     gridTemplateColumns: "minmax(0, 1fr)",
   },
-  tournamentSetupProgressCardV2: {
-    background:
-      "linear-gradient(145deg, rgba(15,23,42,0.66), rgba(8,47,73,0.34))",
-    border: "1px solid rgba(125,211,252,0.14)",
-    boxShadow: "0 16px 44px rgba(2,6,23,0.24)",
-    backdropFilter: "blur(16px)",
-    borderRadius: "20px",
-    padding: "13px",
-    display: "grid",
-    gap: "12px",
-    minWidth: 0,
-  },
-  tournamentSetupStepListV2: {
-    display: "grid",
-    gap: "8px",
-    minWidth: 0,
-  },
-  tournamentSetupStepRowV2: {
-    background: "rgba(2,6,23,0.36)",
-    border: "1px solid rgba(148,163,184,0.13)",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
-    display: "grid",
-    gridTemplateColumns: "28px minmax(0, 1fr) auto",
-    alignItems: "center",
-    gap: "9px",
-    borderRadius: "14px",
-    padding: "9px",
-    minWidth: 0,
-  },
-  tournamentSetupStepNumberV2: {
-    width: "28px",
-    height: "28px",
-    borderRadius: "999px",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "rgba(14,165,233,0.15)",
-    border: "1px solid rgba(125,211,252,0.22)",
-    color: "#bae6fd",
-    fontSize: "11px",
-    fontWeight: "950",
-  },
-  tournamentSetupStepTextV2: {
-    display: "grid",
-    gap: "2px",
-    minWidth: 0,
-  },
-  tournamentSetupStatusChipV2: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "24px",
-    borderRadius: "999px",
-    padding: "0 8px",
-    background: "rgba(148,163,184,0.12)",
-    border: "1px solid rgba(148,163,184,0.15)",
-    color: "#cbd5e1",
-    fontSize: "10px",
-    fontWeight: "950",
-    textTransform: "uppercase",
-    letterSpacing: 0,
-    whiteSpace: "nowrap",
-  },
-  tournamentSetupStatusDoneV2: {
-    background: "rgba(34,197,94,0.18)",
-    border: "1px solid rgba(52,211,153,0.30)",
-    color: "#bbf7d0",
-  },
-  tournamentSetupStatusNextV2: {
-    background: "rgba(14,165,233,0.18)",
-    border: "1px solid rgba(125,211,252,0.30)",
-    color: "#bae6fd",
-  },
-  tournamentSetupStatusMissingV2: {
-    background: "rgba(244,63,94,0.16)",
-    border: "1px solid rgba(251,113,133,0.28)",
-    color: "#fecdd3",
-  },
-  tournamentSetupStatusOptionalV2: {
-    background: "rgba(148,163,184,0.13)",
-    border: "1px solid rgba(203,213,225,0.18)",
-    color: "#cbd5e1",
-  },
   tournamentOrganizerHeaderV2: {
     background:
       "linear-gradient(145deg, rgba(15,23,42,0.84), rgba(8,47,73,0.54) 58%, rgba(6,78,59,0.26))",
@@ -31484,90 +28304,6 @@ Object.assign(styles, {
     gap: "14px",
     minWidth: 0,
   },
-  tournamentFormatPresetPanelV1: {
-    background:
-      "linear-gradient(145deg, rgba(15,23,42,0.72), rgba(8,47,73,0.40))",
-    border: "1px solid rgba(125,211,252,0.16)",
-    boxShadow: "0 16px 44px rgba(2,6,23,0.24)",
-    backdropFilter: "blur(16px)",
-    borderRadius: "22px",
-    padding: "14px",
-    display: "grid",
-    gap: "12px",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-  tournamentFormatPresetWarningV1: {
-    borderRadius: "14px",
-    padding: "9px 10px",
-    background: "rgba(245,158,11,0.16)",
-    border: "1px solid rgba(251,191,36,0.26)",
-    color: "#fde68a",
-    fontSize: "11px",
-    fontWeight: "900",
-    lineHeight: 1.35,
-  },
-  tournamentFormatPresetGridV1: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))",
-    gap: "10px",
-    minWidth: 0,
-  },
-  tournamentFormatPresetCardV1: {
-    background: "rgba(2,6,23,0.38)",
-    border: "1px solid rgba(148,163,184,0.14)",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
-    borderRadius: "18px",
-    padding: "12px",
-    display: "grid",
-    gap: "10px",
-    minWidth: 0,
-  },
-  tournamentFormatPresetCardActiveV1: {
-    background: "rgba(14,165,233,0.17)",
-    border: "1px solid rgba(125,211,252,0.36)",
-    boxShadow:
-      "0 16px 34px rgba(14,165,233,0.16), inset 0 1px 0 rgba(255,255,255,0.05)",
-  },
-  tournamentFormatPresetChipRowV1: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "6px",
-    minWidth: 0,
-  },
-  tournamentFormatPresetChipV1: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "26px",
-    borderRadius: "999px",
-    padding: "0 8px",
-    background: "rgba(14,165,233,0.12)",
-    border: "1px solid rgba(125,211,252,0.20)",
-    color: "#bae6fd",
-    fontSize: "10px",
-    fontWeight: "950",
-    whiteSpace: "nowrap",
-  },
-  tournamentFormatPresetDetailGridV1: {
-    display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: "7px",
-    minWidth: 0,
-  },
-  tournamentFormatPresetDetailV1: {
-    display: "grid",
-    gap: "3px",
-    padding: "8px",
-    borderRadius: "12px",
-    background: "rgba(2,6,23,0.30)",
-    border: "1px solid rgba(148,163,184,0.12)",
-    color: "#cbd5e1",
-    fontSize: "11px",
-    fontWeight: "800",
-    lineHeight: 1.25,
-    minWidth: 0,
-  },
   tournamentSeriesSetupGridV2: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 230px), 1fr))",
@@ -31643,259 +28379,6 @@ Object.assign(styles, {
     color: "#bae6fd",
     fontSize: "11px",
     fontWeight: "800",
-  },
-  tournamentDrawSetupCardV1: {
-    background:
-      "linear-gradient(145deg, rgba(15,23,42,0.72), rgba(8,47,73,0.42))",
-    border: "1px solid rgba(125,211,252,0.16)",
-    boxShadow: "0 18px 48px rgba(2,6,23,0.24)",
-    backdropFilter: "blur(16px)",
-    borderRadius: "24px",
-    padding: "15px",
-    display: "grid",
-    gap: "13px",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-  tournamentDrawSetupCardCompactV1: {
-    background:
-      "linear-gradient(145deg, rgba(15,23,42,0.66), rgba(8,47,73,0.34))",
-    border: "1px solid rgba(125,211,252,0.14)",
-    boxShadow: "0 16px 44px rgba(2,6,23,0.22)",
-    backdropFilter: "blur(16px)",
-    borderRadius: "20px",
-    padding: "13px",
-    display: "grid",
-    gap: "12px",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-  tournamentDrawMetricGridV1: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 92px), 1fr))",
-    gap: "8px",
-    minWidth: 0,
-  },
-  tournamentDrawMetricV1: {
-    display: "grid",
-    gap: "3px",
-    minHeight: "52px",
-    padding: "9px",
-    borderRadius: "14px",
-    background: "rgba(2,6,23,0.34)",
-    border: "1px solid rgba(148,163,184,0.13)",
-    color: "#cbd5e1",
-    fontSize: "10px",
-    fontWeight: "900",
-    minWidth: 0,
-  },
-  tournamentDrawActionRowV1: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "8px",
-    alignItems: "center",
-    minWidth: 0,
-  },
-  tournamentDrawBoardV1: {
-    display: "grid",
-    gridTemplateColumns: "minmax(230px, 0.65fr) minmax(0, 1.35fr)",
-    gap: "14px",
-    alignItems: "start",
-    minWidth: 0,
-  },
-  tournamentDrawBoardMobileV1: {
-    gridTemplateColumns: "minmax(0, 1fr)",
-  },
-  tournamentDrawUnassignedPanelV1: {
-    display: "grid",
-    gap: "10px",
-    padding: "12px",
-    borderRadius: "20px",
-    background: "rgba(2,6,23,0.34)",
-    border: "1px solid rgba(125,211,252,0.14)",
-    minWidth: 0,
-  },
-  tournamentDrawGroupsPanelV1: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 230px), 1fr))",
-    gap: "12px",
-    minWidth: 0,
-  },
-  tournamentDrawGroupCardV1: {
-    display: "grid",
-    gap: "11px",
-    padding: "13px",
-    borderRadius: "20px",
-    border: "1px solid rgba(125,211,252,0.14)",
-    background: "rgba(15,23,42,0.44)",
-    boxShadow: "0 14px 34px rgba(2,6,23,0.18)",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-  tournamentDrawPanelHeaderV1: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "10px",
-    minWidth: 0,
-  },
-  tournamentDrawTeamListV1: {
-    display: "grid",
-    gap: "8px",
-    minWidth: 0,
-  },
-  tournamentDrawTeamChipV1: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
-    gap: "8px",
-    alignItems: "center",
-    padding: "10px",
-    borderRadius: "15px",
-    background: "rgba(2,6,23,0.42)",
-    border: "1px solid rgba(148,163,184,0.13)",
-    color: "#e5f3ff",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-  tournamentDrawTeamMainV1: {
-    display: "grid",
-    gap: "2px",
-    minWidth: 0,
-    overflowWrap: "break-word",
-    wordBreak: "normal",
-  },
-  tournamentDrawTeamStatusV1: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "24px",
-    borderRadius: "999px",
-    padding: "0 8px",
-    background: "rgba(14,165,233,0.16)",
-    border: "1px solid rgba(125,211,252,0.24)",
-    color: "#bae6fd",
-    fontSize: "10px",
-    fontWeight: "950",
-    whiteSpace: "nowrap",
-  },
-  tournamentDrawTeamStatusLockedV1: {
-    background: "rgba(245,158,11,0.16)",
-    border: "1px solid rgba(251,191,36,0.26)",
-    color: "#fde68a",
-  },
-  tournamentDrawTeamStatusConfirmedV1: {
-    background: "rgba(34,197,94,0.18)",
-    border: "1px solid rgba(52,211,153,0.30)",
-    color: "#bbf7d0",
-  },
-  tournamentDrawTeamStatusSubmittedV1: {
-    background: "rgba(99,102,241,0.18)",
-    border: "1px solid rgba(129,140,248,0.28)",
-    color: "#c7d2fe",
-  },
-  tournamentDrawTeamActionsV1: {
-    gridColumn: "1 / -1",
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "6px",
-    minWidth: 0,
-  },
-  tournamentDrawGroupButtonV1: {
-    border: "1px solid rgba(125,211,252,0.20)",
-    borderRadius: "12px",
-    minHeight: "34px",
-    padding: "0 10px",
-    background: "rgba(14,165,233,0.13)",
-    color: "#dff7ff",
-    fontSize: "11px",
-    fontWeight: "950",
-    cursor: "pointer",
-  },
-  tournamentDrawRemoveButtonV1: {
-    background: "rgba(244,63,94,0.14)",
-    border: "1px solid rgba(251,113,133,0.24)",
-    color: "#fecdd3",
-  },
-  tournamentKnockoutSetupCardV1: {
-    display: "grid",
-    gap: "13px",
-    padding: "15px",
-    borderRadius: "24px",
-    background:
-      "linear-gradient(145deg, rgba(15,23,42,0.76), rgba(8,47,73,0.42))",
-    border: "1px solid rgba(125,211,252,0.16)",
-    boxShadow: "0 18px 48px rgba(2,6,23,0.24)",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-  tournamentKnockoutRuleGridV1: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 118px), 1fr))",
-    gap: "8px",
-    minWidth: 0,
-  },
-  tournamentKnockoutToggleV1: {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    color: "#dbeafe",
-    fontSize: "12px",
-    fontWeight: "850",
-    minHeight: "36px",
-  },
-  tournamentKnockoutChipRowV1: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "7px",
-    minWidth: 0,
-  },
-  tournamentKnockoutStatusChipV1: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    minHeight: "26px",
-    borderRadius: "999px",
-    padding: "0 9px",
-    background: "rgba(148,163,184,0.12)",
-    border: "1px solid rgba(148,163,184,0.15)",
-    color: "#cbd5e1",
-    fontSize: "10px",
-    fontWeight: "950",
-    textTransform: "uppercase",
-    letterSpacing: 0,
-    whiteSpace: "nowrap",
-  },
-  tournamentKnockoutFlowCardV1: {
-    display: "grid",
-    gap: "13px",
-    padding: "14px",
-    borderRadius: "26px",
-    background:
-      "linear-gradient(145deg, rgba(15,23,42,0.64), rgba(8,47,73,0.32))",
-    border: "1px solid rgba(125,211,252,0.14)",
-    boxShadow: "0 18px 48px rgba(2,6,23,0.22)",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-  tournamentKnockoutFlowGridV1: {
-    display: "grid",
-    gridTemplateColumns: "minmax(210px, 0.9fr) minmax(230px, 1fr) minmax(220px, 0.9fr)",
-    gap: "13px",
-    alignItems: "start",
-    minWidth: 0,
-  },
-  tournamentKnockoutFlowGridMobileV1: {
-    gridTemplateColumns: "minmax(0, 1fr)",
-  },
-  tournamentKnockoutColumnV1: {
-    display: "grid",
-    gap: "10px",
-    alignContent: "start",
-    padding: "12px",
-    borderRadius: "20px",
-    background: "rgba(2,6,23,0.32)",
-    border: "1px solid rgba(148,163,184,0.12)",
-    minWidth: 0,
   },
   tournamentAdvancementGridV1: {
     display: "grid",
@@ -32245,467 +28728,6 @@ Object.assign(styles, {
     ...styles.tournamentSchedulePanel,
     ...sportsGlassSoftV3,
     borderRadius: "24px",
-  },
-  tournamentMatchControlShellV2: {
-    ...sportsGlassV3,
-    display: "grid",
-    gap: "14px",
-    borderRadius: "24px",
-    padding: "14px",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-  tournamentMatchControlHeaderV2: {
-    display: "flex",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: "12px",
-    flexWrap: "wrap",
-    minWidth: 0,
-  },
-  tournamentMatchControlSummaryGridV2: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 132px), 1fr))",
-    gap: "9px",
-    minWidth: 0,
-  },
-  tournamentMatchControlFilterRowV2: {
-    display: "flex",
-    alignItems: "center",
-    gap: "7px",
-    flexWrap: "wrap",
-    minWidth: 0,
-  },
-  tournamentMatchControlFilterButtonV2: {
-    minHeight: "36px",
-    borderRadius: "999px",
-    border: "1px solid rgba(125,211,252,0.18)",
-    background: "rgba(14,165,233,0.10)",
-    color: "#cbd5e1",
-    fontSize: "11px",
-    fontWeight: "950",
-    padding: "0 10px",
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-  },
-  tournamentMatchControlFilterButtonActiveV2: {
-    background: "linear-gradient(135deg, #38bdf8, #22c55e)",
-    border: "1px solid rgba(186,230,253,0.42)",
-    color: "#03111f",
-    boxShadow: "0 12px 28px rgba(14,165,233,0.20)",
-  },
-  tournamentMatchControlCourtSelectV2: {
-    minHeight: "36px",
-    borderRadius: "999px",
-    border: "1px solid rgba(125,211,252,0.18)",
-    background: "rgba(2,6,23,0.44)",
-    color: "#dff7ff",
-    fontSize: "11px",
-    fontWeight: "900",
-    padding: "0 10px",
-    colorScheme: "dark",
-  },
-  tournamentMatchControlLayoutV2: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) minmax(260px, 0.36fr)",
-    gap: "14px",
-    alignItems: "start",
-    minWidth: 0,
-  },
-  tournamentMatchControlLayoutMobileV2: {
-    gridTemplateColumns: "minmax(0, 1fr)",
-  },
-  tournamentMatchControlListV2: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
-    gap: "10px",
-    minWidth: 0,
-  },
-  tournamentMatchControlCardV2: {
-    ...sportsRowV3,
-    display: "grid",
-    gap: "10px",
-    borderRadius: "20px",
-    padding: "12px",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-  tournamentMatchControlCardLiveV2: {
-    border: "1px solid rgba(34,197,94,0.46)",
-    boxShadow:
-      "0 0 0 1px rgba(34,197,94,0.16), 0 18px 44px rgba(34,197,94,0.12)",
-    background:
-      "linear-gradient(145deg, rgba(6,78,59,0.42), rgba(15,23,42,0.72))",
-  },
-  tournamentMatchControlCardTopV2: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "8px",
-    minWidth: 0,
-  },
-  tournamentMatchControlMetaV2: {
-    display: "flex",
-    alignItems: "center",
-    gap: "6px",
-    flexWrap: "wrap",
-    color: "#9fb4d0",
-    fontSize: "10px",
-    fontWeight: "900",
-    minWidth: 0,
-  },
-  tournamentMatchControlCourtChipV2: {
-    borderRadius: "999px",
-    padding: "4px 7px",
-    background: "rgba(14,165,233,0.16)",
-    border: "1px solid rgba(125,211,252,0.22)",
-    color: "#bae6fd",
-    whiteSpace: "nowrap",
-  },
-  tournamentMatchControlStatusChipV2: {
-    borderRadius: "999px",
-    padding: "5px 8px",
-    background: "rgba(148,163,184,0.13)",
-    border: "1px solid rgba(148,163,184,0.16)",
-    color: "#cbd5e1",
-    fontSize: "10px",
-    fontWeight: "950",
-    textTransform: "uppercase",
-    letterSpacing: 0,
-    whiteSpace: "nowrap",
-  },
-  tournamentMatchControlStatusLiveV2: {
-    background: "rgba(34,197,94,0.20)",
-    border: "1px solid rgba(52,211,153,0.34)",
-    color: "#bbf7d0",
-  },
-  tournamentMatchControlStatusDoneV2: {
-    background: "rgba(99,102,241,0.18)",
-    border: "1px solid rgba(129,140,248,0.28)",
-    color: "#c7d2fe",
-  },
-  tournamentMatchControlStageRowV2: {
-    justifySelf: "start",
-    borderRadius: "999px",
-    padding: "4px 8px",
-    background: "rgba(245,158,11,0.14)",
-    border: "1px solid rgba(251,191,36,0.22)",
-    color: "#fde68a",
-    fontSize: "10px",
-    fontWeight: "950",
-    textTransform: "uppercase",
-  },
-  tournamentMatchControlScoreGridV2: {
-    display: "grid",
-    gap: "8px",
-    minWidth: 0,
-  },
-  tournamentMatchControlScoreGridLiveV2: {
-    gap: "10px",
-  },
-  tournamentMatchControlScoreLineV2: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) auto",
-    alignItems: "center",
-    gap: "10px",
-    minHeight: "42px",
-    color: "#ecfeff",
-    fontSize: "13px",
-    fontWeight: "950",
-    minWidth: 0,
-  },
-  tournamentMatchControlScoreBoxV2: {
-    display: "grid",
-    gridTemplateColumns: "34px 46px 34px",
-    alignItems: "center",
-    gap: "4px",
-  },
-  tournamentMatchControlScoreButtonV2: {
-    width: "34px",
-    height: "34px",
-    borderRadius: "12px",
-    border: "1px solid rgba(125,211,252,0.18)",
-    background: "rgba(14,165,233,0.14)",
-    color: "#dff7ff",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    cursor: "pointer",
-  },
-  tournamentMatchControlScoreInputV2: {
-    width: "46px",
-    height: "34px",
-    borderRadius: "12px",
-    border: "1px solid rgba(125,211,252,0.18)",
-    background: "rgba(2,6,23,0.44)",
-    color: "#ecfeff",
-    fontSize: "16px",
-    fontWeight: "950",
-    textAlign: "center",
-    outline: "none",
-  },
-  tournamentMatchControlResultRowV2: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "6px",
-    minWidth: 0,
-  },
-  tournamentMatchControlWinnerChipV2: {
-    borderRadius: "999px",
-    padding: "5px 8px",
-    background: "rgba(34,197,94,0.16)",
-    border: "1px solid rgba(52,211,153,0.26)",
-    color: "#bbf7d0",
-    fontSize: "10px",
-    fontWeight: "950",
-  },
-  tournamentMatchControlWarningChipV2: {
-    borderRadius: "999px",
-    padding: "5px 8px",
-    background: "rgba(245,158,11,0.16)",
-    border: "1px solid rgba(251,191,36,0.26)",
-    color: "#fde68a",
-    fontSize: "10px",
-    fontWeight: "950",
-  },
-  tournamentMatchControlActionsV2: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "7px",
-    minWidth: 0,
-  },
-  tournamentMatchControlRailV2: {
-    display: "grid",
-    gap: "10px",
-    alignContent: "start",
-    minWidth: 0,
-  },
-  tournamentMatchControlRailCardV2: {
-    ...sportsRowV3,
-    display: "grid",
-    gap: "10px",
-    borderRadius: "18px",
-    padding: "12px",
-    minWidth: 0,
-  },
-  tournamentMatchControlNextItemV2: {
-    ...sportsRowV3,
-    borderRadius: "15px",
-    padding: "10px",
-    display: "grid",
-    gap: "5px",
-    textAlign: "left",
-    color: "#dff7ff",
-    cursor: "pointer",
-    minWidth: 0,
-  },
-  tournamentTeamInterestBoardV1: {
-    ...sportsGlassV3,
-    display: "grid",
-    gap: "14px",
-    borderRadius: "24px",
-    padding: "14px",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-  tournamentTeamInterestSummaryGridV1: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 112px), 1fr))",
-    gap: "9px",
-    minWidth: 0,
-  },
-  tournamentTeamInterestSummaryCardV1: {
-    ...sportsRowV3,
-    borderRadius: "16px",
-    padding: "11px",
-    display: "grid",
-    gap: "4px",
-    minWidth: 0,
-  },
-  tournamentTeamInterestFilterRowV1: {
-    display: "flex",
-    alignItems: "center",
-    gap: "7px",
-    flexWrap: "wrap",
-    minWidth: 0,
-  },
-  tournamentTeamInterestListV1: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 280px), 1fr))",
-    gap: "10px",
-    minWidth: 0,
-  },
-  tournamentTeamInterestCardV1: {
-    ...sportsRowV3,
-    display: "grid",
-    gap: "10px",
-    borderRadius: "20px",
-    padding: "12px",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-  tournamentTeamInterestCardTopV1: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "10px",
-    minWidth: 0,
-  },
-  tournamentTeamInterestNameBlockV1: {
-    display: "grid",
-    gap: "3px",
-    minWidth: 0,
-    color: "#ecfeff",
-  },
-  tournamentTeamInterestStatusChipV1: {
-    borderRadius: "999px",
-    padding: "5px 8px",
-    background: "rgba(148,163,184,0.13)",
-    border: "1px solid rgba(148,163,184,0.16)",
-    color: "#cbd5e1",
-    fontSize: "10px",
-    fontWeight: "950",
-    textTransform: "uppercase",
-    letterSpacing: 0,
-    whiteSpace: "nowrap",
-  },
-  tournamentTeamInterestStatusInterestedV1: {
-    background: "rgba(14,165,233,0.17)",
-    border: "1px solid rgba(125,211,252,0.28)",
-    color: "#bae6fd",
-  },
-  tournamentTeamInterestStatusAskingV1: {
-    background: "rgba(245,158,11,0.16)",
-    border: "1px solid rgba(251,191,36,0.26)",
-    color: "#fde68a",
-  },
-  tournamentTeamInterestStatusSubmittedV1: {
-    background: "rgba(99,102,241,0.18)",
-    border: "1px solid rgba(129,140,248,0.28)",
-    color: "#c7d2fe",
-  },
-  tournamentTeamInterestStatusNeedsReviewV1: {
-    background: "rgba(245,158,11,0.18)",
-    border: "1px solid rgba(251,191,36,0.30)",
-    color: "#fde68a",
-  },
-  tournamentTeamInterestStatusApprovedV1: {
-    background: "rgba(34,197,94,0.18)",
-    border: "1px solid rgba(52,211,153,0.30)",
-    color: "#bbf7d0",
-  },
-  tournamentTeamInterestStatusLockedV1: {
-    background: "rgba(20,184,166,0.18)",
-    border: "1px solid rgba(45,212,191,0.30)",
-    color: "#99f6e4",
-  },
-  tournamentTeamInterestStatusLateV1: {
-    background: "rgba(244,63,94,0.16)",
-    border: "1px solid rgba(251,113,133,0.28)",
-    color: "#fecdd3",
-  },
-  tournamentTeamInterestMetaRowV1: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "6px",
-    minWidth: 0,
-  },
-  tournamentTeamInterestMetaChipV1: {
-    borderRadius: "999px",
-    padding: "5px 8px",
-    background: "rgba(14,165,233,0.12)",
-    border: "1px solid rgba(125,211,252,0.18)",
-    color: "#bae6fd",
-    fontSize: "10px",
-    fontWeight: "900",
-    whiteSpace: "nowrap",
-  },
-  tournamentTeamInterestMetaChipWarnV1: {
-    borderRadius: "999px",
-    padding: "5px 8px",
-    background: "rgba(245,158,11,0.14)",
-    border: "1px solid rgba(251,191,36,0.22)",
-    color: "#fde68a",
-    fontSize: "10px",
-    fontWeight: "900",
-    whiteSpace: "nowrap",
-  },
-  tournamentTeamInterestActionsV1: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "7px",
-    minWidth: 0,
-  },
-  tournamentRegistrationBoardV2: {
-    ...sportsGlassV3,
-    display: "grid",
-    gap: "14px",
-    borderRadius: "24px",
-    padding: "14px",
-    minWidth: 0,
-    boxSizing: "border-box",
-  },
-  tournamentRegistrationBoardLayoutV2: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 1fr) minmax(280px, 0.45fr)",
-    gap: "12px",
-    alignItems: "start",
-    minWidth: 0,
-  },
-  tournamentRegistrationBoardLayoutMobileV2: {
-    gridTemplateColumns: "minmax(0, 1fr)",
-  },
-  tournamentRegistrationCardSelectedV2: {
-    border: "1px solid rgba(125,211,252,0.38)",
-    boxShadow:
-      "0 0 0 1px rgba(14,165,233,0.14), 0 16px 36px rgba(14,165,233,0.12)",
-    background:
-      "linear-gradient(145deg, rgba(14,165,233,0.18), rgba(15,23,42,0.68))",
-  },
-  tournamentRegistrationDetailsV2: {
-    ...sportsRowV3,
-    display: "grid",
-    gap: "12px",
-    borderRadius: "20px",
-    padding: "13px",
-    minWidth: 0,
-    boxSizing: "border-box",
-    position: "sticky",
-    top: "12px",
-  },
-  tournamentRegistrationWarningBoxV2: {
-    display: "grid",
-    gap: "5px",
-    padding: "10px",
-    borderRadius: "14px",
-    background: "rgba(245,158,11,0.14)",
-    border: "1px solid rgba(251,191,36,0.24)",
-    color: "#fde68a",
-    fontSize: "11px",
-    fontWeight: "850",
-    lineHeight: 1.35,
-    minWidth: 0,
-  },
-  tournamentRegistrationRosterListV2: {
-    display: "grid",
-    gap: "8px",
-    minWidth: 0,
-  },
-  tournamentRegistrationPlayerRowV2: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "8px",
-    minHeight: "36px",
-    padding: "8px 9px",
-    borderRadius: "12px",
-    background: "rgba(2,6,23,0.34)",
-    border: "1px solid rgba(148,163,184,0.13)",
-    color: "#dff7ff",
-    fontSize: "12px",
-    fontWeight: "850",
-    minWidth: 0,
-    overflowWrap: "break-word",
   },
   tournamentScheduleCourt: {
     ...styles.tournamentScheduleCourt,
