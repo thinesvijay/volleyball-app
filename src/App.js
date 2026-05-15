@@ -11505,6 +11505,110 @@ const savedRound = readStorageWithTtl(
     );
   }
 
+  function renderLandingShowcaseMiniPreview(slide) {
+    if (slide.type === "teams") {
+      return (
+        <div style={styles.landingTeamBuilderMock}>
+          <div style={styles.landingMockPanel}>
+            {["Mia", "Jonas", "Sara"].map((name, index) => (
+              <div key={name} style={styles.landingPlayerMockRow}>
+                <span style={styles.landingPlayerMockAvatar}>
+                  {index + 1}
+                </span>
+                <span>{name}</span>
+                <strong>{5 - (index % 2)}</strong>
+              </div>
+            ))}
+          </div>
+          <div style={styles.landingTeamMockCardGrid}>
+            {[1, 2].map((teamNumber) => (
+              <div key={teamNumber} style={styles.landingTeamMockCard}>
+                <strong>Team {teamNumber}</strong>
+                <div style={styles.landingTeamMockBars}>
+                  <span style={styles.landingTeamMockBar} />
+                  <span style={styles.landingTeamMockBar} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (slide.type === "tournaments") {
+      return (
+        <div style={styles.landingTeamBuilderMock}>
+          <div style={styles.landingClassChipRow}>
+            <span style={styles.landingClassChip}>{getSeriesDisplayName("4-manns")}</span>
+            <span style={styles.landingClassChip}>{getSeriesDisplayName("5-manns")}</span>
+          </div>
+          <div style={styles.landingSetupMockGrid}>
+            {[
+              ["Teams", "16"],
+              ["Groups", "4"],
+              ["Courts", "3"],
+              ["Live", "On"],
+            ].map(([label, value]) => (
+              <div key={label} style={styles.landingSetupMockTile}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (slide.type === "availability") {
+      return (
+        <div style={styles.landingAvailabilityMock}>
+          {[
+            ["✓", "Going", "8"],
+            ["?", "Maybe", "2"],
+            ["×", "No", "1"],
+          ].map(([icon, label, value]) => (
+            <span key={label} style={styles.landingAvailabilityChip}>
+              <strong>{icon}</strong>
+              <span>{label}</span>
+              <em>{value}</em>
+            </span>
+          ))}
+        </div>
+      );
+    }
+
+    if (slide.type === "roster") {
+      return (
+        <div style={styles.landingRosterMock}>
+          {["A", "B", "Reserve"].map((label, index) => (
+            <div key={label} style={styles.landingRosterSquadMock}>
+              <span>Squad {label}</span>
+              <strong>{index === 2 ? 2 : 5}</strong>
+            </div>
+          ))}
+          <span style={styles.landingRosterStatusMock}>✓ Approved</span>
+        </div>
+      );
+    }
+
+    return (
+      <div style={styles.landingPublicScoreMock}>
+        <div style={styles.landingPublicScoreTop}>
+          <span>Live</span>
+          <strong>Court 1</strong>
+        </div>
+        <div style={styles.landingPublicScoreLine}>
+          <span>Aces</span>
+          <strong>21</strong>
+        </div>
+        <div style={styles.landingPublicScoreLine}>
+          <span>Nord</span>
+          <strong>18</strong>
+        </div>
+      </div>
+    );
+  }
+
   function renderLandingShowcaseVisual(slide) {
     return (
       <div style={styles.landingMockScreen}>
@@ -11512,6 +11616,7 @@ const savedRound = readStorageWithTtl(
           <span>{slide.kicker}</span>
           <strong>{slide.marker}</strong>
         </div>
+        {renderLandingShowcaseMiniPreview(slide)}
         <p style={styles.landingShowcaseSummary}>{slide.detail}</p>
         <div style={styles.landingShowcaseStepList}>
           {(slide.items || []).map((item) => (
@@ -11531,8 +11636,8 @@ const savedRound = readStorageWithTtl(
         type: "teams",
         kicker: t.teamBuilder,
         marker: "1",
-        detail: "Pick players, set team count and generate balanced training teams.",
-        items: ["Players", "Selected count", "Generate"],
+        detail: "Pick players. Generate balanced teams.",
+        items: ["Players", "Generate"],
         tone: "linear-gradient(155deg, #ffffff 0%, #dbeafe 58%, #bfdbfe 100%)",
       },
       {
@@ -11540,7 +11645,7 @@ const savedRound = readStorageWithTtl(
         type: "tournaments",
         kicker: tournamentText.tournamentSetupTitle,
         marker: "2",
-        detail: "Create the tournament, classes, teams, schedule and public link.",
+        detail: "Set classes, teams and schedule.",
         items: [
           getSeriesDisplayName("4-manns"),
           getSeriesDisplayName("5-manns"),
@@ -11553,7 +11658,7 @@ const savedRound = readStorageWithTtl(
         type: "availability",
         kicker: "Player Hub",
         marker: "3",
-        detail: "Captains ask availability and players answer with clear status.",
+        detail: "Ask players. See replies fast.",
         items: ["✓ Going", "? Maybe", "× No"],
         tone: "linear-gradient(155deg, #ffffff 0%, #eff6ff 52%, #c7d2fe 100%)",
       },
@@ -11562,7 +11667,7 @@ const savedRound = readStorageWithTtl(
         type: "roster",
         kicker: "Captain",
         marker: "4",
-        detail: "Plan squads, name them and submit the roster for review.",
+        detail: "Plan squads and submit roster.",
         items: ["Squads", "Roster", "Approval"],
         tone: "linear-gradient(155deg, #eff6ff 0%, #dbeafe 48%, #93c5fd 100%)",
       },
@@ -11571,7 +11676,7 @@ const savedRound = readStorageWithTtl(
         type: "public",
         kicker: tournamentText.publicPreviewTitle,
         marker: "5",
-        detail: "Spectators follow live matches, results and standings publicly.",
+        detail: "Follow live matches and results.",
         items: ["Live", tournamentText.nextLabel, tournamentText.standingsTitle],
         tone: "linear-gradient(155deg, #ffffff 0%, #eef2ff 54%, #bfdbfe 100%)",
       },
@@ -20796,8 +20901,8 @@ const styles = {
   landingShowcaseSummary: {
     margin: 0,
     color: "#334155",
-    fontSize: "13px",
-    lineHeight: 1.42,
+    fontSize: "11px",
+    lineHeight: 1.35,
     fontWeight: "800",
   },
 
@@ -20819,6 +20924,89 @@ const styles = {
     lineHeight: 1,
     fontWeight: "950",
     whiteSpace: "nowrap",
+  },
+
+  landingAvailabilityMock: {
+    display: "grid",
+    gap: "7px",
+    minWidth: 0,
+  },
+
+  landingAvailabilityChip: {
+    display: "grid",
+    gridTemplateColumns: "24px minmax(0, 1fr) auto",
+    gap: "6px",
+    alignItems: "center",
+    padding: "8px",
+    borderRadius: "14px",
+    background: "#ffffff",
+    border: "1px solid rgba(37,99,235,0.12)",
+    color: "#0f172a",
+    fontSize: "10px",
+    fontWeight: "900",
+    minWidth: 0,
+  },
+
+  landingRosterMock: {
+    display: "grid",
+    gap: "7px",
+    minWidth: 0,
+  },
+
+  landingRosterSquadMock: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "8px",
+    padding: "8px",
+    borderRadius: "14px",
+    background: "#ffffff",
+    border: "1px solid rgba(37,99,235,0.12)",
+    color: "#0f172a",
+    fontSize: "10px",
+    fontWeight: "900",
+  },
+
+  landingRosterStatusMock: {
+    borderRadius: "999px",
+    padding: "8px 10px",
+    background: "rgba(34,197,94,0.14)",
+    border: "1px solid rgba(34,197,94,0.26)",
+    color: "#166534",
+    fontSize: "10px",
+    fontWeight: "950",
+    textAlign: "center",
+  },
+
+  landingPublicScoreMock: {
+    display: "grid",
+    gap: "7px",
+    padding: "10px",
+    borderRadius: "18px",
+    background: "linear-gradient(145deg, #0f172a, #1e3a8a)",
+    color: "#ffffff",
+    minWidth: 0,
+  },
+
+  landingPublicScoreTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "8px",
+    color: "#bfdbfe",
+    fontSize: "10px",
+    fontWeight: "950",
+    textTransform: "uppercase",
+  },
+
+  landingPublicScoreLine: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    gap: "8px",
+    alignItems: "center",
+    padding: "8px",
+    borderRadius: "14px",
+    background: "rgba(255,255,255,0.10)",
+    fontSize: "12px",
+    fontWeight: "950",
   },
 
   landingTeamBuilderMock: {

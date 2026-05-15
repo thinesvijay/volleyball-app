@@ -164,7 +164,7 @@ async function openPlayerHub(page) {
   await expect(page.getByTestId("player-hub-root")).toBeVisible({
     timeout: 20_000,
   });
-  await expect(page.getByText("Player Hub").first()).toBeVisible();
+  await expect(page.getByTestId("player-hub-tab-home")).toBeVisible();
 }
 
 async function openAdminConsole(page) {

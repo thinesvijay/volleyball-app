@@ -2167,10 +2167,10 @@ const hubGlassRow = {
 Object.assign(playerHubStyles, {
   shell: {
     ...playerHubStyles.shell,
-    gap: "16px",
+    gap: "12px",
     maxWidth: "1240px",
-    padding: "18px",
-    borderRadius: "30px",
+    padding: "12px",
+    borderRadius: "24px",
     color: hubDarkPalette.text,
     background:
       "radial-gradient(circle at 12% 0%, rgba(56,189,248,0.22), transparent 30%), radial-gradient(circle at 88% 8%, rgba(52,211,153,0.16), transparent 28%), linear-gradient(135deg, #06111f 0%, #0f172a 55%, #111827 100%)",
@@ -3221,7 +3221,8 @@ Object.assign(playerHubStyles, {
     padding: "10px 8px",
     borderRadius: "16px",
     fontSize: "13px",
-    background: "rgba(14,165,233,0.12)",
+    background: "rgba(15,23,42,0.58)",
+    borderColor: "rgba(148,163,184,0.18)",
     whiteSpace: "normal",
   },
   eventResponseButtonActive: {
@@ -4177,6 +4178,18 @@ Object.assign(playerHubStyles, {
     boxShadow:
       "0 14px 34px rgba(14,165,233,0.28), inset 0 1px 0 rgba(255,255,255,0.28)",
   },
+  hubCompactHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    padding: "10px 12px",
+    borderRadius: "18px",
+    background: "rgba(15,23,42,0.48)",
+    border: "1px solid rgba(148,163,184,0.12)",
+    color: hubDarkPalette.text,
+    minWidth: 0,
+  },
   profileCard: {
     ...playerHubStyles.profileCard,
     ...hubGlassSoftV3,
@@ -4261,8 +4274,10 @@ Object.assign(playerHubStyles, {
   adminActionButton: {
     ...playerHubStyles.adminActionButton,
     minHeight: "40px",
-    border: "1px solid rgba(125,211,252,0.22)",
-    background: "rgba(14,165,233,0.14)",
+    border: "1px solid rgba(148,163,184,0.20)",
+    background: "rgba(15,23,42,0.58)",
+    color: hubDarkPalette.text,
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
   },
   chip: {
     ...playerHubStyles.chip,
@@ -4322,8 +4337,8 @@ Object.assign(playerHubStyles, {
     ...playerHubStyles.eventCard,
     ...hubGlassV3,
     maxWidth: "none",
-    borderRadius: "24px",
-    padding: "14px",
+    borderRadius: "20px",
+    padding: "12px",
   },
   eventCardFeatured: {
     ...playerHubStyles.eventCardFeatured,
@@ -4337,8 +4352,8 @@ Object.assign(playerHubStyles, {
   },
   eventResponseButton: {
     ...playerHubStyles.eventResponseButton,
-    minHeight: "48px",
-    borderRadius: "16px",
+    minHeight: "44px",
+    borderRadius: "14px",
   },
   eventPreferencePanel: {
     ...playerHubStyles.eventPreferencePanel,
@@ -4966,7 +4981,7 @@ export default function PlayerHubPage({
     } catch (error) {
       setAdminReviewStatus("error");
       setAdminReviewMessage(
-        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+        cleanPlayerHubError(error, "Could not load this section. Try again later.")
       );
     } finally {
       logPlayerHubTiming("adminReview load", startedAt);
@@ -4993,7 +5008,7 @@ export default function PlayerHubPage({
       setClubTeams([]);
       setClubTeamsStatus("error");
       setClubTeamsMessage(
-        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+        cleanPlayerHubError(error, "Could not load this section. Try again later.")
       );
     } finally {
       logPlayerHubTiming("availableClubs load", startedAt);
@@ -5020,7 +5035,7 @@ export default function PlayerHubPage({
     } catch (error) {
       setAdminClubTeamsStatus("error");
       setAdminClubTeamsMessage(
-        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+        cleanPlayerHubError(error, "Could not load this section. Try again later.")
       );
     } finally {
       logPlayerHubTiming("adminClubs load", startedAt);
@@ -5046,7 +5061,7 @@ export default function PlayerHubPage({
     } catch (error) {
       setAccessRequestsStatus("error");
       setAccessRequestsMessage(
-        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+        cleanPlayerHubError(error, "Could not load this section. Try again later.")
       );
     } finally {
       logPlayerHubTiming("accessRequests load", startedAt);
@@ -5072,7 +5087,7 @@ export default function PlayerHubPage({
     } catch (error) {
       setAdminAccessRequestsStatus("error");
       setAdminAccessRequestsMessage(
-        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+        cleanPlayerHubError(error, "Could not load this section. Try again later.")
       );
     } finally {
       logPlayerHubTiming("adminAccess load", startedAt);
@@ -5115,7 +5130,7 @@ export default function PlayerHubPage({
       setCanManageTeamProfile(false);
       setTeamProfileStatus("error");
       setTeamProfileMessage(
-        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+        cleanPlayerHubError(error, "Could not load this section. Try again later.")
       );
     } finally {
       logPlayerHubTiming("teamProfile load", startedAt);
@@ -5261,7 +5276,7 @@ export default function PlayerHubPage({
     } catch (error) {
       setAdminTeamProfileStatus("error");
       setAdminTeamProfileMessage(
-        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+        cleanPlayerHubError(error, "Could not load this section. Try again later.")
       );
     } finally {
       logPlayerHubTiming("adminTeamProfiles load", startedAt);
@@ -5374,7 +5389,7 @@ export default function PlayerHubPage({
       setTeamIdentityRequests([]);
       setTeamIdentityStatus("error");
       setTeamIdentityMessage(
-        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+        cleanPlayerHubError(error, "Could not load this section. Try again later.")
       );
       return [];
     }
@@ -5432,7 +5447,7 @@ export default function PlayerHubPage({
       setAdminTeamIdentityRequests([]);
       setAdminTeamIdentityStatus("error");
       setAdminTeamIdentityMessage(
-        cleanPlayerHubError(error, "Could not load this section. Refresh.")
+        cleanPlayerHubError(error, "Could not load this section. Try again later.")
       );
       return [];
     } finally {
@@ -7531,73 +7546,110 @@ export default function PlayerHubPage({
           ) : null}
         </div>
 
-        <div style={playerHubStyles.eventActionBar}>
-          <button
-            type="button"
-            style={compact ? playerHubStyles.eventViewRosterButton : playerHubStyles.adminActionButton}
-            onClick={() => toggleTournamentPlanResponses(plan)}
-          >
-            {expandedTournamentPlanId === plan.planId
-              ? "Refresh"
-              : compact
-                ? "Review responses"
-                : "Responses"}
-          </button>
-          {expandedTournamentPlanId === plan.planId ? (
+        {compact ? (
+          <div style={playerHubStyles.eventActionBar}>
+            <button
+              type="button"
+              style={playerHubStyles.eventViewRosterButton}
+              onClick={() =>
+                rosterIsViewOnly
+                  ? openCaptainPlanFromEvents(plan)
+                  : toggleTournamentPlanResponses(plan)
+              }
+            >
+              {rosterIsViewOnly ? "View roster" : "Review responses"}
+            </button>
+            <details style={playerHubStyles.captainActionMore}>
+              <summary style={playerHubStyles.captainChecklistSummary}>
+                More
+              </summary>
+              <div style={playerHubStyles.captainActionMoreGrid}>
+                {!rosterIsViewOnly ? (
+                  <button
+                    type="button"
+                    style={playerHubStyles.adminActionButton}
+                    onClick={() => openCaptainPlanFromEvents(plan)}
+                  >
+                    Plan squads
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    style={playerHubStyles.adminActionButton}
+                    onClick={() => toggleTournamentPlanResponses(plan)}
+                  >
+                    Responses
+                  </button>
+                )}
+                {expandedTournamentPlanId === plan.planId ? (
+                  <button
+                    type="button"
+                    style={playerHubStyles.adminActionButton}
+                    onClick={() => setExpandedTournamentPlanId("")}
+                  >
+                    Hide
+                  </button>
+                ) : null}
+              </div>
+            </details>
+          </div>
+        ) : (
+          <div style={playerHubStyles.eventActionBar}>
             <button
               type="button"
               style={playerHubStyles.adminActionButton}
-              onClick={() => setExpandedTournamentPlanId("")}
+              onClick={() => toggleTournamentPlanResponses(plan)}
             >
-              Hide
+              Responses
             </button>
-          ) : null}
-          <button
-            type="button"
-            style={playerHubStyles.adminActionButton}
-            onClick={() =>
-              compact
-                ? openCaptainPlanFromEvents(plan)
-                : toggleTournamentSquadPlanning(plan)
-            }
-          >
-            {rosterIsViewOnly
-              ? "View roster"
-              : expandedSquadPlanId === plan.planId
-                ? "Refresh teams"
-                : "Plan squads"}
-          </button>
-          <button
-            type="button"
-            style={playerHubStyles.feedTinyAction}
-            onClick={() => toggleEventComments(plan)}
-          >
-            {expandedEventCommentPlanId === plan.planId
-              ? "Hide comments"
-              : "Comment"}
-          </button>
-          {!compact && plan.planStatus !== "READY" ? (
+            {expandedTournamentPlanId === plan.planId ? (
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={() => setExpandedTournamentPlanId("")}
+              >
+                Hide
+              </button>
+            ) : null}
             <button
               type="button"
               style={playerHubStyles.adminActionButton}
-              onClick={() => handleTournamentPlanStatus(plan, "READY")}
+              onClick={() => toggleTournamentSquadPlanning(plan)}
             >
-              Ready
+              {rosterIsViewOnly ? "View roster" : "Plan squads"}
             </button>
-          ) : null}
-          {!compact && plan.planStatus !== "CANCELLED" ? (
             <button
               type="button"
-              style={{
-                ...playerHubStyles.adminActionButton,
-                ...playerHubStyles.adminDangerButton,
-              }}
-              onClick={() => handleTournamentPlanStatus(plan, "CANCELLED")}
+              style={playerHubStyles.feedTinyAction}
+              onClick={() => toggleEventComments(plan)}
             >
-              Cancel
+              {expandedEventCommentPlanId === plan.planId
+                ? "Hide comments"
+                : "Comment"}
             </button>
-          ) : null}
-        </div>
+            {plan.planStatus !== "READY" ? (
+              <button
+                type="button"
+                style={playerHubStyles.adminActionButton}
+                onClick={() => handleTournamentPlanStatus(plan, "READY")}
+              >
+                Ready
+              </button>
+            ) : null}
+            {plan.planStatus !== "CANCELLED" ? (
+              <button
+                type="button"
+                style={{
+                  ...playerHubStyles.adminActionButton,
+                  ...playerHubStyles.adminDangerButton,
+                }}
+                onClick={() => handleTournamentPlanStatus(plan, "CANCELLED")}
+              >
+                Cancel
+              </button>
+            ) : null}
+          </div>
+        )}
 
         {expandedTournamentPlanId === plan.planId ? (
           <div style={playerHubStyles.accessRequestList}>
@@ -8242,19 +8294,6 @@ export default function PlayerHubPage({
           </span>
         </div>
 
-        <div style={playerHubStyles.captainRosterNextAction}>
-          <div style={playerHubStyles.profileMeta}>
-            <span style={playerHubStyles.homeKicker}>Next action</span>
-            <strong style={playerHubStyles.previewTitle}>
-              {rosterCurrentStep?.label || "No action needed"}
-            </strong>
-            <span style={playerHubStyles.previewSubtitle}>
-              {rosterCurrentStep?.detail || "Roster work is clear."}
-            </span>
-          </div>
-          <span style={playerHubStyles.chip}>Use Team control</span>
-        </div>
-
         <div style={playerHubStyles.captainRosterFlowStepGrid}>
           {visibleRosterFlowSteps.map((step) => (
             <article key={step.id} style={playerHubStyles.captainRosterFlowStep}>
@@ -8292,14 +8331,6 @@ export default function PlayerHubPage({
                   Availability status
                 </span>
               </div>
-              <button
-                type="button"
-                style={playerHubStyles.feedTinyAction}
-                disabled={!flow.plan}
-                onClick={() => toggleTournamentPlanResponses(flow.plan)}
-              >
-                Review
-              </button>
             </div>
             <div style={playerHubStyles.captainRosterMetricRow}>
               <span style={playerHubStyles.chip} title="Going">
@@ -8356,14 +8387,6 @@ export default function PlayerHubPage({
                   {unassignedPlanningCount} unassigned
                 </span>
               </div>
-              <button
-                type="button"
-                style={playerHubStyles.feedTinyAction}
-                disabled={!flow.plan}
-                onClick={() => toggleTournamentSquadPlanning(flow.plan)}
-              >
-                Plan
-              </button>
             </div>
             <div style={playerHubStyles.captainRosterSquadGrid}>
               {assignedGroups.map((group) => (
@@ -8392,14 +8415,6 @@ export default function PlayerHubPage({
                   Display labels for roster preview.
                 </span>
               </div>
-              <button
-                type="button"
-                style={playerHubStyles.feedTinyAction}
-                disabled={!flow.plan}
-                onClick={() => toggleTournamentSquadPlanning(flow.plan)}
-              >
-                Edit names
-              </button>
             </div>
             <div style={playerHubStyles.captainRosterNamesPreview}>
               {captainSquadNameSlots.map((squad) => (
@@ -9291,9 +9306,6 @@ export default function PlayerHubPage({
               }}
             >
               {teamNeedContextLabel(need)}
-            </span>
-            <span style={playerHubStyles.chip}>
-              {need.status === "OPEN" ? "Open" : "Closed"}
             </span>
             <button
               type="button"
@@ -10851,7 +10863,8 @@ export default function PlayerHubPage({
   const showHomeNextActionCard = !(
     profileEditorOpen && homeNextAction.target === "profile"
   );
-  const showHomeQuickStats = homeProfileComplete || homeQuickStatsHaveValue;
+  const showHomeQuickStats =
+    !profileEditorOpen && (homeProfileComplete || homeQuickStatsHaveValue);
   const hasVisibleHomeProfileData = Boolean(
     passportText(savedProfilePreview.displayName, username) ||
       passportText(savedProfilePreview.country) ||
@@ -10895,7 +10908,48 @@ export default function PlayerHubPage({
       return Boolean(bundle?.roster) && status !== "CANCELLED";
     })
     .slice(0, 2);
-  const teamEventPreviewPlans = dedupedTournamentPlans.slice(0, 2);
+  const teamActiveEventPlans = dedupedTournamentPlans.filter(
+    (plan) => String(plan?.planStatus || "").trim().toUpperCase() !== "CANCELLED"
+  );
+  const teamPendingResponseCount = teamActiveEventPlans.reduce((total, plan) => {
+    const availability = captainAvailabilityByPlanId[plan.planId] || [];
+    return (
+      total +
+      availability.filter(
+        (item) =>
+          normalizeTournamentAvailabilityStatus(item.responseStatus) === "PENDING"
+      ).length
+    );
+  }, 0);
+  const teamNextEventPlan =
+    teamActiveEventPlans
+      .slice()
+      .sort((left, right) => {
+        const leftTime =
+          Date.parse(
+            left.deadlineAt ||
+              left.startDate ||
+              left.eventDate ||
+              left.tournamentStartDate ||
+              left.updatedAt ||
+              ""
+          ) || Number.MAX_SAFE_INTEGER;
+        const rightTime =
+          Date.parse(
+            right.deadlineAt ||
+              right.startDate ||
+              right.eventDate ||
+              right.tournamentStartDate ||
+              right.updatedAt ||
+              ""
+          ) || Number.MAX_SAFE_INTEGER;
+        return leftTime - rightTime;
+      })[0] || null;
+  const teamNextEventMeta = teamNextEventPlan
+    ? [eventShortDateText(teamNextEventPlan), eventMetaText(teamNextEventPlan)]
+        .filter(Boolean)
+        .join(" / ")
+    : "";
   const selectedTournamentAdOption = tournamentOptions.find(
     (option) =>
       String(option.id || option.tournamentId || option.name || "") ===
@@ -11481,16 +11535,6 @@ export default function PlayerHubPage({
             <span style={playerHubStyles.chip}>
               {teamRosterVisibilityItems.length}
             </span>
-            {canReviewRosterDrafts ? (
-              <button
-                type="button"
-                style={playerHubStyles.feedTinyAction}
-                disabled={adminTournamentRosterStatus === "loading"}
-                onClick={loadAdminRosterDrafts}
-              >
-                {adminTournamentRosterStatus === "loading" ? "Loading..." : "Refresh"}
-              </button>
-            ) : null}
           </div>
         </div>
 
@@ -11718,20 +11762,16 @@ export default function PlayerHubPage({
 
   return (
     <div style={playerHubStyles.shell} data-testid="player-hub-root">
-      <section style={playerHubStyles.hero}>
-        <div style={playerHubStyles.heroTitleRow}>
-          <div style={playerHubStyles.titleBlock}>
-            <h2 style={playerHubStyles.title}>
-              {adminOnlyMode ? "Admin Console" : "Player Hub"}
-            </h2>
-            <p style={playerHubStyles.subtitle}>
-              {adminOnlyMode
-                ? "Review inbox and admin tools."
-                : "Club. Squad. Roster."}
-            </p>
+      {adminOnlyMode ? (
+        <section style={playerHubStyles.hubCompactHeader}>
+          <div style={playerHubStyles.profileMeta}>
+            <strong style={playerHubStyles.previewTitle}>Admin Console</strong>
+            <span style={playerHubStyles.previewSubtitle}>
+              Review inbox and admin tools.
+            </span>
           </div>
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       <nav style={playerHubStyles.hubNav} aria-label="Player Hub views">
         {hubTabs.map((tab) => {
@@ -13477,17 +13517,53 @@ export default function PlayerHubPage({
 
               {dedupedTournamentPlans.length ? (
                 <div style={playerHubStyles.teamEventPreviewGrid}>
-                  {teamEventPreviewPlans.map((plan) => {
-                    const availability =
-                      captainAvailabilityByPlanId[plan.planId] || [];
-                    return renderCaptainEventCard(plan, availability, { compact: true });
-                  })}
+                  <div style={playerHubStyles.teamSummaryStats}>
+                    <article style={playerHubStyles.teamSummaryStat}>
+                      <strong style={playerHubStyles.teamSummaryStatValue}>
+                        {teamActiveEventPlans.length}
+                      </strong>
+                      <span style={playerHubStyles.teamSummaryStatLabel}>
+                        Active events
+                      </span>
+                    </article>
+                    <article style={playerHubStyles.teamSummaryStat}>
+                      <strong style={playerHubStyles.teamSummaryStatValue}>
+                        {teamPendingResponseCount}
+                      </strong>
+                      <span style={playerHubStyles.teamSummaryStatLabel}>
+                        Pending responses
+                      </span>
+                    </article>
+                  </div>
+                  {teamNextEventPlan ? (
+                    <article style={playerHubStyles.teamCompactRow}>
+                      <div style={playerHubStyles.profileMeta}>
+                        <span style={playerHubStyles.homeKicker}>Next event</span>
+                        <strong style={playerHubStyles.previewTitle}>
+                          {teamNextEventPlan.tournamentName || "Tournament"}
+                        </strong>
+                        {teamNextEventMeta ? (
+                          <span style={playerHubStyles.previewSubtitle}>
+                            {teamNextEventMeta}
+                          </span>
+                        ) : null}
+                      </div>
+                      <span
+                        style={{
+                          ...playerHubStyles.accessStatusChip,
+                          ...eventStatusStyle(teamNextEventPlan),
+                        }}
+                      >
+                        {eventStatusForPlan(teamNextEventPlan)}
+                      </span>
+                    </article>
+                  ) : null}
                   <button
                     type="button"
                     style={playerHubStyles.feedTinyAction}
                     onClick={() => setActiveHubTab("events")}
                   >
-                    All events
+                    Open Events
                   </button>
                 </div>
               ) : (
@@ -14026,7 +14102,7 @@ export default function PlayerHubPage({
               onClick={loadAdminReviewProfiles}
               disabled={adminReviewStatus === "loading"}
             >
-              {adminReviewStatus === "loading" ? "Loading..." : "Refresh"}
+              {adminReviewStatus === "loading" ? "Loading..." : "Update"}
             </button>
           </div>
 
@@ -14260,7 +14336,7 @@ export default function PlayerHubPage({
               onClick={loadAdminAccessRequests}
               disabled={adminAccessRequestsStatus === "loading"}
             >
-              {adminAccessRequestsStatus === "loading" ? "Loading..." : "Refresh"}
+              {adminAccessRequestsStatus === "loading" ? "Loading..." : "Update"}
             </button>
           </div>
 
@@ -14442,7 +14518,7 @@ export default function PlayerHubPage({
               onClick={loadAdminClubTeams}
               disabled={adminClubTeamsStatus === "loading"}
             >
-              {adminClubTeamsStatus === "loading" ? "Loading..." : "Refresh"}
+              {adminClubTeamsStatus === "loading" ? "Loading..." : "Update"}
             </button>
           </div>
 
@@ -14652,7 +14728,7 @@ export default function PlayerHubPage({
               >
                 {adminTeamIdentityStatus === "loading"
                   ? "Loading..."
-                  : "Refresh"}
+                  : "Update"}
               </button>
             </div>
 
@@ -14807,7 +14883,7 @@ export default function PlayerHubPage({
                 onClick={loadAdminTeamProfiles}
                 disabled={adminTeamProfileStatus === "loading"}
               >
-                {adminTeamProfileStatus === "loading" ? "Loading..." : "Refresh"}
+                {adminTeamProfileStatus === "loading" ? "Loading..." : "Update"}
               </button>
             </div>
 
@@ -14930,7 +15006,7 @@ export default function PlayerHubPage({
               >
                 {adminTeamNeedInterestStatus === "loading"
                   ? "Loading..."
-                  : "Refresh"}
+                  : "Update"}
               </button>
             </div>
 
@@ -14996,7 +15072,7 @@ export default function PlayerHubPage({
                 onClick={loadAdminTeamMembers}
                 disabled={adminTeamMembersStatus === "loading"}
               >
-                {adminTeamMembersStatus === "loading" ? "Loading..." : "Refresh"}
+                {adminTeamMembersStatus === "loading" ? "Loading..." : "Update"}
               </button>
             </div>
 
@@ -15095,7 +15171,7 @@ export default function PlayerHubPage({
               >
                 {adminTeamMembershipStatus === "loading"
                   ? "Loading..."
-                  : "Refresh"}
+                  : "Update"}
               </button>
             </div>
 
@@ -15186,7 +15262,7 @@ export default function PlayerHubPage({
               >
                 {adminTournamentRosterStatus === "loading"
                   ? "Loading..."
-                  : "Refresh"}
+                  : "Update"}
               </button>
             </div>
 
